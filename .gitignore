@@ -1,2 +1,10 @@
 # nix
 result
+result-*
+
+# haskell
+dist-newstyle
+
+# data from runs
+.run-*
+.run-latest
