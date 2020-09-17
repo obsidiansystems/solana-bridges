@@ -15,6 +15,7 @@ executable solana-bridges
                      , bytestring
                      , containers
                      , directory
+                     , lens
                      , mtl
                      , process
                      , temporary
@@ -22,3 +23,4 @@ executable solana-bridges
                      , unix
                      , web3
                      , which
+  ghc-options: -threaded

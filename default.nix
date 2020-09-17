@@ -26,7 +26,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [go-ethereum]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = markUnbroken (doJailbreak (dontCheck super.web3));
           which = self.callCabal2nix "which" sources.which {};
@@ -60,15 +60,19 @@ let
     checkPhase = null;
   };
 
+  solc = nixpkgs.solc.overrideAttrs (old: {
+    # https://github.com/NixOS/nixpkgs/pull/97730
+    checkPhase = null;
+  });
 
 
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-    nativeBuildInputs = with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana ];
+    nativeBuildInputs = [ solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana ]);
   };
 
 in {
-  inherit nixpkgs shell;
+  inherit nixpkgs shell solc;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }

@@ -8,3 +8,6 @@ dist-newstyle
 # data from runs
 .run-*
 .run-latest
+
+# emacs
+.#*
