@@ -60,19 +60,164 @@ let
     checkPhase = null;
   };
 
+  solana-rust-bpf = with nixpkgs; stdenv.mkDerivation {
+    name = "solana-rust-bpf";
+    src = fetchTarball {
+      name = "solana-rust-bpf-linux";
+      url = "https://github.com/solana-labs/rust-bpf-builder/releases/download/v0.2.3/solana-rust-bpf-linux.tar.bz2";
+      sha256 = "0cbwrjwbvd2dyq4w1gnh8d7yyzywqx2k8f32h03z53fmcwldcj1g";
+    };
+    nativeBuildInputs = [ autoPatchelfHook openssl stdenv.cc.cc.lib ];
+    installPhase = ''
+       cp -R $src $out
+    '';
+  };
+
+  solana-llvm = with nixpkgs; stdenv.mkDerivation {
+    name = "solana-llvm";
+    src = fetchTarball {
+      url = "https://github.com/solana-labs/llvm-builder/releases/download/v0.0.15/solana-llvm-linux.tar.bz2";
+      sha256 = "09bfj3jg97d2xh9c036xynff0fpg648vhg4sva0sabi6rpzp2c8r";
+    };
+    nativeBuildInputs = [ autoPatchelfHook stdenv.cc.cc.lib ];
+    installPhase = ''
+      cp -R $src $out
+    '';
+  };
+
   solc = nixpkgs.solc.overrideAttrs (old: {
     # https://github.com/NixOS/nixpkgs/pull/97730
     checkPhase = null;
   });
 
+  xargo = with nixpkgs; rustPlatform.buildRustPackage rec {
+    pname = "xargo";
+
+    version = "v0.3.22";
+
+    src = fetchFromGitHub {
+      owner = "japaric";
+      repo = pname;
+      rev = "b7cec9d3dc3720f0b7964f4b6e3a1878f94e4c07";
+      sha256 = "0m1dg7vwmmlpqp20p219gsm7zbnnii6lik6hc2vvfsdmnygf271l";
+    };
+
+    cargoSha256 = "0jn9flcw5vqvqqm16vxzywqcz47mgbhdh73l6a5f5nxr4m00yy9i";
+    verifyCargoDeps = true;
+
+    # TODO: allow tests to run in debug in nixpkgs
+    # error[E0554]: `#![feature]` may not be used on the stable release channel
+    #  --> tests/smoke.rs:3:1
+    # buildType = "debug";
+    checkPhase = null;
+    strictDeps = true;
+    buildInputs = [ makeWrapper ];
+
+    postInstall = ''
+      wrapProgram $out/bin/xargo \
+      --set-default RUST_BACKTRACE FULL \
+    '';
+  };
+
+  rust-bpf-sysroot = with nixpkgs; fetchFromGitHub {
+    owner = "solana-labs";
+    repo = "rust-bpf-sysroot";
+    rev = "b4dc90e3ee8a88f197876bc76149add1de7fec25"; # branch v0.12
+    sha256 = "1f1w73mkcdld3xxh5vjjc09icafw0z2bskcysay1r0bgbfd5ix82";
+  };
+
+  example-helloworld = with nixpkgs; fetchFromGitHub {
+    owner = "solana-labs";
+    repo = "example-helloworld";
+    rev = "0510fcc777a3a4cbbd37e54d09aa806feb128457";
+    sha256 = "0zmy74mlxb1mmfzg2zv5w1fni8rb27ddn3rw8sgzzq8gv65hf8qh";
+  };
+
+  helloWorld = with nixpkgs; stdenv.mkDerivation {
+    name = "helloWorld";
+    src = example-helloworld;
+    buildInputs = [ solana-rust-bpf xargo which rustup ];
+    phases = "buildPhase";
+
+    RUST_BACKTRACE="1";
+    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/";
+    RUST_COMPILER_RT_ROOT="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/compiler-rt";
+    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
+    RUSTUP_TOOLCHAIN="bpf";
+
+    buildPhase = ''
+      source $stdenv/setup
+#      export RUSTUP_HOME=$PWD/.rustup-home
+#      export RUSTUP_TOOLCHAIN=bpf
+#      export XARGO_RUST_SRC=$PWD/rust-bpf-sysroot/src
+#      export RUST_COMPILER_RT_ROOT=$PWD/rust-bpf-sysroot/src/compiler-rt
+#      export RUST_BACKTRACE=1
+      echo 11
+      cp -r ${rust-bpf-sysroot} rust-bpf-sysroot
+      cp -r ${solana-rust-bpf} solana-rust-bpf
+      chmod -R 777 rust-bpf-sysroot
+      chmod -R 777 solana-rust-bpf
+      ls -l rust-bpf-sysroot/
+      ls -l solana-rust-bpf/
+      echo 22
+      cp -r $src example-helloworld
+      echo 33
+      which rustc
+      echo $USER
+      whoami
+      echo 44
+#      ls -l rust-bpf-sysroot/
+#      echo 44
+#      chmod 444 rust-bpf-sysroot
+      echo 55
+      rustup toolchain list -v
+      rustup toolchain link bpf $(rustc --print sysroot)
+      rustup toolchain list -v
+      echo 66
+      cd example-helloworld/src/program-rust
+      echo 77
+#     cargo check
+#     cargo build
+#     xargo check
+#     xargo-check
+      xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
+    '';
+  };
 
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-    nativeBuildInputs = [ solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana ]);
+    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup ]);
+
+    RUST_BACKTRACE="1";
+    XARGO_HOME="/home/alexfmpe/xargoxargoxargo";
+    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/"; # can't be read-only ???
+    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
+    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
+    RUSTUP_TOOLCHAIN="bpf";
+
+    CC="${solana-llvm}/bin/clang"; # has no effect here
+    AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+
+    # Get bpf.ld from npm?
+    RUSTFLAGS="
+      -C lto=no \
+      -C opt-level=2 \
+      -C link-arg=-z -C link-arg=notext \
+      -C link-arg=-T${rust-bpf-sysroot}/bpf.ld \
+      -C link-arg=--Bdynamic \
+      -C link-arg=-shared \
+      -C link-arg=--entry=entrypoint \
+      -C link-arg=-no-threads \
+      -C linker=${solana-llvm}/bin/ld.lld";
   };
 
+  # export CC=$(nix-build /home/alexfmpe/repos/solana/solana-bridges -A solana-llvm)/bin/clang
+  # export AR=$(nix-build /home/alexfmpe/repos/solana/solana-bridges -A solana-llvm)/bin/llvm-ar
+  # rustup toolchain link bpf $(rustc --print sysroot)
+  # xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
+
 in {
-  inherit nixpkgs shell solc;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
