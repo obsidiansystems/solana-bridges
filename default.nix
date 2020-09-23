@@ -177,8 +177,12 @@ let
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup shellcheck ninja cmake ]);
-
+    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
+      [ cabal-install ghcid hlint
+        go-ethereum solana
+        xargo rustup cargo-deps cargo-watch
+        shellcheck ninja cmake
+      ]);
 
     RUST_BACKTRACE="1";
     RUSTUP_TOOLCHAIN="bpf";
@@ -204,6 +208,7 @@ let
       -C link-arg=--entry=entrypoint \
       -C link-arg=-no-threads \
       -C linker=${solana-llvm}/bin/ld.lld";
+
   };
 
 in {

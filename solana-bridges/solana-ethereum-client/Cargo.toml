@@ -1,0 +1,28 @@
+[package]
+name = "solana-ethereum-client"
+version = "0.0.1"
+description = "Ethereum light client for Solana"
+authors = ["Obsidian Systems LLC <maintainer@obsidian.systems>"]
+repository = "https://github.com/obsidiansystems/solana-bridges"
+#license = "Apache-2.0"
+edition = "2018"
+
+[features]
+no-entrypoint = []
+skip-no-mangle = ["solana-sdk/skip-no-mangle"]
+program = ["solana-sdk/program"]
+default = ["solana-sdk/default"]
+
+[dependencies]
+byteorder = "1.3"
+solana-sdk = { version = "=1.3.12", default-features = false, optional = true }
+fixed-hash = "0.6.1"
+getrandom = { version = "0.1.14", features = ["dummy"] }
+uint = { git = "https://github.com/obsidiansystems/parity-common", rev = "eb39309c64e5c42f124744fc2d887f2f4648bbd8" }
+serde = "1.0.116"
+impl-serde = "0.3.1"
+bincode = "1.3.1"
+
+[lib]
+name = "solana_ethereum_client"
+crate-type = ["cdylib", "lib"]
