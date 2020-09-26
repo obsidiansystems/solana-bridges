@@ -11,7 +11,6 @@ use std::{
 use bincode::{serialize, deserialize};
 use solana_sdk::{program_error::ProgramError};
 
-
 // Unsigned integers: bits(words)
 construct_uint! { pub struct U128(2); }
 construct_uint! { pub struct U256(4); }
@@ -70,6 +69,7 @@ pub struct State {
 pub fn pack(state: State) -> Result<Vec<u8>, ProgramError> {
     return serialize(&state).map_err(|_| ProgramError::InvalidAccountData);
 }
+
 pub fn unpack(bytes: &[u8]) -> Result<State, ProgramError> {
     return deserialize(bytes).map_err(|_| ProgramError::InvalidAccountData);
 }

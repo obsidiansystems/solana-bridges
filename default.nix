@@ -208,7 +208,10 @@ let
       -C link-arg=--entry=entrypoint \
       -C link-arg=-no-threads \
       -C linker=${solana-llvm}/bin/ld.lld";
+  };
 
+  shell-x86 = with nixpkgs; mkShell {
+    buildInputs = [ rustc cargo cargo-watch  ];
   };
 
 in {
