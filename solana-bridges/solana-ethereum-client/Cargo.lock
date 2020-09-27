@@ -657,6 +657,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "impl-rlp"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f7a72f11830b52333f36e3b09a288333888bf54380fd0ac0790a3c31ab0f3c5"
+dependencies = [
+ "rlp",
+]
+
+[[package]]
 name = "impl-serde"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1192,6 +1201,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlp"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a7d3f9bed94764eac15b8f14af59fac420c236adaff743b7bcc88e265cb4345"
+dependencies = [
+ "rustc-hex",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1403,7 +1421,10 @@ dependencies = [
  "byteorder",
  "fixed-hash",
  "getrandom",
+ "hex",
+ "impl-rlp",
  "impl-serde",
+ "rlp",
  "serde",
  "solana-sdk",
  "uint",
