@@ -26,7 +26,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solana solc ]);
           });
           web3 = markUnbroken (doJailbreak (dontCheck super.web3));
           which = self.callCabal2nix "which" sources.which {};
@@ -123,7 +123,8 @@ let
     owner = "solana-labs";
     repo = "rust-bpf-sysroot";
     rev = "b4dc90e3ee8a88f197876bc76149add1de7fec25"; # branch v0.12
-    sha256 = "1f1w73mkcdld3xxh5vjjc09icafw0z2bskcysay1r0bgbfd5ix82";
+    sha256 = "1jiw61bdxb10s2xnf9lcw8aqra35vq2a95kk01kz72kqm63rijy8";
+    fetchSubmodules = true;
   };
 
   example-helloworld = with nixpkgs; fetchFromGitHub {
@@ -133,53 +134,42 @@ let
     sha256 = "0zmy74mlxb1mmfzg2zv5w1fni8rb27ddn3rw8sgzzq8gv65hf8qh";
   };
 
+  # TODO build these properly
+  spl = with nixpkgs; {
+    token = fetchurl {
+      url = "https://github.com/solana-labs/solana-program-library/releases/download/token-v2.0.3/spl_token.so";
+      sha256 = "0qnkyapd033nbnqsm1hcyrr47pb6kpk9dz88i6j2wqbwhgbqxvp5";
+    };
+    memo = fetchurl {
+      url = "https://github.com/solana-labs/solana-program-library/releases/download/memo-v1.0.0/spl_memo.so";
+      sha256 = "0fy664ciriinnk0x6kvsa2wr48prnnrcvlg8g06jpc62kkapn2cv";
+    };
+  };
+
+  # TODO: https://github.com/NixOS/nixpkgs/pull/95542/files
+
   helloWorld = with nixpkgs; stdenv.mkDerivation {
+    RUST_BACKTRACE="1";
+    RUSTUP_TOOLCHAIN="bpf";
+    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
+    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
+
     name = "helloWorld";
     src = example-helloworld;
     buildInputs = [ solana-rust-bpf xargo which rustup ];
     phases = "buildPhase";
 
-    RUST_BACKTRACE="1";
-    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/";
-    RUST_COMPILER_RT_ROOT="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/compiler-rt";
-    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
-    RUSTUP_TOOLCHAIN="bpf";
-
     buildPhase = ''
-      source $stdenv/setup
-#      export RUSTUP_HOME=$PWD/.rustup-home
-#      export RUSTUP_TOOLCHAIN=bpf
-#      export XARGO_RUST_SRC=$PWD/rust-bpf-sysroot/src
-#      export RUST_COMPILER_RT_ROOT=$PWD/rust-bpf-sysroot/src/compiler-rt
-#      export RUST_BACKTRACE=1
-      echo 11
-      cp -r ${rust-bpf-sysroot} rust-bpf-sysroot
-      cp -r ${solana-rust-bpf} solana-rust-bpf
-      chmod -R 777 rust-bpf-sysroot
-      chmod -R 777 solana-rust-bpf
-      ls -l rust-bpf-sysroot/
-      ls -l solana-rust-bpf/
-      echo 22
+      export XARGO_HOME="$PWD/xargoxargoxargo";
+      export CARGO_HOME="$PWD/cargo-home";
+
+      # source $stdenv/setup
+      export RUSTUP_HOME=$PWD/.rustup-home
+      # ls -l solana-rust-bpf/
       cp -r $src example-helloworld
-      echo 33
       which rustc
-      echo $USER
-      whoami
-      echo 44
-#      ls -l rust-bpf-sysroot/
-#      echo 44
-#      chmod 444 rust-bpf-sysroot
-      echo 55
-      rustup toolchain list -v
       rustup toolchain link bpf $(rustc --print sysroot)
-      rustup toolchain list -v
-      echo 66
       cd example-helloworld/src/program-rust
-      echo 77
-#     cargo check
-#     cargo build
-#     xargo check
-#     xargo-check
       xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
     '';
   };
@@ -187,17 +177,24 @@ let
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup ]);
+    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup shellcheck ninja cmake ]);
+
 
     RUST_BACKTRACE="1";
-    XARGO_HOME="/home/alexfmpe/xargoxargoxargo";
-    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/"; # can't be read-only ???
-    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
-    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
     RUSTUP_TOOLCHAIN="bpf";
+    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
+    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
+
+    SPL_TOKEN=spl.token;
+    SPL_MEMO=spl.memo;
 
     CC="${solana-llvm}/bin/clang"; # has no effect here
     AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+
+    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
+    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+
+    CARGO_TARGET_DIR="target-bpf";
 
     # Get bpf.ld from npm?
     RUSTFLAGS="
@@ -218,6 +215,6 @@ let
   # xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
 
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld spl;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
