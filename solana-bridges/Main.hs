@@ -32,6 +32,7 @@ import           System.Process (CreateProcess(std_err, std_out), StdStream(..),
                                 , proc, readProcess, readCreateProcessWithExitCode, waitForProcess)
 import           System.Which (staticWhich)
 import           System.Environment
+import System.Exit
 
 main :: IO ()
 main = do
@@ -84,7 +85,9 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
       ]
 
   let p = proc solanaGenesisPath genArgs
-  print =<< readCreateProcessWithExitCode p ""
+  readCreateProcessWithExitCode p "" >>= \case
+    good@(ExitSuccess, _, _) -> print good
+    bad -> error $ show bad
 
   let
     bootstrapValidator = proc solanaValidatorPath

@@ -123,7 +123,8 @@ let
     owner = "solana-labs";
     repo = "rust-bpf-sysroot";
     rev = "b4dc90e3ee8a88f197876bc76149add1de7fec25"; # branch v0.12
-    sha256 = "1f1w73mkcdld3xxh5vjjc09icafw0z2bskcysay1r0bgbfd5ix82";
+    sha256 = "1jiw61bdxb10s2xnf9lcw8aqra35vq2a95kk01kz72kqm63rijy8";
+    fetchSubmodules = true;
   };
 
   example-helloworld = with nixpkgs; fetchFromGitHub {
@@ -145,27 +146,25 @@ let
     };
   };
 
+  # TODO: https://github.com/NixOS/nixpkgs/pull/95542/files
+
   helloWorld = with nixpkgs; stdenv.mkDerivation {
+    RUST_BACKTRACE="1";
+    RUSTUP_TOOLCHAIN="bpf";
+    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
+    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
+
     name = "helloWorld";
     src = example-helloworld;
     buildInputs = [ solana-rust-bpf xargo which rustup ];
     phases = "buildPhase";
 
-    RUST_BACKTRACE="1";
-    RUSTUP_TOOLCHAIN="bpf";
-
     buildPhase = ''
       export XARGO_HOME="$PWD/xargoxargoxargo";
+      export CARGO_HOME="$PWD/cargo-home";
 
       # source $stdenv/setup
       export RUSTUP_HOME=$PWD/.rustup-home
-      export XARGO_RUST_SRC=$PWD/rust-bpf-sysroot/src
-      export RUST_COMPILER_RT_ROOT=$PWD/rust-bpf-sysroot/src/compiler-rt
-      cp -r ${rust-bpf-sysroot} rust-bpf-sysroot
-      # cp -r ${solana-rust-bpf} solana-rust-bpf
-      # chmod -R 777 rust-bpf-sysroot
-      # chmod -R 777 solana-rust-bpf
-      ls -l rust-bpf-sysroot/
       # ls -l solana-rust-bpf/
       cp -r $src example-helloworld
       which rustc
@@ -180,10 +179,11 @@ let
     packages = p: [ p.solana-bridges ];
     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup shellcheck ninja cmake ]);
 
+
     RUST_BACKTRACE="1";
-    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
-    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
     RUSTUP_TOOLCHAIN="bpf";
+    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
+    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
 
     SPL_TOKEN=spl.token;
     SPL_MEMO=spl.memo;
