@@ -8,15 +8,16 @@ use std::{
     result::{Result},
     vec::{Vec},
 };
-use bincode::{serialize, deserialize};
-use solana_sdk::{program_error::ProgramError};
+use solana_sdk::{
+    program_error::ProgramError,
+    account_info::{AccountInfo},
+};
 use rlp::{
-    Decodable ,
-    DecoderError,
-    Encodable,
+    Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
 use impl_rlp::{impl_fixed_hash_rlp, impl_uint_rlp};
+use sha3::{Digest, Sha3_256};
 
 macro_rules! impls_uint {
     ($name: ident, $len: expr) => {
@@ -75,16 +76,42 @@ pub struct BlockHeader {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct State {
-    header_hashes: HashMap<Height, Vec<H256>>,
     headers: HashMap<H256, BlockHeader>,
 }
 
-pub fn pack(state: State) -> Result<Vec<u8>, ProgramError> {
-    return serialize(&state).map_err(|_| ProgramError::InvalidAccountData);
+fn process_new_block (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
+    //TODO: check account data size
+    //TODO: initial state
+    let mut state = account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?;
+    let hash = hash_header(&header_rlp);
+    let header = BlockHeader::decode(&header_rlp).map_err(|_| ProgramError::InvalidInstructionData)?;
+
+    if !verify(&state, &header) {
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    state.headers.insert(hash, header);
+    account.serialize_data(&state).map_err(|_| ProgramError::Custom(1))?;
+    return Ok(());
 }
 
-pub fn unpack(bytes: &[u8]) -> Result<State, ProgramError> {
-    return deserialize(bytes).map_err(|_| ProgramError::InvalidAccountData);
+fn hash_header(header_rlp: &Rlp) -> H256 {
+    let digest = Sha3_256::digest(header_rlp.as_raw());
+    let hash = H256::from_slice(digest.as_slice());
+    return hash;
+}
+
+fn verify(state: &State, header: &BlockHeader) -> bool {
+    //TODO: genesis block?
+    let parent = match state.headers.get(&header.parent_hash) {
+        None => return false,
+        Some(h) => h,
+    };
+    if header.number != (parent.number + 1) {
+        return false;
+    };
+
+    return true;
 }
 
 impl Encodable for BlockHeader {
