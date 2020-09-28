@@ -26,7 +26,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solana solc ]);
           });
           web3 = markUnbroken (doJailbreak (dontCheck super.web3));
           which = self.callCabal2nix "which" sources.which {};
