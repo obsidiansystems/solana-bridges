@@ -133,6 +133,18 @@ let
     sha256 = "0zmy74mlxb1mmfzg2zv5w1fni8rb27ddn3rw8sgzzq8gv65hf8qh";
   };
 
+  # TODO build these properly
+  spl = with nixpkgs; {
+    token = fetchurl {
+      url = "https://github.com/solana-labs/solana-program-library/releases/download/token-v2.0.3/spl_token.so";
+      sha256 = "0qnkyapd033nbnqsm1hcyrr47pb6kpk9dz88i6j2wqbwhgbqxvp5";
+    };
+    memo = fetchurl {
+      url = "https://github.com/solana-labs/solana-program-library/releases/download/memo-v1.0.0/spl_memo.so";
+      sha256 = "0fy664ciriinnk0x6kvsa2wr48prnnrcvlg8g06jpc62kkapn2cv";
+    };
+  };
+
   helloWorld = with nixpkgs; stdenv.mkDerivation {
     name = "helloWorld";
     src = example-helloworld;
@@ -196,8 +208,14 @@ let
     RUSTUP_HOME="/home/alexfmpe/rustrustrust";
     RUSTUP_TOOLCHAIN="bpf";
 
+    SPL_TOKEN=spl.token;
+    SPL_MEMO=spl.memo;
+
     CC="${solana-llvm}/bin/clang"; # has no effect here
     AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+
+    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
+    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
 
     # Get bpf.ld from npm?
     RUSTFLAGS="
@@ -218,6 +236,6 @@ let
   # xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
 
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld spl;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }

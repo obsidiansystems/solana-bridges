@@ -18,11 +18,12 @@ import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
 import           Data.String (IsString)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import           Network.Web3 (runWeb3)
 import qualified Network.Ethereum.Api.Eth as Eth
 import qualified Network.Ethereum.Api.Types as Eth
 import           Network.Ethereum.Api.Types (Call(..))
-import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile)
+import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import           System.IO (IOMode(ReadMode, WriteMode), openFile)
 import           System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import           System.IO.Temp (createTempDirectory)
@@ -30,13 +31,74 @@ import           System.Posix.Files (createSymbolicLink)
 import           System.Process (CreateProcess(std_err, std_out), StdStream(..), callCommand, createProcess
                                 , proc, readProcess, readCreateProcessWithExitCode, waitForProcess)
 import           System.Which (staticWhich)
+import           System.Environment
 
 main :: IO ()
 main = do
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
+  solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
   setup currentDir runDir
   runEthereum runDir
+
+data SolanaSpecialPaths = SolanaSpecialPaths
+  { _solanaSpecialPaths_splToken :: !FilePath
+  , _solanaSpecialPaths_splMemo :: !FilePath
+  } deriving (Eq, Show)
+
+setupSolana' = do
+  currentDir <- getCurrentDirectory
+  runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
+  solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
+  setupSolana runDir solanaSpecialPaths
+
+setupSolana :: FilePath -> SolanaSpecialPaths -> IO ()
+setupSolana solanaConfigDir solanaSpecialPaths = do
+  createDirectoryIfMissing True (solanaConfigDir <> "/bootstrap-validator")
+
+  let
+    solanaFaucetKeypairFile = solanaConfigDir <> "/faucet.json"
+    bootstrapValidatorIdentity = solanaConfigDir <> "/bootstrap-validator/identity.json"
+    voteAccountKeypairFile = solanaConfigDir <> "/bootstrap-validator/vote-account.json"
+    stakeAccountKeypairFile = solanaConfigDir <> "/bootstrap-validator/stake-account.json"
+    ledgerPath = solanaConfigDir <> "/ledger"
+
+  T.writeFile solanaFaucetKeypairFile solanaFaucetKeypair
+  T.writeFile bootstrapValidatorIdentity solanaBootstrapValidatorIdentityKeypair
+  T.writeFile voteAccountKeypairFile voteAccountKeypair
+  T.writeFile stakeAccountKeypairFile stakeAccountKeypair
+
+  let
+    genArgs :: [String]
+    genArgs =
+      [ "--max-genesis-archive-unpacked-size", "1073741824"
+      , "--enable-warmup-epochs"
+      , "--bootstrap-validator", bootstrapValidatorIdentity, voteAccountKeypairFile, stakeAccountKeypairFile
+      , "--bpf-program", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splToken solanaSpecialPaths
+      , "--bpf-program", "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splMemo solanaSpecialPaths
+      , "--ledger", ledgerPath
+      , "--faucet-pubkey", solanaFaucetKeypairFile
+      , "--faucet-lamports", "500000000000000000"
+      , "--hashes-per-tick", "auto"
+      , "--cluster-type", "development"
+      ]
+
+  let p = proc solanaGenesisPath genArgs
+  print =<< readCreateProcessWithExitCode p ""
+
+  let
+    bootstrapValidator = proc solanaValidatorPath
+      [ "--log", "-"
+      , "--ledger", ledgerPath
+      , "--rpc-port", "8899"
+      , "--identity", bootstrapValidatorIdentity
+      , "--vote-account" , voteAccountKeypairFile
+      , "--rpc-faucet-address", "127.0.0.1:9900"
+      ]
+
+  print =<< readCreateProcessWithExitCode bootstrapValidator ""
+  pure ()
+
 
 setup :: FilePath -> FilePath -> IO ()
 setup currentDir runDir = do
@@ -97,6 +159,15 @@ solcPath = $(staticWhich "solc")
 gethPath :: FilePath
 gethPath = $(staticWhich "geth")
 
+solanaPath :: FilePath
+solanaPath = $(staticWhich "solana")
+
+solanaValidatorPath :: FilePath
+solanaValidatorPath = $(staticWhich "solana-validator")
+
+solanaGenesisPath :: FilePath
+solanaGenesisPath = $(staticWhich "solana-genesis")
+
 genesisPath :: FilePath
 genesisPath = "ethereum/Genesis.json"
 
@@ -149,3 +220,16 @@ logsSubdir = (<> "/log")
 
 unlockedAddress :: IsString s => s
 unlockedAddress = "0xabc6bBD0aD6aca2D25380FC7835fe088E7690c2C"
+
+-- bunch of solana keypairs, generated with:
+--  solana-keygen new --no-passphrase -fso
+solanaFaucetKeypair :: T.Text
+solanaFaucetKeypair = "[71,246,227,15,183,154,72,252,69,32,15,111,223,164,103,186,79,159,115,61,174,120,204,134,145,174,44,24,80,226,175,207,29,4,251,191,17,108,250,213,190,67,179,253,188,118,62,224,190,227,157,203,228,244,95,161,40,123,58,106,229,156,161,86]"
+solanaBootstrapValidatorIdentityKeypair :: T.Text
+solanaBootstrapValidatorIdentityKeypair = "[192,159,180,229,68,70,233,70,83,76,150,77,185,87,166,222,88,179,154,0,158,179,128,238,167,148,135,86,191,109,94,98,211,82,244,11,26,46,138,30,212,209,111,171,170,186,133,40,144,233,101,93,215,121,42,110,169,165,224,69,186,192,120,10]"
+voteAccountKeypair :: T.Text
+voteAccountKeypair = "[183,84,232,40,36,248,21,231,135,120,104,233,237,92,143,38,177,127,63,199,44,101,82,126,213,199,20,227,73,253,234,87,160,1,85,103,20,207,0,131,28,53,240,217,131,246,147,9,136,69,122,225,14,34,195,97,242,39,224,85,152,209,183,249]"
+stakeAccountKeypair :: T.Text
+stakeAccountKeypair = "[55,217,78,20,228,230,230,89,66,11,131,181,64,47,247,36,11,78,76,54,43,57,160,189,228,203,8,66,0,233,135,3,159,165,84,42,226,126,129,204,24,141,148,117,233,154,29,94,204,98,176,43,7,76,26,23,146,121,196,145,159,152,8,111]"
+
+
