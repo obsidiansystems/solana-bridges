@@ -79,26 +79,43 @@ pub struct State {
     headers: HashMap<H256, BlockHeader>,
 }
 
-fn process_new_block (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
-    //TODO: check account data size
-    //TODO: initial state
-    let mut state = account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?;
+fn hash_header(header_rlp: &Rlp) -> H256 {
+    let digest = Sha3_256::digest(header_rlp.as_raw());
+    let hash = H256::from_slice(digest.as_slice());
+    return hash;
+}
+
+fn parse_header(header_rlp: Rlp) -> Result<(H256, BlockHeader), ProgramError> {
     let hash = hash_header(&header_rlp);
     let header = BlockHeader::decode(&header_rlp).map_err(|_| ProgramError::InvalidInstructionData)?;
+    return Ok((hash, header))
+}
+
+fn update_state(mut account: AccountInfo, state: &State) -> Result<(), ProgramError> {
+    return account.serialize_data(state).map_err(|_| ProgramError::Custom(1));
+}
+
+fn bootstrap (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
+    let (hash, header) = parse_header(header_rlp)?;
+    let mut initial = State {
+        headers: HashMap::new(),
+    };
+    initial.headers.insert(hash, header);
+    return update_state(account, &initial);
+}
+
+fn process_new_block (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
+    //TODO: check account data size
+    let mut state = account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?;
+    let (hash, header) = parse_header(header_rlp)?;
 
     if !verify(&state, &header) {
         return Err(ProgramError::InvalidInstructionData);
     }
 
     state.headers.insert(hash, header);
-    account.serialize_data(&state).map_err(|_| ProgramError::Custom(1))?;
+    update_state(account, &state);
     return Ok(());
-}
-
-fn hash_header(header_rlp: &Rlp) -> H256 {
-    let digest = Sha3_256::digest(header_rlp.as_raw());
-    let hash = H256::from_slice(digest.as_slice());
-    return hash;
 }
 
 fn verify(state: &State, header: &BlockHeader) -> bool {
