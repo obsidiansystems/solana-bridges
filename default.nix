@@ -152,46 +152,25 @@ let
     phases = "buildPhase";
 
     RUST_BACKTRACE="1";
-    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/";
-    RUST_COMPILER_RT_ROOT="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/compiler-rt";
-    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
     RUSTUP_TOOLCHAIN="bpf";
 
     buildPhase = ''
-      source $stdenv/setup
-#      export RUSTUP_HOME=$PWD/.rustup-home
-#      export RUSTUP_TOOLCHAIN=bpf
-#      export XARGO_RUST_SRC=$PWD/rust-bpf-sysroot/src
-#      export RUST_COMPILER_RT_ROOT=$PWD/rust-bpf-sysroot/src/compiler-rt
-#      export RUST_BACKTRACE=1
-      echo 11
+      export XARGO_HOME="$PWD/xargoxargoxargo";
+
+      # source $stdenv/setup
+      export RUSTUP_HOME=$PWD/.rustup-home
+      export XARGO_RUST_SRC=$PWD/rust-bpf-sysroot/src
+      export RUST_COMPILER_RT_ROOT=$PWD/rust-bpf-sysroot/src/compiler-rt
       cp -r ${rust-bpf-sysroot} rust-bpf-sysroot
-      cp -r ${solana-rust-bpf} solana-rust-bpf
-      chmod -R 777 rust-bpf-sysroot
-      chmod -R 777 solana-rust-bpf
+      # cp -r ${solana-rust-bpf} solana-rust-bpf
+      # chmod -R 777 rust-bpf-sysroot
+      # chmod -R 777 solana-rust-bpf
       ls -l rust-bpf-sysroot/
-      ls -l solana-rust-bpf/
-      echo 22
+      # ls -l solana-rust-bpf/
       cp -r $src example-helloworld
-      echo 33
       which rustc
-      echo $USER
-      whoami
-      echo 44
-#      ls -l rust-bpf-sysroot/
-#      echo 44
-#      chmod 444 rust-bpf-sysroot
-      echo 55
-      rustup toolchain list -v
       rustup toolchain link bpf $(rustc --print sysroot)
-      rustup toolchain list -v
-      echo 66
       cd example-helloworld/src/program-rust
-      echo 77
-#     cargo check
-#     cargo build
-#     xargo check
-#     xargo-check
       xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
     '';
   };
@@ -199,13 +178,11 @@ let
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup ]);
+    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup shellcheck ninja cmake ]);
 
     RUST_BACKTRACE="1";
-    XARGO_HOME="/home/alexfmpe/xargoxargoxargo";
-    XARGO_RUST_SRC="/home/alexfmpe/repos/solana/rust-bpf-sysroot/src/"; # can't be read-only ???
     RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
-    RUSTUP_HOME="/home/alexfmpe/rustrustrust";
+    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
     RUSTUP_TOOLCHAIN="bpf";
 
     SPL_TOKEN=spl.token;
@@ -216,6 +193,8 @@ let
 
     SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
     SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+
+    CARGO_TARGET_DIR="target-bpf";
 
     # Get bpf.ld from npm?
     RUSTFLAGS="
