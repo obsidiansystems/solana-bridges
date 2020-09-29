@@ -95,7 +95,7 @@ fn update_state(mut account: AccountInfo, state: &State) -> Result<(), ProgramEr
     return account.serialize_data(state).map_err(|_| ProgramError::Custom(1));
 }
 
-fn bootstrap (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
+fn bootstrap (account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
     let (hash, header) = parse_header(header_rlp)?;
     let mut initial = State {
         headers: HashMap::new(),
@@ -104,7 +104,7 @@ fn bootstrap (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramEr
     return update_state(account, &initial);
 }
 
-fn process_new_block (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
+fn process_new_block (account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
     //TODO: check account data size
     let mut state = account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?;
     let (hash, header) = parse_header(header_rlp)?;
@@ -114,8 +114,7 @@ fn process_new_block (mut account: AccountInfo, header_rlp: Rlp) -> Result<(), P
     }
 
     state.headers.insert(hash, header);
-    update_state(account, &state);
-    return Ok(());
+    return update_state(account, &state);
 }
 
 fn verify(state: &State, header: &BlockHeader) -> bool {
