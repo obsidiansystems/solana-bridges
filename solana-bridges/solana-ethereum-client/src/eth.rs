@@ -118,7 +118,6 @@ fn process_new_block (account: AccountInfo, header_rlp: Rlp) -> Result<(), Progr
 }
 
 fn verify(state: &State, header: &BlockHeader) -> bool {
-    //TODO: genesis block?
     let parent = match state.headers.get(&header.parent_hash) {
         None => return false,
         Some(h) => h,
