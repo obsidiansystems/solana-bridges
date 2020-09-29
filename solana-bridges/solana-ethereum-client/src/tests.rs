@@ -15,7 +15,10 @@ solana_sdk::program_stubs!();
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::eth::*;
     use solana_sdk::clock::Epoch;
+    use std::str::FromStr;
+    use rlp::{Decodable, Encodable, Rlp};
 
     #[test]
     fn test_sanity() {
@@ -44,15 +47,25 @@ mod test {
         assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 1);
         process_instruction(&program_id, &accounts, &instruction_data).unwrap();
         assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 2);
+
+
     }
-}
 
+    #[test]
+    fn test_roundtrip() -> Result<(), TestError>{
+        let expected = expected_decoded()?;
+        assert_eq!(expected, decode_header(&encode_header(&expected))?);
+        return Ok(());
+    }
 
-#[cfg(test)]
-mod tests {
-    use crate::eth::*;
-    use std::str::FromStr;
-    use rlp::{Decodable, Encodable, Rlp};
+    #[test]
+    fn test_enc() -> Result<(), TestError>{
+        let expected = expected_decoded()?;
+        let header = decode_header(&hex_to_bytes(HEADER_0)?)?;
+        assert_eq!(header, expected);
+        return Ok(());
+    }
+
 
     #[derive(Debug)]
     enum TestError {
@@ -71,10 +84,9 @@ mod tests {
         return header.rlp_bytes();
     }
 
-    #[test]
-    fn test_enc() -> Result<(), TestError>{
-        let hex = "f9021aa0f779e50b45bc27e4ed236840e5dbcf7afab50beaf553be56bf76da977e10cc73a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d493479452bc44d5378309ee2abf1539bf71de1b7d7be3b5a014c996b6934d7991643669e145b8355c63aa02cbde63d390fcf4e6181d5eea45a079b7e79dc739c31662fe6f25f65bf5a5d14299c7a7aa42c3f75b9fb05474f54ca0e28dc05418692cb7baab7e7f85c1dedb8791c275b797ea3b1ffcaec5ef2aa271b9010000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000010000000000000000000000000000000000000000000000000000000408000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000010000000000000000000000000000000000000000000000000000000400000000000100000000000000000000000000080000000000000000000000000000000000000000000100002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000903234373439353837313930323034343383890fe68395ba8e82d0d9845dd84a079150505945206e616e6f706f6f6c2e6f7267a0a35425f443452cf94ba4b698b00fd7b3ff4fc671dea3d5cc2dcbedbc3766f45e88af7fec6031063a17";
-        let header = decode_header(&hex_to_bytes(hex)?)?;
+    const HEADER_0: &str = "f9021aa0f779e50b45bc27e4ed236840e5dbcf7afab50beaf553be56bf76da977e10cc73a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d493479452bc44d5378309ee2abf1539bf71de1b7d7be3b5a014c996b6934d7991643669e145b8355c63aa02cbde63d390fcf4e6181d5eea45a079b7e79dc739c31662fe6f25f65bf5a5d14299c7a7aa42c3f75b9fb05474f54ca0e28dc05418692cb7baab7e7f85c1dedb8791c275b797ea3b1ffcaec5ef2aa271b9010000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000010000000000000000000000000000000000000000000000000000000408000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000010000000000000000000000000000000000000000000000000000000400000000000100000000000000000000000000080000000000000000000000000000000000000000000100002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000903234373439353837313930323034343383890fe68395ba8e82d0d9845dd84a079150505945206e616e6f706f6f6c2e6f7267a0a35425f443452cf94ba4b698b00fd7b3ff4fc671dea3d5cc2dcbedbc3766f45e88af7fec6031063a17";
+
+    fn expected_decoded() -> Result<BlockHeader, TestError>{
         let expected = BlockHeader {
             parent_hash: H256::from([
                 0xf7, 0x79, 0xe5, 0x0b, 0x45, 0xbc, 0x27, 0xe4,
@@ -163,10 +175,6 @@ mod tests {
                 0xaf, 0x7f, 0xec, 0x60, 0x31, 0x06, 0x3a, 0x17,
             ]),
         };
-
-        assert_eq!(expected, decode_header(&encode_header(&expected))?);
-        assert_eq!(header, expected);
-
-        return Ok(());
+        return Ok(expected);
     }
 }
