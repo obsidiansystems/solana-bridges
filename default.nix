@@ -188,11 +188,8 @@ let
     SPL_TOKEN=spl.token;
     SPL_MEMO=spl.memo;
 
-    CC="${solana-llvm}/bin/clang"; # has no effect here
-    AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
-
-    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
-    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # CC gets overwritten
+    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # AR gets overwritten
 
     CARGO_TARGET_DIR="target-bpf";
 
@@ -208,11 +205,6 @@ let
       -C link-arg=-no-threads \
       -C linker=${solana-llvm}/bin/ld.lld";
   };
-
-  # export CC=$(nix-build /home/alexfmpe/repos/solana/solana-bridges -A solana-llvm)/bin/clang
-  # export AR=$(nix-build /home/alexfmpe/repos/solana/solana-bridges -A solana-llvm)/bin/llvm-ar
-  # rustup toolchain link bpf $(rustc --print sysroot)
-  # xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
 
 in {
   inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld spl;
