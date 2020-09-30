@@ -1,5 +1,10 @@
 #![cfg(feature = "program")]
 
+use crate::{
+    eth::{initialize, new_block},
+    instruction::Instruction,
+};
+
 use byteorder::{ByteOrder, LittleEndian};
 use solana_sdk::{
     account_info::{next_account_info, AccountInfo},
@@ -11,7 +16,7 @@ use solana_sdk::{
 use std::mem;
 
 // Program entrypoint's implementation
-pub fn process_instruction<'a>(
+pub fn process_hello<'a>(
     program_id: &Pubkey, // Public key of the account the hello world program was loaded into
     accounts: &'a [AccountInfo<'a>], // The account to say hello to
     _instruction_data: &[u8], // Ignored, all helloworld instructions are hellos
@@ -45,4 +50,34 @@ pub fn process_instruction<'a>(
     info!("Hello!");
 
     Ok(())
+}
+
+pub fn process_instruction<'a>(
+    program_id: &Pubkey,
+    accounts: &'a [AccountInfo<'a>],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    info!("Ethereum light client entrypoint");
+
+    let accounts_iter = &mut accounts.iter();
+    let account = next_account_info(accounts_iter)?;
+
+    let new_state = match Instruction::unpack(instruction_data)? {
+        Instruction::Initialize(header) => initialize(header),
+        Instruction::NewBlock(header) => new_block(account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?, header),
+    };
+
+    account_serialize_data(account, &new_state)?;
+
+    return Ok(());
+}
+
+fn account_serialize_data <T: serde::Serialize>(account: &AccountInfo, state: &T) -> Result<(), ProgramError> {
+    let size = bincode::serialized_size(state).map_err(|_| ProgramError::InvalidAccountData)?;
+    if size > account.data_len() as u64 {
+        return Err(ProgramError::AccountDataTooSmall);
+    }
+
+    bincode::serialize_into(&mut account.data.borrow_mut()[..], state).map_err(|_| ProgramError::InvalidAccountData)?;
+    return Ok(())
 }

@@ -1,9 +1,13 @@
-use crate::processor::process_instruction;
+use crate::{
+    instruction::*,
+    processor::*,
+};
 
 use byteorder::{ByteOrder, LittleEndian};
 use solana_sdk::{
     account_info::{AccountInfo},
     pubkey::Pubkey,
+    program_error::ProgramError,
 };
 use std::mem;
 
@@ -43,10 +47,39 @@ mod test {
         let accounts = vec![account];
 
         assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 0);
-        process_instruction(&program_id, &accounts, &instruction_data).unwrap();
+        process_hello(&program_id, &accounts, &instruction_data).unwrap();
         assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 1);
-        process_instruction(&program_id, &accounts, &instruction_data).unwrap();
+        process_hello(&program_id, &accounts, &instruction_data).unwrap();
         assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 2);
+    }
+
+    #[test]
+    fn test_initialize() -> Result<(), TestError> {
+        let header = decoded_header_0()?;
+
+        let program_id = Pubkey::default();
+        let key = Pubkey::default();
+        let mut lamports = 0;
+        let mut data = vec![0;1241]; //TODO: don't hardcode
+
+        let owner = Pubkey::default();
+        let account = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data,
+            &owner,
+            false,
+            Epoch::default(),
+        );
+        let instruction_data: Vec<u8> = Instruction::Initialize(header).pack();
+
+        let accounts = vec![account];
+
+        process_instruction(&program_id, &accounts, &instruction_data).map_err(TestError::ProgError)?;
+        //TODO: test state
+        return Ok(());
     }
 
     #[test]
@@ -64,11 +97,11 @@ mod test {
         return Ok(());
     }
 
-
     #[derive(Debug)]
     enum TestError {
         HexError,
         RlpError,
+        ProgError(ProgramError),
     }
 
     fn hex_to_bytes(h: &str) -> Result<Vec<u8>, TestError> {

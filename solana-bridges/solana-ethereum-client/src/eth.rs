@@ -8,10 +8,7 @@ use std::{
     result::{Result},
     vec::{Vec},
 };
-use solana_sdk::{
-    program_error::ProgramError,
-    account_info::{AccountInfo},
-};
+use solana_sdk::program_error::ProgramError;
 use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
@@ -76,48 +73,41 @@ pub struct BlockHeader {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct State {
-    headers: HashMap<H256, BlockHeader>,
+    pub headers: HashMap<H256, BlockHeader>,
 }
 
-fn hash_header(header_rlp: &Rlp) -> H256 {
+fn hash_header(header: &BlockHeader) -> H256 {
+    return hash_rlp(&Rlp::new(&rlp::encode(header)));
+}
+
+fn hash_rlp(header_rlp: &Rlp) -> H256 {
     let digest = Sha3_256::digest(header_rlp.as_raw());
     let hash = H256::from_slice(digest.as_slice());
     return hash;
 }
 
-fn parse_header(header_rlp: Rlp) -> Result<(H256, BlockHeader), ProgramError> {
-    let hash = hash_header(&header_rlp);
-    let header = BlockHeader::decode(&header_rlp).map_err(|_| ProgramError::InvalidInstructionData)?;
-    return Ok((hash, header))
+pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
+    return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
 }
 
-fn update_state(mut account: AccountInfo, state: &State) -> Result<(), ProgramError> {
-    return account.serialize_data(state).map_err(|_| ProgramError::Custom(1));
-}
-
-fn bootstrap (account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
-    let (hash, header) = parse_header(header_rlp)?;
+pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
     let mut initial = State {
         headers: HashMap::new(),
     };
-    initial.headers.insert(hash, header);
-    return update_state(account, &initial);
+    initial.headers.insert(hash_header(&header), header);
+    return Ok(initial);
 }
 
-fn process_new_block (account: AccountInfo, header_rlp: Rlp) -> Result<(), ProgramError> {
-    //TODO: check account data size
-    let mut state = account.deserialize_data().map_err(|_| ProgramError::InvalidAccountData)?;
-    let (hash, header) = parse_header(header_rlp)?;
-
+pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
     if !verify(&state, &header) {
         return Err(ProgramError::InvalidInstructionData);
     }
 
-    state.headers.insert(hash, header);
-    return update_state(account, &state);
+    state.headers.insert(hash_header(&header), header);
+    return Ok(state);
 }
 
-fn verify(state: &State, header: &BlockHeader) -> bool {
+pub fn verify(state: &State, header: &BlockHeader) -> bool {
     let parent = match state.headers.get(&header.parent_hash) {
         None => return false,
         Some(h) => h,

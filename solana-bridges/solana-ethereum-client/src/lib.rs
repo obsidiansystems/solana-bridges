@@ -1,5 +1,6 @@
 #![cfg(feature = "program")]
 mod eth;
+mod instruction;
 mod processor;
 
 #[cfg(test)]
