@@ -1,25 +1,16 @@
 let
   nixpkgs = import ./dep/nixpkgs { overlays = [overlay]; };
 
-  sources = {
-    # Not on nixpkgs: https://github.com/hercules-ci/gitignore.nix/issues/6
-    gitignore = nixpkgs.fetchFromGitHub {
-      owner = "hercules-ci";
-      repo = "gitignore";
-      rev = "f9e996052b5af4032fe6150bba4a6fe4f7b9d698";
-      sha256 = "0jrh5ghisaqdd0vldbywags20m2cxpkbbk5jjjmwaw0gr8nhsafv";
-    };
+  nix-thunk = import ./dep/nix-thunk { pkgs = nixpkgs; };
 
-    # Hackage release (0.1.0.0) does not support GHC 8.8
-    which = nixpkgs.fetchFromGitHub {
-      owner = "obsidiansystems";
-      repo = "which";
-      rev = "a7a86bfa1d05d81de4a12a89315bd383763b98ea";
-      sha256 = "1635wh4psqbhybbvgjr9gy6f051sb27zlgfamrqw14cdrqdvk5m8";
-    };
-  };
+  # Per thunk notes:
+  #
+  #  gitignore.nix: Not on nixpkgs: https://github.com/hercules-ci/gitignore.nix/issues/6
+  #
+  #  which: Hackage release (0.1.0.0) does not support GHC 8.8
+  sources = nix-thunk.mapSubdirectories nix-thunk.thunkSource ./dep;
 
-  gitignoreSource = (import sources.gitignore {}).gitignoreSource;
+  gitignoreSource = (import sources."gitignore.nix" {}).gitignoreSource;
 
   overlay = self: super: {
     haskellPackages = with nixpkgs.haskell.lib;
@@ -214,8 +205,31 @@ let
     buildInputs = [ rustc cargo cargo-watch  ];
   };
 
+  solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+
+  solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    sourceRoot = null;
+    sha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
+  solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    #cargoVendorDir = solana-ethereum-client-dep-srcs;
+    #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
+    #buildInputs = [ rustPackages.rust-std ];
+    verifyCargoDeps = true;
+
+    # Cargo hash must be updated when Cargo.lock file changes.
+    cargoSha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
+    solana-ethereum-client
+    solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
   shells = {
