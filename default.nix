@@ -205,9 +205,19 @@ let
     buildInputs = [ rustc cargo cargo-watch  ];
   };
 
+  solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+
+  solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    sourceRoot = null;
+    sha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
   solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
     name = "solana-ethereum-client";
-    src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+    src = solana-ethereum-client-src;
+    #cargoVendorDir = solana-ethereum-client-dep-srcs;
     #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
     #buildInputs = [ rustPackages.rust-std ];
     verifyCargoDeps = true;
@@ -218,7 +228,8 @@ let
 
 in {
   inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
-    solana-ethereum-client;
+    solana-ethereum-client
+    solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
   shells = {
