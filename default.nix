@@ -207,6 +207,6 @@ let
   };
 
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm helloWorld spl;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
