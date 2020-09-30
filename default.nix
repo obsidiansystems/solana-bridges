@@ -205,8 +205,20 @@ let
     buildInputs = [ rustc cargo cargo-watch  ];
   };
 
+  solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
+    name = "solana-ethereum-client";
+    src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+    #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
+    #buildInputs = [ rustPackages.rust-std ];
+    verifyCargoDeps = true;
+
+    # Cargo hash must be updated when Cargo.lock file changes.
+    cargoSha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
+    solana-ethereum-client;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
   shells = {
