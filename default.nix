@@ -217,4 +217,8 @@ let
 in {
   inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl;
   inherit (nixpkgs.haskellPackages) solana-bridges;
+
+  shells = {
+    target-x86 = shell-x86;
+  };
 }
