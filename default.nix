@@ -1,25 +1,16 @@
 let
   nixpkgs = import ./dep/nixpkgs { overlays = [overlay]; };
 
-  sources = {
-    # Not on nixpkgs: https://github.com/hercules-ci/gitignore.nix/issues/6
-    gitignore = nixpkgs.fetchFromGitHub {
-      owner = "hercules-ci";
-      repo = "gitignore";
-      rev = "f9e996052b5af4032fe6150bba4a6fe4f7b9d698";
-      sha256 = "0jrh5ghisaqdd0vldbywags20m2cxpkbbk5jjjmwaw0gr8nhsafv";
-    };
+  nix-thunk = import ./dep/nix-thunk { pkgs = nixpkgs; };
 
-    # Hackage release (0.1.0.0) does not support GHC 8.8
-    which = nixpkgs.fetchFromGitHub {
-      owner = "obsidiansystems";
-      repo = "which";
-      rev = "a7a86bfa1d05d81de4a12a89315bd383763b98ea";
-      sha256 = "1635wh4psqbhybbvgjr9gy6f051sb27zlgfamrqw14cdrqdvk5m8";
-    };
-  };
+  # Per thunk notes:
+  #
+  #  gitignore.nix: Not on nixpkgs: https://github.com/hercules-ci/gitignore.nix/issues/6
+  #
+  #  which: Hackage release (0.1.0.0) does not support GHC 8.8
+  sources = nix-thunk.mapSubdirectories nix-thunk.thunkSource ./dep;
 
-  gitignoreSource = (import sources.gitignore {}).gitignoreSource;
+  gitignoreSource = (import sources."gitignore.nix" {}).gitignoreSource;
 
   overlay = self: super: {
     haskellPackages = with nixpkgs.haskell.lib;
