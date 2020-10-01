@@ -207,11 +207,14 @@ let
 
   solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
 
+  # Cargo hash must be updated when Cargo.lock file changes.
+  solana-ethereum-client-dep-sha256 = "1588gmkma0jvl1b37wg1g4l5ckv3kb941rd0s6jwhdnrakprzy1v";
+
   solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
     name = "solana-ethereum-client";
     src = solana-ethereum-client-src;
     sourceRoot = null;
-    sha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+    sha256 = solana-ethereum-client-dep-sha256;
   };
 
   solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
@@ -222,8 +225,7 @@ let
     #buildInputs = [ rustPackages.rust-std ];
     verifyCargoDeps = true;
 
-    # Cargo hash must be updated when Cargo.lock file changes.
-    cargoSha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+    cargoSha256 = solana-ethereum-client-dep-sha256;
   };
 
 in {
