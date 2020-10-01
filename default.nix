@@ -168,11 +168,24 @@ let
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-# <<<<<<< Updated upstream
-#     nativeBuildInputs = [ solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana ]);
-# =======
-    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs; [ cabal-install ghcid hlint go-ethereum solana xargo rustup shellcheck ninja cmake nodePackages.node2nix nodejs-12_x nodePackages.eslint ]);
+# <<<<<<< HEAD
+    nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
+      [ cabal-install ghcid hlint
+        go-ethereum solana
+        xargo rustup cargo-deps cargo-watch
+        shellcheck ninja cmake
+        nodePackages.node2nix nodejs-12_x nodePackages.eslint
+        client-tool
+      ]);
 
+# =======
+#     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
+#       [ cabal-install ghcid hlint
+#         go-ethereum solana
+#         xargo rustup cargo-deps cargo-watch
+#         shellcheck ninja cmake
+#       ]);
+# >>>>>>> origin/ethereum-client
 
     RUST_BACKTRACE="1";
     RUSTUP_TOOLCHAIN="bpf";
@@ -182,11 +195,16 @@ let
     SPL_TOKEN=spl.token;
     SPL_MEMO=spl.memo;
 
-    CC="${solana-llvm}/bin/clang"; # has no effect here
-    AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
-
-    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
-    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+# <<<<<<< HEAD
+#     CC="${solana-llvm}/bin/clang"; # has no effect here
+#     AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+# 
+#     SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
+#     SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
+# =======
+    SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # CC gets overwritten
+    SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # AR gets overwritten
+# >>>>>>> origin/ethereum-client
 
     CARGO_TARGET_DIR="target-bpf";
 
@@ -201,10 +219,44 @@ let
       -C link-arg=--entry=entrypoint \
       -C link-arg=-no-threads \
       -C linker=${solana-llvm}/bin/ld.lld";
-# >>>>>>> Stashed changes
   };
 
+  shell-x86 = with nixpkgs; mkShell {
+    buildInputs = [ rustc cargo cargo-watch  ];
+  };
+
+  solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+
+  solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    sourceRoot = null;
+    sha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
+  solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    #cargoVendorDir = solana-ethereum-client-dep-srcs;
+    #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
+    #buildInputs = [ rustPackages.rust-std ];
+    verifyCargoDeps = true;
+
+    # Cargo hash must be updated when Cargo.lock file changes.
+    cargoSha256 = "139zdyd80h2zpihbkx39pcjh2axz2nv2npmingkrph4bkzw1r7j9";
+  };
+
+  client-tool = (import ./client-tool {pkgs = nixpkgs;}).package;
+
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl;
+  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
+    solana-ethereum-client
+    solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
+
+
+  solana-ethereum-client-tool = client-tool;
+  shells = {
+    target-x86 = shell-x86;
+  };
 }

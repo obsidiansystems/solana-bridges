@@ -31,13 +31,14 @@ import           System.Posix.Files (createSymbolicLink)
 import           System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess
                                 , proc, readProcess, readCreateProcessWithExitCode, waitForProcess)
 import           System.Which (staticWhich)
+import           System.Environment
 import           System.Exit
-import System.Environment
 
 main :: IO ()
 main = do
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
+  solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
   setup currentDir runDir
   runEthereum runDir
 
@@ -256,4 +257,3 @@ voteAccountKeypair :: T.Text
 voteAccountKeypair = "[183,84,232,40,36,248,21,231,135,120,104,233,237,92,143,38,177,127,63,199,44,101,82,126,213,199,20,227,73,253,234,87,160,1,85,103,20,207,0,131,28,53,240,217,131,246,147,9,136,69,122,225,14,34,195,97,242,39,224,85,152,209,183,249]"
 stakeAccountKeypair :: T.Text
 stakeAccountKeypair = "[55,217,78,20,228,230,230,89,66,11,131,181,64,47,247,36,11,78,76,54,43,57,160,189,228,203,8,66,0,233,135,3,159,165,84,42,226,126,129,204,24,141,148,117,233,154,29,94,204,98,176,43,7,76,26,23,146,121,196,145,159,152,8,111]"
-
