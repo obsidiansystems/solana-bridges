@@ -26,6 +26,7 @@ impl-rlp = "0.2.1"
 rlp = "0.4.5"
 hex = "0.4.2"
 sha3 = "0.9.1"
+arrayref = "0.3.6"
 
 [lib]
 name = "solana_ethereum_client"
