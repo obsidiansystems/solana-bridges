@@ -62,6 +62,7 @@ let
     installPhase = ''
        cp -R $src $out
     '';
+    meta.platforms = [ "x86_64-linux" ];
   };
 
   solana-llvm = with nixpkgs; stdenv.mkDerivation {
@@ -161,7 +162,7 @@ let
       which rustc
       rustup toolchain link bpf $(rustc --print sysroot)
       cd example-helloworld/src/program-rust
-      xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
+      xargo build --target bpfelh-unknown-unknown --release --no-default-features --features program
     '';
   };
 
@@ -228,9 +229,37 @@ let
     cargoSha256 = solana-ethereum-client-dep-sha256;
   };
 
+  nixpkgsBPF = import sources.nixpkgs {
+    crossSystem = {
+      config = "bpfel-none";
+      useLLVM = true;
+    };
+  };
+
+  rustPlatform-bpf = nixpkgsBPF.callPackage "${nixpkgsBPF.path}/pkgs/build-support/rust/make-rust-platform.nix" {
+    callPackage = nixpkgsBPF.newScope { stdenv = nixpkgsBPF.crossLibcStdenv; };
+  } {
+    inherit (nixpkgs) cargo;
+    rustc = solana-rust-bpf;
+  };
+
+  solana-ethereum-client-bpf = rustPlatform-bpf.buildRustPackage {
+    name = "solana-ethereum-client";
+    src = solana-ethereum-client-src;
+    #cargoVendorDir = solana-ethereum-client-dep-srcs;
+    #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
+    #buildInputs = [ rustPackages.rust-std ];
+    verifyCargoDeps = true;
+
+    cargoSha256 = solana-ethereum-client-dep-sha256;
+
+    meta.platforms = nixpkgsBPF.lib.platforms.all;
+  };
+
 in {
   inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
     solana-ethereum-client
+    solana-ethereum-client-bpf
     solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
