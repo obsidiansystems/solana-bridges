@@ -168,7 +168,6 @@ let
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
     packages = p: [ p.solana-bridges ];
-# <<<<<<< HEAD
     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
       [ cabal-install ghcid hlint
         go-ethereum solana
@@ -178,15 +177,6 @@ let
         client-tool
       ]);
 
-# =======
-#     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
-#       [ cabal-install ghcid hlint
-#         go-ethereum solana
-#         xargo rustup cargo-deps cargo-watch
-#         shellcheck ninja cmake
-#       ]);
-# >>>>>>> origin/ethereum-client
-
     RUST_BACKTRACE="1";
     RUSTUP_TOOLCHAIN="bpf";
     XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
@@ -195,16 +185,8 @@ let
     SPL_TOKEN=spl.token;
     SPL_MEMO=spl.memo;
 
-# <<<<<<< HEAD
-#     CC="${solana-llvm}/bin/clang"; # has no effect here
-#     AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
-# 
-#     SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # has no effect here
-#     SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # has no effect here
-# =======
     SOLANA_LLVM_CC="${solana-llvm}/bin/clang"; # CC gets overwritten
     SOLANA_LLVM_AR="${solana-llvm}/bin/llvm-ar"; # AR gets overwritten
-# >>>>>>> origin/ethereum-client
 
     CARGO_TARGET_DIR="target-bpf";
 

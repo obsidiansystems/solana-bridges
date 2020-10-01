@@ -1,7 +1,6 @@
 #!/usr/bin/env nix-shell
-#! nix-shell -I nixpkgs=../dep/nixpkgs/default.nix -i bash -p nodePackages.node2nix nodejs-12_x
+#! nix-shell -I nixpkgs=../dep/nixpkgs/default.nix -i bash -p nodePackages.node2nix
 
-echo sup
 node2nix --bypass-cache --pkg-name 'nodejs-12_x' --lock ./package-lock.json 
 
 patch -p0 <<EOF
