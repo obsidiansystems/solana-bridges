@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::parameters::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
@@ -47,7 +46,7 @@ pub struct State {
     pub headers: HashMap<H256, BlockHeader>,
 }
 
-fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
+pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
     let mut stream = RlpStream::new();
     header.stream_rlp(&mut stream, truncated);
     return keccak256(stream.out().as_slice());
@@ -67,6 +66,7 @@ pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
     let mut initial = State {
         headers: HashMap::new(),
     };
+
     initial.headers.insert(hash_header(&header, false), header);
     return Ok(initial);
 }
@@ -90,6 +90,22 @@ pub fn verify(state: &State, header: &BlockHeader) -> bool {
     };
 
     return true;
+}
+
+pub fn verify_pow(header: &BlockHeader) -> bool {
+    use ethash::*;
+    let epoch = (header.number / 30000) as usize;
+    let seed = get_seedhash(epoch);
+    let cache_size = get_cache_size(epoch);
+    let full_size = get_full_size(epoch);
+
+    let mut cache = vec![0; cache_size];
+    make_cache(&mut cache, seed);
+
+    let (_mix_hash, result) = hashimoto_light(crate::eth::hash_header(&header, true), header.nonce, full_size, &cache);
+    let target = cross_boundary(header.difficulty);
+
+    return U256::from_big_endian(result.as_fixed_bytes()) <= target;
 }
 
 impl Sealed for State {}
