@@ -15,7 +15,6 @@ use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
-use sha3::{Digest, Sha3_256};
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 
@@ -51,14 +50,13 @@ pub struct State {
 fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
     let mut stream = RlpStream::new();
     header.stream_rlp(&mut stream, truncated);
-    stream.out().as_slice();
-    return hash_rlp(&Rlp::new(&rlp::encode(header)));
+    return keccak256(stream.out().as_slice());
 }
 
-fn hash_rlp(rlp: &Rlp) -> H256 {
-    let digest = Sha3_256::digest(rlp.as_raw());
-    let hash = H256::from_slice(digest.as_slice());
-    return hash;
+fn keccak256(bytes: &[u8]) -> H256 {
+    use sha3::{Digest, Keccak256};
+    let digest = Keccak256::digest(bytes);
+    return H256::from_slice(digest.as_slice());
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
