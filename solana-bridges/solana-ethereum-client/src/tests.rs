@@ -21,6 +21,7 @@ mod test {
     use solana_sdk::clock::Epoch;
     use std::str::FromStr;
     use rlp::{Decodable, Encodable, Rlp};
+    use ethereum_types::{U256, H64, H160, H256, Bloom};
 
     #[test]
     fn test_initialize() -> Result<(), TestError> {

@@ -16,17 +16,18 @@ default = ["solana-sdk/default"]
 [dependencies]
 byteorder = "1.3"
 solana-sdk = { version = "=1.3.12", default-features = false, optional = true }
-fixed-hash = "0.6.1"
 getrandom = { version = "0.1.14", features = ["dummy"] }
-uint = { git = "https://github.com/obsidiansystems/parity-common", rev = "eb39309c64e5c42f124744fc2d887f2f4648bbd8" }
-serde = "1.0.116"
-impl-serde = "0.3.1"
+uint = "0.8.5"
 bincode = "1.3.1"
-impl-rlp = "0.2.1"
 rlp = "0.4.5"
 hex = "0.4.2"
 sha3 = "0.9.1"
 arrayref = "0.3.6"
+ethereum-types = { version = "0.8.0" }
+
+[patch.crates-io]
+parity-scale-codec = { git = "https://github.com/obsidiansystems/parity-scale-codec", rev = "2290261cd3cc9df22493452e10cf3ed44a417b25" }
+uint = { git = "https://github.com/obsidiansystems/parity-common", rev = "eb39309c64e5c42f124744fc2d887f2f4648bbd8" }
 
 [lib]
 name = "solana_ethereum_client"
