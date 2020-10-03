@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::{
     instruction::*,
     processor::*,
@@ -14,7 +16,6 @@ use solana_sdk::{
 #[cfg(not(target_arch = "bpf"))]
 solana_sdk::program_stubs!();
 
-// Sanity tests
 mod test {
     use super::*;
     use crate::eth::*;

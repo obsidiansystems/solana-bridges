@@ -17,12 +17,12 @@ use rlp::{
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ExtraData {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub uncles_hash: H256,
@@ -62,19 +62,19 @@ pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
     return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
 }
 
-pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
+pub fn initialize (header: BlockHeader) -> State {
     let mut initial = State {
         headers: HashMap::new(),
     };
 
     initial.headers.insert(hash_header(&header, false), header);
-    return Ok(initial);
+    return initial;
 }
 
 pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
     if !verify(&state, &header) {
         return Err(ProgramError::InvalidInstructionData);
-    }
+    };
 
     state.headers.insert(hash_header(&header, false), header);
     return Ok(state);
@@ -94,7 +94,8 @@ pub fn verify(state: &State, header: &BlockHeader) -> bool {
 
 pub fn verify_pow(header: &BlockHeader) -> bool {
     use ethash::*;
-    let epoch = (header.number / 30000) as usize;
+    const EPOCH_LENGTH: u64 = 30000;
+    let epoch = (header.number / EPOCH_LENGTH) as usize;
     let seed = get_seedhash(epoch);
     let cache_size = get_cache_size(epoch);
     let full_size = get_full_size(epoch);
@@ -102,7 +103,7 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let mut cache = vec![0; cache_size];
     make_cache(&mut cache, seed);
 
-    let (_mix_hash, result) = hashimoto_light(crate::eth::hash_header(&header, true), header.nonce, full_size, &cache);
+    let (_mix_hash, result) = hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
