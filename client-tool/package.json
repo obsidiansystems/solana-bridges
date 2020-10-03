@@ -12,5 +12,7 @@
     "@solana/web3.js": "^0.78.2",
     "yargs": ""
   },
-  "bin": {"solana-bridge-tool":"index.js"}
+  "bin": {
+    "solana-bridge-tool": "index.js"
+  }
 }

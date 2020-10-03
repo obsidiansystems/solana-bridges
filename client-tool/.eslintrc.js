@@ -14,6 +14,7 @@ module.exports = {
     },
     "rules": {
         "no-console": "off",
-        "no-extra-semi": "off"
+        "no-extra-semi": "off",
+        "no-extra-boolean-cast": "off",
     }
 };
