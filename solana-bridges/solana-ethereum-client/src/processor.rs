@@ -32,7 +32,7 @@ pub fn process_instruction<'a>(
     guard_sufficient_storage(&account)?;
 
     let new_state = match Instruction::unpack(instruction_data)? {
-        Instruction::Initialize(header) => initialize(header),
+        Instruction::Initialize(header) => Ok(initialize(header)),
         Instruction::NewBlock(header) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, header),
     };
 
@@ -41,12 +41,12 @@ pub fn process_instruction<'a>(
     return Ok(());
 }
 
-fn account_deserialize_data (account: &AccountInfo) -> Result<State, ProgramError> {
+pub fn account_deserialize_data (account: &AccountInfo) -> Result<State, ProgramError> {
     let data = account.try_borrow_mut_data()?;
     return State::unpack_from_slice(&data);
 }
 
-fn account_serialize_data (account: &AccountInfo, state: &State) -> Result<(), ProgramError> {
+pub fn account_serialize_data (account: &AccountInfo, state: &State) -> Result<(), ProgramError> {
     guard_sufficient_storage(&account)?;
     let mut data = account.data.borrow_mut();
     state.pack_into_slice(&mut data);

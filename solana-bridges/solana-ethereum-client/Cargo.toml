@@ -23,7 +23,8 @@ rlp = "0.4.5"
 hex = "0.4.2"
 sha3 = "0.9.1"
 arrayref = "0.3.6"
-ethereum-types = { version = "0.8.0" }
+ethereum-types = { version = "0.9.2" }
+ethash = { git = "https://github.com/nearprotocol/rust-ethash", branch = "upgrade-eth-types" }
 
 [patch.crates-io]
 parity-scale-codec = { git = "https://github.com/obsidiansystems/parity-scale-codec", rev = "2290261cd3cc9df22493452e10cf3ed44a417b25" }

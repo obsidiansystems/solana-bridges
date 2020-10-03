@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::parameters::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
@@ -15,16 +14,15 @@ use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
-use sha3::{Digest, Sha3_256};
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ExtraData {
     pub bytes: Vec<u8>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub uncles_hash: H256,
@@ -48,34 +46,37 @@ pub struct State {
     pub headers: HashMap<H256, BlockHeader>,
 }
 
-fn hash_header(header: &BlockHeader) -> H256 {
-    return hash_rlp(&Rlp::new(&rlp::encode(header)));
+pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
+    let mut stream = RlpStream::new();
+    header.stream_rlp(&mut stream, truncated);
+    return keccak256(stream.out().as_slice());
 }
 
-fn hash_rlp(header_rlp: &Rlp) -> H256 {
-    let digest = Sha3_256::digest(header_rlp.as_raw());
-    let hash = H256::from_slice(digest.as_slice());
-    return hash;
+fn keccak256(bytes: &[u8]) -> H256 {
+    use sha3::{Digest, Keccak256};
+    let digest = Keccak256::digest(bytes);
+    return H256::from_slice(digest.as_slice());
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
     return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
 }
 
-pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
+pub fn initialize (header: BlockHeader) -> State {
     let mut initial = State {
         headers: HashMap::new(),
     };
-    initial.headers.insert(hash_header(&header), header);
-    return Ok(initial);
+
+    initial.headers.insert(hash_header(&header, false), header);
+    return initial;
 }
 
 pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
     if !verify(&state, &header) {
         return Err(ProgramError::InvalidInstructionData);
-    }
+    };
 
-    state.headers.insert(hash_header(&header), header);
+    state.headers.insert(hash_header(&header, false), header);
     return Ok(state);
 }
 
@@ -89,6 +90,23 @@ pub fn verify(state: &State, header: &BlockHeader) -> bool {
     };
 
     return true;
+}
+
+pub fn verify_pow(header: &BlockHeader) -> bool {
+    use ethash::*;
+    const EPOCH_LENGTH: u64 = 30000;
+    let epoch = (header.number / EPOCH_LENGTH) as usize;
+    let seed = get_seedhash(epoch);
+    let cache_size = get_cache_size(epoch);
+    let full_size = get_full_size(epoch);
+
+    let mut cache = vec![0; cache_size];
+    make_cache(&mut cache, seed);
+
+    let (_mix_hash, result) = hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
+    let target = cross_boundary(header.difficulty);
+
+    return U256::from_big_endian(result.as_fixed_bytes()) <= target;
 }
 
 impl Sealed for State {}
@@ -114,7 +132,7 @@ impl Pack for State {
         for i in 0..length {
             let header_src = array_ref![src, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
             let header = BlockHeader::unpack_from_slice(header_src)?;
-            headers.insert(hash_header(&header), header);
+            headers.insert(hash_header(&header, false), header);
         }
         return Ok(State { headers })
     }
@@ -289,9 +307,9 @@ impl Pack for BlockHeader {
     }
 }
 
-impl Encodable for BlockHeader {
-    fn rlp_append(&self, stream: &mut RlpStream) {
-        stream.begin_list(HEADER_FIELD_SIZES.len());
+impl BlockHeader {
+    fn stream_rlp(&self, stream: &mut RlpStream, truncated: bool) {
+        stream.begin_list(HEADER_FIELD_SIZES.len() - if truncated { 2 } else { 0 });
 
         stream.append(&self.parent_hash);
         stream.append(&self.uncles_hash);
@@ -306,8 +324,17 @@ impl Encodable for BlockHeader {
         stream.append(&self.gas_used);
         stream.append(&self.timestamp);
         stream.append(&self.extra_data.bytes);
-        stream.append(&self.mix_hash);
-        stream.append(&self.nonce);
+
+        if !truncated {
+            stream.append(&self.mix_hash);
+            stream.append(&self.nonce);
+        }
+    }
+}
+
+impl Encodable for BlockHeader {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        self.stream_rlp(stream, false);
     }
 }
 
