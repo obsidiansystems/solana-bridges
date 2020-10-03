@@ -173,7 +173,6 @@ let
         go-ethereum solana
         xargo rustup cargo-deps cargo-watch
         shellcheck ninja cmake
-        nodePackages.node2nix nodejs-12_x nodePackages.eslint
         client-tool
       ]);
 
