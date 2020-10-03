@@ -1,62 +1,34 @@
 #![allow(dead_code)]
-use fixed_hash::{construct_fixed_hash};
-use uint::{construct_uint};
-use serde::{Deserialize, Serialize};
-use impl_serde::{impl_fixed_hash_serde, impl_uint_serde};
+use crate::parameters::*;
+
+use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
     collections::{HashMap},
     result::{Result},
     vec::{Vec},
 };
-use solana_sdk::program_error::ProgramError;
+use solana_sdk::{
+    program_error::ProgramError,
+    program_pack::{Pack, Sealed},
+};
 use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
-use impl_rlp::{impl_fixed_hash_rlp, impl_uint_rlp};
 use sha3::{Digest, Sha3_256};
+use std::mem;
+use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 
-macro_rules! impls_uint {
-    ($name: ident, $len: expr) => {
-        impl_uint_serde!($name, $len);
-        impl_uint_rlp!($name, $len);
-    };
-}
-macro_rules! impls_fixed_hash {
-    ($name: ident, $len: expr) => {
-        impl_fixed_hash_serde!($name, $len);
-        impl_fixed_hash_rlp!($name, $len);
-    };
+#[derive(Debug, Eq, PartialEq)]
+pub struct ExtraData {
+    pub bytes: Vec<u8>,
 }
 
-// Unsigned integers: bits(words)
-construct_uint! { pub struct U128(2); }
-construct_uint! { pub struct U256(4); }
-construct_uint! { pub struct U512(8); }
-impls_uint!(U128, 2);
-impls_uint!(U256, 4);
-impls_uint!(U512, 8);
-
-// Hash types: bits(bytes)
-construct_fixed_hash! { pub struct H64(8); }
-construct_fixed_hash! { pub struct H128(16); }
-construct_fixed_hash! { pub struct H160(20); }
-construct_fixed_hash! { pub struct H256(32); }
-construct_fixed_hash! { pub struct Bloom(256); }
-impls_fixed_hash!(H64, 8);
-impls_fixed_hash!(H128, 16);
-impls_fixed_hash!(H160, 20);
-impls_fixed_hash!(H256, 32);
-impls_fixed_hash!(Bloom, 256);
-
-pub type Address = H160;
-pub type Height = u64;
-
-#[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct BlockHeader {
     pub parent_hash: H256,
     pub uncles_hash: H256,
-    pub author: Address,
+    pub author: H160,
     pub state_root: H256,
     pub transactions_root: H256,
     pub receipts_root: H256,
@@ -66,12 +38,12 @@ pub struct BlockHeader {
     pub gas_limit: U256,
     pub gas_used: U256,
     pub timestamp: u64,
-    pub extra_data: Vec<u8>,
+    pub extra_data: ExtraData,
     pub mix_hash: H256,
     pub nonce: H64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Debug)]
 pub struct State {
     pub headers: HashMap<H256, BlockHeader>,
 }
@@ -119,9 +91,207 @@ pub fn verify(state: &State, header: &BlockHeader) -> bool {
     return true;
 }
 
+impl Sealed for State {}
+impl Pack for State {
+    const LEN: usize = 1 + BlockHeader::LEN * HEADER_HISTORY_SIZE;
+    fn pack_into_slice(&self, dst: &mut [u8]) {
+        const LENGTH_SIZE: usize = mem::size_of::<usize>();
+        let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
+        *length_dst = self.headers.len().to_le_bytes();
+
+        for (i, h) in self.headers.values().enumerate() {
+            let dst_array = array_mut_ref![dst, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
+            h.pack_into_slice(dst_array);
+        }
+    }
+
+    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
+        const LENGTH_SIZE: usize = mem::size_of::<usize>();
+        let length_src = array_ref![src, 0, LENGTH_SIZE];
+        let length = usize::from_le_bytes(*length_src);
+
+        let mut headers: HashMap<H256,BlockHeader> = HashMap::new();
+        for i in 0..length {
+            let header_src = array_ref![src, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
+            let header = BlockHeader::unpack_from_slice(header_src)?;
+            headers.insert(hash_header(&header), header);
+        }
+        return Ok(State { headers })
+    }
+}
+
+impl Sealed for ExtraData {}
+impl Pack for ExtraData {
+    const LEN: usize = 1 + 32;
+    fn pack_into_slice(&self, dst: &mut [u8]) {
+        let len = self.bytes.len();
+        dst[0] = len as u8;
+        dst[1..len+1].copy_from_slice(&self.bytes);
+    }
+    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
+        let (&size, rest) = src.split_first().ok_or(ProgramError::InvalidInstructionData)?;
+        return Ok(ExtraData { bytes: rest[0..size as usize].to_vec() });
+    }
+}
+
+const H64_LEN: usize = 8;
+const H160_LEN: usize = 20;
+const H256_LEN: usize = 32;
+const U256_LEN: usize = 32;
+const BLOOM_LEN: usize = 256;
+pub const SIZE_OF_HEADER: usize =
+      H256_LEN // parent_hash: H256
+    + H256_LEN // uncles_hash: H256
+    + H160_LEN // author: H160
+    + H256_LEN // state_root: H256
+    + H256_LEN // transactions_root: H256
+    + H256_LEN // receipts_root: H256
+    + BLOOM_LEN // log_bloom: Bloom
+    + U256_LEN // difficulty: U256
+    + mem::size_of::<u64>() // number: u64
+    + U256_LEN // gas_limit: U256
+    + U256_LEN // gas_used: U256
+    + mem::size_of::<u64>() // timestamp: u64
+    + ExtraData::LEN // extra_data: ExtraData
+    + H256_LEN // mix_hash: H256
+    + H64_LEN //  nonce: H64
+    ;
+
+pub const HEADER_FIELD_SIZES: [usize; 15] = [
+    H256_LEN, // parent_hash: H256
+    H256_LEN, // uncles_hash: H256
+    H160_LEN, // author: H160
+    H256_LEN, // state_root: H256
+    H256_LEN, // transactions_root: H256
+    H256_LEN, // receipts_root: H256
+    BLOOM_LEN, // log_bloom: Bloom
+    U256_LEN, // difficulty: U256
+    mem::size_of::<u64>(), // number: u64
+    U256_LEN, // gas_limit: U256
+    U256_LEN, // gas_used: U256
+    mem::size_of::<u64>(), // timestamp: u64
+    ExtraData::LEN, // extra_data: ExtraData
+    H256_LEN, // mix_hash: H256
+    H64_LEN, //  nonce: H64
+];
+
+impl Sealed for BlockHeader {}
+impl Pack for BlockHeader {
+    const LEN: usize = SIZE_OF_HEADER;
+    fn pack_into_slice(&self, dst: &mut [u8]) {
+        let dst = array_mut_ref![dst, 0, BlockHeader::LEN];
+        let (
+            parent_hash_dst,
+            uncles_hash_dst,
+            author_dst,
+            state_root_dst,
+            transactions_root_dst,
+            receipts_root_dst,
+            log_bloom_dst,
+            difficulty_dst,
+            number_dst,
+            gas_limit_dst,
+            gas_used_dst,
+            timestamp_dst,
+            extra_data_dst,
+            mix_hash_dst,
+            nonce_dst,
+        ) = mut_array_refs![dst,
+                            H256_LEN, // parent_hash: H256
+                            H256_LEN, // uncles_hash: H256
+                            H160_LEN, // author: H160
+                            H256_LEN, // state_root: H256
+                            H256_LEN, // transactions_root: H256
+                            H256_LEN, // receipts_root: H256
+                            BLOOM_LEN, // log_bloom: Bloom
+                            U256_LEN, // difficulty: U256
+                            mem::size_of::<u64>(), // number: u64
+                            U256_LEN, // gas_limit: U256
+                            U256_LEN, // gas_used: U256
+                            mem::size_of::<u64>(), // timestamp: u64
+                            ExtraData::LEN, // extra_data: ExtraData
+                            H256_LEN, // mix_hash: H256
+                            H64_LEN //  nonce: H64
+        ];
+
+        *parent_hash_dst = *self.parent_hash.as_fixed_bytes();
+        *uncles_hash_dst = *self.uncles_hash.as_fixed_bytes();
+        *author_dst = *self.author.as_fixed_bytes();
+        *state_root_dst = *self.state_root.as_fixed_bytes();
+        *transactions_root_dst = *self.transactions_root.as_fixed_bytes();
+        *receipts_root_dst = *self.receipts_root.as_fixed_bytes();
+        *log_bloom_dst = *self.log_bloom.as_fixed_bytes();
+        self.difficulty.to_little_endian(difficulty_dst);
+        *number_dst = self.number.to_le_bytes();
+        self.gas_limit.to_little_endian(gas_limit_dst);
+        self.gas_used.to_little_endian(gas_used_dst);
+        *timestamp_dst = self.timestamp.to_le_bytes();
+        self.extra_data.pack_into_slice(extra_data_dst);
+        *mix_hash_dst = *self.mix_hash.as_fixed_bytes();
+        *nonce_dst = *self.nonce.as_fixed_bytes();
+    }
+
+    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
+        let src = array_ref![src, 0, BlockHeader::LEN];
+        let (
+            parent_hash_src,
+            uncles_hash_src,
+            author_src,
+            state_root_src,
+            transactions_root_src,
+            receipts_root_src,
+            log_bloom_src,
+            difficulty_src,
+            number_src,
+            gas_limit_src,
+            gas_used_src,
+            timestamp_src,
+            extra_data_src,
+            mix_hash_src,
+            nonce_src,
+        ) = array_refs![src,
+                        H256_LEN, // parent_hash: H256
+                        H256_LEN, // uncles_hash: H256
+                        H160_LEN, // author: H160
+                        H256_LEN, // state_root: H256
+                        H256_LEN, // transactions_root: H256
+                        H256_LEN, // receipts_root: H256
+                        BLOOM_LEN, // log_bloom: Bloom
+                        U256_LEN, // difficulty: U256
+                        mem::size_of::<u64>(), // number: u64
+                        U256_LEN, // gas_limit: U256
+                        U256_LEN, // gas_used: U256
+                        mem::size_of::<u64>(), // timestamp: u64
+                        ExtraData::LEN, // extra_data: ExtraData
+                        H256_LEN, // mix_hash: H256
+                        H64_LEN //  nonce: H64
+        ];
+
+        let header = BlockHeader {
+            parent_hash: H256::from(parent_hash_src),
+            uncles_hash: H256::from(uncles_hash_src),
+            author: H160::from(author_src),
+            state_root: H256::from(state_root_src),
+            transactions_root: H256::from(transactions_root_src),
+            receipts_root: H256::from(receipts_root_src),
+            log_bloom: Bloom::from(log_bloom_src),
+            difficulty: U256::from_little_endian(difficulty_src),
+            number: u64::from_le_bytes(*number_src),
+            gas_limit: U256::from_little_endian(gas_limit_src),
+            gas_used: U256::from_little_endian(gas_used_src),
+            timestamp: u64::from_le_bytes(*timestamp_src),
+            extra_data: ExtraData::unpack_from_slice(extra_data_src)?,
+            mix_hash: H256::from(mix_hash_src),
+            nonce: H64::from(nonce_src),
+        };
+
+        return Ok(header);
+    }
+}
+
 impl Encodable for BlockHeader {
     fn rlp_append(&self, stream: &mut RlpStream) {
-        stream.begin_list(15);
+        stream.begin_list(HEADER_FIELD_SIZES.len());
 
         stream.append(&self.parent_hash);
         stream.append(&self.uncles_hash);
@@ -135,7 +305,7 @@ impl Encodable for BlockHeader {
         stream.append(&self.gas_limit);
         stream.append(&self.gas_used);
         stream.append(&self.timestamp);
-        stream.append(&self.extra_data);
+        stream.append(&self.extra_data.bytes);
         stream.append(&self.mix_hash);
         stream.append(&self.nonce);
     }
@@ -156,7 +326,7 @@ impl Decodable for BlockHeader {
             gas_limit: serialized.val_at(9)?,
             gas_used: serialized.val_at(10)?,
             timestamp: serialized.val_at(11)?,
-            extra_data: serialized.val_at(12)?,
+            extra_data: ExtraData { bytes: serialized.val_at(12)? },
             mix_hash: serialized.val_at(13)?,
             nonce: serialized.val_at(14)?,
         };

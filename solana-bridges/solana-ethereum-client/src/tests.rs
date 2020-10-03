@@ -3,55 +3,25 @@ use crate::{
     processor::*,
 };
 
-use byteorder::{ByteOrder, LittleEndian};
 use solana_sdk::{
     account_info::{AccountInfo},
     pubkey::Pubkey,
     program_error::ProgramError,
+    program_pack::{Pack},
 };
-use std::mem;
 
 // Required to support info! in tests
 #[cfg(not(target_arch = "bpf"))]
 solana_sdk::program_stubs!();
 
 // Sanity tests
-#[cfg(test)]
 mod test {
     use super::*;
     use crate::eth::*;
     use solana_sdk::clock::Epoch;
     use std::str::FromStr;
     use rlp::{Decodable, Encodable, Rlp};
-
-    #[test]
-    fn test_sanity() {
-        let program_id = Pubkey::default();
-        let key = Pubkey::default();
-        let mut lamports = 0;
-        let mut data = vec![0; mem::size_of::<u64>()];
-        LittleEndian::write_u64(&mut data, 0);
-        let owner = Pubkey::default();
-        let account = AccountInfo::new(
-            &key,
-            false,
-            true,
-            &mut lamports,
-            &mut data,
-            &owner,
-            false,
-            Epoch::default(),
-        );
-        let instruction_data: Vec<u8> = Vec::new();
-
-        let accounts = vec![account];
-
-        assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 0);
-        process_hello(&program_id, &accounts, &instruction_data).unwrap();
-        assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 1);
-        process_hello(&program_id, &accounts, &instruction_data).unwrap();
-        assert_eq!(LittleEndian::read_u64(&accounts[0].data.borrow()), 2);
-    }
+    use ethereum_types::{U256, H64, H160, H256, Bloom};
 
     #[test]
     fn test_initialize() -> Result<(), TestError> {
@@ -60,7 +30,7 @@ mod test {
         let program_id = Pubkey::default();
         let key = Pubkey::default();
         let mut lamports = 0;
-        let mut data = vec![0;1241]; //TODO: don't hardcode
+        let mut data = vec![0;State::LEN];
 
         let owner = Pubkey::default();
         let account = AccountInfo::new(
@@ -82,8 +52,32 @@ mod test {
         return Ok(());
     }
 
+    fn test_extradata_pack(extra: ExtraData) -> Result<(), TestError> {
+        let mut extra_slice = [0; ExtraData::LEN];
+        extra.pack_into_slice(&mut extra_slice);
+        assert_eq!(extra.bytes.len() as u8, extra_slice[0]);
+        assert_eq!(extra, ExtraData::unpack_from_slice(&extra_slice).map_err(TestError::ProgError)?);
+        return Ok(());
+    }
+
     #[test]
-    fn test_roundtrip() -> Result<(), TestError> {
+    fn test_roundtrip_pack() -> Result<(), TestError> {
+        test_extradata_pack(ExtraData { bytes: vec![] })?;
+        test_extradata_pack(ExtraData { bytes: vec![4] })?;
+        test_extradata_pack(ExtraData { bytes: vec![5,5] })?;
+        test_extradata_pack(ExtraData { bytes: vec![6,6,6] })?;
+
+        let expected = decoded_header_0()?;
+        let mut buffer = [0; BlockHeader::LEN];
+        expected.pack_into_slice(&mut buffer);
+        let unpacked = BlockHeader::unpack_from_slice(&buffer).map_err(TestError::ProgError)?;
+        assert_eq!(expected, unpacked);
+
+        return Ok(());
+    }
+
+    #[test]
+    fn test_roundtrip_rlp() -> Result<(), TestError> {
         let expected = decoded_header_0()?;
         assert_eq!(expected, decode_header(&encode_header(&expected))?);
         return Ok(());
@@ -195,7 +189,7 @@ mod test {
             gas_limit: U256::from(9812622),
             gas_used: U256::from(53465),
             timestamp: 1574455815,
-            extra_data: Vec::from([80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103]),
+            extra_data: ExtraData { bytes: Vec::from([80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103]) },
             mix_hash: H256::from([
                 0xa3, 0x54, 0x25, 0xf4, 0x43, 0x45, 0x2c, 0xf9,
                 0x4b, 0xa4, 0xb6, 0x98, 0xb0, 0x0f, 0xd7, 0xb3,
