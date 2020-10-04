@@ -2,7 +2,6 @@ use crate::parameters::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
-    collections::{HashMap},
     result::{Result},
     vec::{Vec},
 };
@@ -44,7 +43,7 @@ pub struct BlockHeader {
 
 #[derive(Debug)]
 pub struct State {
-    pub headers: HashMap<H256, BlockHeader>,
+    pub headers: Vec<BlockHeader>,
 }
 
 pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
@@ -67,32 +66,20 @@ pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
 
 pub fn initialize (header: BlockHeader) -> State {
     let mut initial = State {
-        headers: HashMap::new(),
+        headers: Vec::new(),
     };
 
-    initial.headers.insert(hash_header(&header, false), header);
+    initial.headers.push(header);
     return initial;
 }
 
 pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
-    if !verify(&state, &header) {
+    if !verify_pow(&header) {
         return Err(ProgramError::InvalidInstructionData);
     };
 
-    state.headers.insert(hash_header(&header, false), header);
+    state.headers.push(header);
     return Ok(state);
-}
-
-pub fn verify(state: &State, header: &BlockHeader) -> bool {
-    let parent = match state.headers.get(&header.parent_hash) {
-        None => return false,
-        Some(h) => h,
-    };
-    if header.number != (parent.number + 1) {
-        return false;
-    };
-
-    return true;
 }
 
 pub fn verify_pow(header: &BlockHeader) -> bool {
@@ -120,7 +107,7 @@ impl Pack for State {
         let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
         *length_dst = self.headers.len().to_le_bytes();
 
-        for (i, h) in self.headers.values().enumerate() {
+        for (i, h) in self.headers.iter().enumerate() {
             let dst_array = array_mut_ref![dst, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
             h.pack_into_slice(dst_array);
         }
@@ -131,11 +118,11 @@ impl Pack for State {
         let length_src = array_ref![src, 0, LENGTH_SIZE];
         let length = usize::from_le_bytes(*length_src);
 
-        let mut headers: HashMap<H256,BlockHeader> = HashMap::new();
+        let mut headers: Vec<BlockHeader> = Vec::new();
         for i in 0..length {
             let header_src = array_ref![src, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
             let header = BlockHeader::unpack_from_slice(header_src)?;
-            headers.insert(hash_header(&header, false), header);
+            headers.push(header);
         }
         return Ok(State { headers })
     }
