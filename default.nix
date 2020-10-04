@@ -29,14 +29,15 @@ let
     pname = "solana";
     version = "v1.3.9";
 
+    # TODO: upstream
     src = fetchFromGitHub {
-      owner = "solana-labs";
+      owner = "obsidiansystems";
       repo = pname;
-      rev = version;
-      sha256 = "0fxn2vdh7wkdh9zkl2y3dbprjs5w6mhnr6vp819537h39i2xw90n";
+      rev = "db2f8ec4fc7b9ccbfdc68ace67d767dbac9330dd"; # branch: debug-elf
+      sha256 = "0ffih3armr6fdys40dzdc913rkpaxrgyfiw7030kp0nqbarhr0d4";
     };
 
-    cargoSha256 = "0lmvixpkzgbkn9lj2w0c809yg5dgjpf8flmhwkk9jvx6dx9wzyqd";
+    cargoSha256 = "1hdphhl6acj48z11ciznisb826yk8njv79ri46yzznybx6bqybrh";
     verifyCargoDeps = true;
 
     LIBCLANG_PATH="${llvmPackages.libclang}/lib";
@@ -229,7 +230,7 @@ let
   };
 
 in {
-  inherit nixpkgs shell solc solana-rust-bpf solana-llvm spl
+  inherit nixpkgs shell solc solana solana-rust-bpf solana-llvm spl
     solana-ethereum-client
     solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
