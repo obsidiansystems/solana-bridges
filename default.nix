@@ -17,7 +17,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ (with nixpkgs; [ go-ethereum solana solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = markUnbroken (doJailbreak (dontCheck super.web3));
           which = self.callCabal2nix "which" sources.which {};
@@ -174,6 +174,7 @@ let
         go-ethereum solana
         xargo rustup cargo-deps cargo-watch
         shellcheck ninja cmake
+        client-tool
       ]);
 
     RUST_BACKTRACE="1";
@@ -229,12 +230,16 @@ let
     cargoSha256 = solana-ethereum-client-dep-sha256;
   };
 
+  client-tool = (import ./client-tool {pkgs = nixpkgs;}).package;
+
 in {
   inherit nixpkgs shell solc solana solana-rust-bpf solana-llvm spl
     solana-ethereum-client
     solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
+
+  solana-ethereum-client-tool = client-tool;
   shells = {
     target-x86 = shell-x86;
   };
