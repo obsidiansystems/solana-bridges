@@ -38,6 +38,7 @@ async function readOrGenerateAccount(filename, hint) {
 }
 
 
+// todo solana cli can do this (better with check_elf patch)
 async function doDeploy(argv) {
 
     const progData = await fs.readFile(argv.program);
@@ -87,8 +88,22 @@ async function doDeploy(argv) {
         );
 
     console.log("loader result:" + v);
+}
 
-    // todo solana cli can do the part above;
+async function doAlloc(argv) {
+
+    const payerAccount = await readAccount(argv.payer);
+    console.log ("payer id:" + payerAccount.publicKey.toBase58())
+
+    const storageAccount = await readOrGenerateAccount(argv.storageAccount, "storage");
+    console.log ("storage id:" + storageAccount.publicKey.toBase58());
+
+    const programId = new web3.PublicKey(argv.programId);
+
+    const connection = new web3.Connection(argv.url);
+    console.log(await connection.getVersion());
+
+    const fees = await calcFees(connection, new Buffer(0), argv.space);
 
     const progAcctTxn = new web3.Transaction()
         .add(web3.SystemProgram.createAccount(
@@ -96,13 +111,23 @@ async function doDeploy(argv) {
             , newAccountPubkey: storageAccount.publicKey
             , lamports: fees
             , space: argv.space
-            , programId: programAccount.publicKey
+            , programId: programId
             }))
         ;
     console.log(await progAcctTxn)
     console.log("storageAccount:" + storageAccount.publicKey.toBase58());
 
-    v = web3.sendAndConfirmTransaction(
+    const payerInfo = await connection.getAccountInfo(payerAccount.publicKey);
+
+    console.log( "payer balance: " + payerInfo.lamports);
+    console.log( "deployment fees: " + fees);
+
+    if (fees > payerInfo.lamports) {
+        console.log("balance too low");
+        process.exit(1);
+    }
+
+    var v = web3.sendAndConfirmTransaction(
         connection,
         progAcctTxn,
         [payerAccount, storageAccount],
@@ -176,6 +201,13 @@ yargs
             , 'use-deprecated-loader': {type: 'boolean', default: false}
             })
         , callCmd(doDeploy))
+    .command('alloc', 'Deploy program'
+        , (yargv) => yargv.options(
+            { 'program-id' : {demand : true }
+            , 'space' : { demand : true, type: 'number' }
+            , 'storage-account' : {}
+            })
+        , callCmd(doAlloc))
     .command('call', 'Call program'
         , (yargv) => yargv.options(
             { 'storage-id' : {demand: true}
