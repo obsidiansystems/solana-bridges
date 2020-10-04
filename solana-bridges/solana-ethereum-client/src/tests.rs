@@ -26,7 +26,8 @@ mod test {
 
     #[test]
     fn test_initialize() -> Result<(), TestError> {
-        let header = decode_header(&hex_to_bytes(HEADER_400000)?)?;
+        let header_400000 = decode_header(&hex_to_bytes(HEADER_400000)?)?;
+        let header_400001 = decode_header(&hex_to_bytes(HEADER_400001)?)?;
 
         let program_id = Pubkey::default();
         let key = Pubkey::default();
@@ -45,13 +46,16 @@ mod test {
             Epoch::default(),
         );
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-        let instruction_init: Vec<u8> = Instruction::Initialize(header).pack();
+        let instruction_init: Vec<u8> = Instruction::Initialize(header_400000).pack();
+        let instruction_new: Vec<u8> = Instruction::NewBlock(header_400001).pack();
 
         let accounts = vec![account];
 
         process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
-        //TODO: test state
+        process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
+
+        assert_eq!([2], data[0..1]);
         return Ok(());
     }
 

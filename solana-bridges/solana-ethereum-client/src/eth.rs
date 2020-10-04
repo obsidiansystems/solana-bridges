@@ -64,22 +64,47 @@ pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
     return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
 }
 
-pub fn initialize (header: BlockHeader) -> State {
+pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
+    if !verify_block(&header, None) {
+        return Err(ProgramError::InvalidInstructionData);
+    };
+
     let mut initial = State {
         headers: Vec::new(),
     };
 
     initial.headers.push(header);
-    return initial;
+    return Ok(initial);
 }
 
 pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
-    if !verify_pow(&header) {
+    let parent = match state.headers.get(state.headers.len() - 1) {
+        None => return Err(ProgramError::InvalidInstructionData),
+        Some(h) => h,
+    };
+
+    if !verify_block(&header, Some(parent)) {
         return Err(ProgramError::InvalidInstructionData);
     };
 
     state.headers.push(header);
     return Ok(state);
+}
+
+pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool {
+    let parent_check = match parent {
+        None => true,
+        Some(p) =>
+            header.number == p.number + 1
+            && header.timestamp > p.timestamp
+            && header.parent_hash == hash_header(p, false)
+    };
+
+    let self_check =
+        header.extra_data.bytes.len() <= 32
+        && verify_pow(header);
+
+    return self_check && parent_check;
 }
 
 pub fn verify_pow(header: &BlockHeader) -> bool {
