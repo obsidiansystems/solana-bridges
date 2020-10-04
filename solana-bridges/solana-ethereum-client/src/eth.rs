@@ -16,6 +16,7 @@ use rlp::{
 };
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
+use tiny_keccak::{Hasher, Keccak};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ExtraData {
@@ -53,9 +54,11 @@ pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
 }
 
 fn keccak256(bytes: &[u8]) -> H256 {
-    use sha3::{Digest, Keccak256};
-    let digest = Keccak256::digest(bytes);
-    return H256::from_slice(digest.as_slice());
+    let mut keccak256 = Keccak::v256();
+    let mut out = [0u8; 32];
+    keccak256.update(bytes);
+    keccak256.finalize(&mut out);
+    H256::from(out)
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
