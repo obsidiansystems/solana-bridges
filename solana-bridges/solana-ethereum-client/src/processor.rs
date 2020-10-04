@@ -32,6 +32,7 @@ pub fn process_instruction<'a>(
     guard_sufficient_storage(&account)?;
 
     let new_state = match Instruction::unpack(instruction_data)? {
+        Instruction::Noop => return Ok(()),
         Instruction::Initialize(header) => Ok(initialize(header)),
         Instruction::NewBlock(header) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, header),
     };

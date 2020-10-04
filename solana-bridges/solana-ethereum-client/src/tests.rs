@@ -44,11 +44,13 @@ mod test {
             false,
             Epoch::default(),
         );
-        let instruction_data: Vec<u8> = Instruction::Initialize(header).pack();
+        let instruction_noop: Vec<u8> = Instruction::Noop.pack();
+        let instruction_init: Vec<u8> = Instruction::Initialize(header).pack();
 
         let accounts = vec![account];
 
-        process_instruction(&program_id, &accounts, &instruction_data).map_err(TestError::ProgError)?;
+        process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
+        process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
         //TODO: test state
         return Ok(());
     }
