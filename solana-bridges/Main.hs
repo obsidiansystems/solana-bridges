@@ -204,7 +204,7 @@ runGeth ::  FilePath -> IO ()
 runGeth runDir = do
   let
     dataDirArgs = [ "--datadir", runDir <> "/.ethereum"]
-    httpArgs = [ "--rpc" ]
+    httpArgs = [ "--http", "--rpcapi", "eth,net,web3,debug" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--etherbase=0x0000000000000000000000000000000000000001" ]
     initArgs = [ "init", genesisPath]
     privateArgs = [ "--nodiscover" ]
