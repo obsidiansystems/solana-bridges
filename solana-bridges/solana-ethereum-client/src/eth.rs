@@ -41,6 +41,120 @@ pub struct BlockHeader {
     pub nonce: H64,
 }
 
+//TODO: determine maximum widths to support per field
+type Scalar = U256;
+
+pub struct TransactionData {
+    pub bytes: Vec<u8>,
+}
+
+impl Encodable for TransactionData {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        stream.begin_list(1);
+        stream.append(&self.bytes);
+    }
+}
+
+impl Decodable for TransactionData {
+    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
+        let res = TransactionData {
+            bytes: serialized.val_at(0)?,
+        };
+        return Ok(res);
+    }
+}
+
+pub enum TransactionAction {
+    Call(H160), //TODO: transfer?
+    Create,
+}
+
+impl Encodable for TransactionAction {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        match self {
+            &TransactionAction::Call(address) => stream.append(&address),
+            &TransactionAction::Create => stream.begin_list(0),
+        };
+    }
+}
+
+impl Decodable for TransactionAction {
+    fn decode(rlp: &Rlp) -> Result<Self, DecoderError> {
+    Ok(if rlp.is_empty() {
+            TransactionAction::Create
+        } else {
+            TransactionAction::Call(rlp.as_val()?)
+        })
+    }
+}
+
+pub struct Transaction {
+    pub nonce: Scalar,
+    pub gas_price: Scalar,
+    pub gas_limit: Scalar,
+    pub to: TransactionAction,
+    pub value: Scalar,
+    pub data: TransactionData,
+    pub v: U256,
+    pub r: U256,
+    pub s: U256,
+}
+
+impl Encodable for Transaction {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        stream.begin_list(9);
+        stream.append(&self.nonce);
+        stream.append(&self.gas_price);
+        stream.append(&self.gas_limit);
+        stream.append(&self.to);
+        stream.append(&self.value);
+        stream.append(&self.data);
+        stream.append(&self.v);
+        stream.append(&self.r);
+        stream.append(&self.s);
+    }
+}
+
+impl Decodable for Transaction {
+    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
+        let res = Transaction {
+            nonce: serialized.val_at(0)?,
+            gas_price: serialized.val_at(1)?,
+            gas_limit: serialized.val_at(2)?,
+            to: serialized.val_at(3)?,
+            value: serialized.val_at(4)?,
+            data: serialized.val_at(5)?,
+            v: serialized.val_at(6)?,
+            r: serialized.val_at(7)?,
+            s: serialized.val_at(8)?,
+        };
+        return Ok(res);
+    }
+}
+
+pub struct Block {
+    pub header: BlockHeader,
+    pub transactions: Vec<Transaction>,
+}
+
+impl Decodable for Block {
+    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
+        let res = Block {
+            header: serialized.val_at(0)?,
+            transactions: serialized.list_at(1)?,
+        };
+        return Ok(res);
+    }
+}
+
+impl Encodable for Block {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        stream.begin_list(2);
+        stream.append(&self.header);
+        stream.append_list(&self.transactions);
+    }
+}
+
 #[derive(Debug)]
 pub struct State {
     pub headers: Vec<BlockHeader>,
@@ -58,6 +172,10 @@ fn keccak256(bytes: &[u8]) -> H256 {
     keccak256.update(bytes);
     keccak256.finalize(&mut out);
     H256::from(out)
+}
+
+pub fn decode_block(block_rlp: &Rlp) -> Result<Block, ProgramError> {
+    return Block::decode(block_rlp).map_err(|_| ProgramError::InvalidInstructionData);
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {

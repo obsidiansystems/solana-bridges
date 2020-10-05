@@ -6,8 +6,8 @@ use solana_sdk::program_error::ProgramError;
 
 pub enum Instruction {
     Noop,
-    Initialize(BlockHeader),
-    NewBlock(BlockHeader),
+    Initialize(Block),
+    NewBlock(Block),
 }
 
 impl Instruction {
@@ -18,13 +18,13 @@ impl Instruction {
             &Self::Noop => {
                 buf.push(0);
             }
-            &Self::Initialize(ref header) => {
+            &Self::Initialize(ref block) => {
                 buf.push(1);
-                buf.extend_from_slice(&rlp::encode(header));
+                buf.extend_from_slice(&rlp::encode(block));
             }
-            &Self::NewBlock(ref header) => {
+            &Self::NewBlock(ref block) => {
                 buf.push(2);
-                buf.extend_from_slice(&rlp::encode(header));
+                buf.extend_from_slice(&rlp::encode(block));
             }
         }
         return buf;
@@ -35,12 +35,12 @@ impl Instruction {
         return match tag {
             0 => Ok(Self::Noop),
             1 => {
-                let header = decode_header(&Rlp::new(rest))?;
-                Ok(Self::Initialize(header))
+                let block = decode_block(&Rlp::new(rest))?;
+                Ok(Self::Initialize(block))
             }
             2 => {
-                let header = decode_header(&Rlp::new(rest))?;
-                Ok(Self::NewBlock(header))
+                let block = decode_block(&Rlp::new(rest))?;
+                Ok(Self::NewBlock(block))
             }
             _ => return Err(ProgramError::InvalidInstructionData)
         };
