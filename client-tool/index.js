@@ -182,6 +182,7 @@ async function doCall(argv) {
     console.log(txn);
     var v = await web3.sendAndConfirmTransaction(connection, txn, [payerAccount]);
     console.log(v);
+    return {};
 }
 
 function callCmd (fn) {
