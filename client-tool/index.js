@@ -88,6 +88,7 @@ async function doDeploy(argv) {
         );
 
     console.log("loader result:" + v);
+    return {programId: programAccount.publicKey.toBase58()};
 }
 
 async function doAlloc(argv) {
@@ -150,6 +151,11 @@ async function doAlloc(argv) {
     console.log(stgInfo);
     console.log("owner:" + stgInfo.owner.toBase58());
 
+    return {
+        programId: programId.toBase58(),
+        accountId: storageAccount.publicKey.toBase58()
+    };
+
 };
 
 async function doCall(argv) {
@@ -181,8 +187,8 @@ async function doCall(argv) {
 function callCmd (fn) {
     return function (argv) {
         return fn(argv)
-            .then(() => {console.log("Ok!"); process.exit();})
-            .catch(bad => console.error(bad))
+            .then(result => {process.stdout.write(JSON.stringify(result)); process.exit();})
+            .catch(bad => {console.error(bad); process.exit(99)})
             ;
     };
 }
