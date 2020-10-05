@@ -178,14 +178,16 @@ runEthereum runDir = withGeth runDir $ do
 
   let loop n = do
         res <- catch
-          (fmap Right $ runWeb3 $ Eth.getBlockRlp n)
-          (\(_ :: JsonRpcException) -> do
-              T.putStrLn "all done!"
-              pure $ Left ())
+          (runWeb3 $ Eth.getBlockRlp n)
+          (\case
+              ParsingException msg -> fail msg
+              CallException _ -> do
+                T.putStrLn "No new block, waiting"
+                threadDelay 5e6
+                loop n)
         case res of
-          Left () -> pure ()
-          Right (Left _) -> pure ()
-          Right (Right rlp) -> do
+          Left e -> fail $ show e
+          Right rlp -> do
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
             loop $ n + 1
   loop 0
