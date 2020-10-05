@@ -14,6 +14,7 @@ executable solana-bridges
                      , async
                      , bytestring
                      , containers
+                     , exceptions
                      , directory
                      , lens
                      , mtl

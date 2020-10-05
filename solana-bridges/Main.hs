@@ -9,6 +9,7 @@ import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad (unless)
+import           Control.Monad.Catch (catch)
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Foldable (fold)
@@ -20,6 +21,7 @@ import           Data.String (IsString)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import           Network.Web3 (runWeb3)
+import           Network.JsonRpc.TinyClient as Eth
 import qualified Network.Ethereum.Api.Eth as Eth
 import qualified Network.Ethereum.Api.Debug as Eth
 import qualified Network.Ethereum.Api.Types as Eth
@@ -175,10 +177,15 @@ runEthereum runDir = withGeth runDir $ do
         Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
 
   let loop n = do
-        res <- runWeb3 $ Eth.getBlockRlp n
+        res <- catch
+          (fmap Right $ runWeb3 $ Eth.getBlockRlp n)
+          (\(_ :: JsonRpcException) -> do
+              T.putStrLn "all done!"
+              pure $ Left ())
         case res of
-          Left _ -> pure ()
-          Right rlp -> do
+          Left () -> pure ()
+          Right (Left _) -> pure ()
+          Right (Right rlp) -> do
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
             loop $ n + 1
   loop 0
