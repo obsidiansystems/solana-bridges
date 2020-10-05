@@ -21,6 +21,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import           Network.Web3 (runWeb3)
 import qualified Network.Ethereum.Api.Eth as Eth
+import qualified Network.Ethereum.Api.Debug as Eth
 import qualified Network.Ethereum.Api.Types as Eth
 import           Network.Ethereum.Api.Types (Call(..))
 import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
@@ -172,6 +173,15 @@ runEthereum runDir = withGeth runDir $ do
       runWeb3 (Eth.getTransactionReceipt hex) >>= \case
         Left err -> putStrLn $ "Query failed: " <> show err
         Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
+
+  let loop n = do
+        res <- runWeb3 $ Eth.getBlockRlp n
+        case res of
+          Left _ -> pure ()
+          Right rlp -> do
+            T.putStrLn $ T.pack (show n) <> ": " <> rlp
+            loop $ n + 1
+  loop 0
 
   putStrLn "All done - network can be stopped now"
 
