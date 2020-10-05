@@ -10,6 +10,8 @@ import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad (unless)
 import           Control.Monad.Catch (catch)
+import           Data.Aeson
+import           Data.Aeson.TH
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Foldable (fold)
@@ -18,6 +20,7 @@ import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
 import           Data.String (IsString)
+import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import           Network.Web3 (runWeb3)
@@ -155,6 +158,12 @@ runEthereum runDir = withGeth runDir $ do
   let contract = "solidity/helloWorld.sol"
   putStrLn $ "Compiling " <> contract
 
+  config :: ContractConfig <- case
+      eitherDecode "{\"programId\":\"GruoV4CLWxRazyqgfsJw3B1VbLxdgb7zGFyAEtj7xZ9P\",\"accountId\":\"DPpr2MjTSSzpGMxmXHVs4GrVcrwJ8sCeBQv5HkbTdWsm\"}"
+    of
+      Right c -> pure c
+      Left e -> fail $ show e
+
   h <- openFile "/dev/null" ReadMode
   do
     let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
@@ -192,12 +201,10 @@ runEthereum runDir = withGeth runDir $ do
           Left e -> fail $ show e
           Right rlp -> do
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
-            let programId = "BxTsQPphg8fRbaTyp1w5MEaKwjkyjrFFsKaTWZUe6R9S"
-            let storageId = "2Ctk8ebnzksHakhHs1ZioKDf7gLgZRUxb7NGnFRwNBLM"
             let p = (proc solanaBridgeToolPath
                       [ "call"
-                      , "--program-id", programId
-                      , "--storage-id", storageId
+                      , "--program-id", T.unpack $ _contractConfig_programId config
+                      , "--storage-id", T.unpack $ _contractConfig_accountId config
                       -- , "--payer", "/dev/null"
                       , "--instruction", (if n == 0 then "01" else "02") <> T.unpack rlp
                       ])
@@ -212,6 +219,11 @@ runEthereum runDir = withGeth runDir $ do
 
   putStrLn "All done - network can be stopped now"
 
+
+data ContractConfig = ContractConfig
+ { _contractConfig_programId :: Text
+ , _contractConfig_accountId :: Text
+ } deriving (Show, Eq, Ord)
 
 solcPath :: FilePath
 solcPath = $(staticWhich "solc")
@@ -297,3 +309,6 @@ voteAccountKeypair :: T.Text
 voteAccountKeypair = "[183,84,232,40,36,248,21,231,135,120,104,233,237,92,143,38,177,127,63,199,44,101,82,126,213,199,20,227,73,253,234,87,160,1,85,103,20,207,0,131,28,53,240,217,131,246,147,9,136,69,122,225,14,34,195,97,242,39,224,85,152,209,183,249]"
 stakeAccountKeypair :: T.Text
 stakeAccountKeypair = "[55,217,78,20,228,230,230,89,66,11,131,181,64,47,247,36,11,78,76,54,43,57,160,189,228,203,8,66,0,233,135,3,159,165,84,42,226,126,129,204,24,141,148,117,233,154,29,94,204,98,176,43,7,76,26,23,146,121,196,145,159,152,8,111]"
+
+deriveJSON (defaultOptions { fieldLabelModifier = dropWhile ('_' ==) . dropWhile ('_' /=) . dropWhile ('_' ==) })
+  ''ContractConfig

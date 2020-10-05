@@ -11,6 +11,7 @@ executable solana-bridges
   default-language:    Haskell2010
   ghc-options:         -Wall
   build-depends:       base >=4.13 && <4.14
+                     , aeson
                      , async
                      , bytestring
                      , containers
