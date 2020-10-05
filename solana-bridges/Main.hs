@@ -156,11 +156,14 @@ runEthereum runDir = withGeth runDir $ do
   putStrLn $ "Compiling " <> contract
 
   h <- openFile "/dev/null" ReadMode
-  let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
-        { std_out = UseHandle h
-        , std_err = UseHandle h
-        }
-  void $ readCreateProcessWithExitCode p ""
+  do
+    let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
+          { std_out = UseHandle h
+          , std_err = UseHandle h
+          }
+    readCreateProcessWithExitCode p "" >>= \case
+      good@(ExitSuccess, _, _) -> print good
+      bad -> error $ show bad
   bin <- BS.readFile "solidity/HelloWorld.bin"
 
   runWeb3 (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
@@ -189,8 +192,23 @@ runEthereum runDir = withGeth runDir $ do
           Left e -> fail $ show e
           Right rlp -> do
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
+            let programId = "BxTsQPphg8fRbaTyp1w5MEaKwjkyjrFFsKaTWZUe6R9S"
+            let storageId = "2Ctk8ebnzksHakhHs1ZioKDf7gLgZRUxb7NGnFRwNBLM"
+            let p = (proc solanaBridgeToolPath
+                      [ "call"
+                      , "--program-id", programId
+                      , "--storage-id", storageId
+                      -- , "--payer", "/dev/null"
+                      , "--instruction", (if n == 0 then "01" else "02") <> T.unpack rlp
+                      ])
+                  { std_out = UseHandle h
+                  , std_err = UseHandle h
+                  }
+            readCreateProcessWithExitCode p "" >>= \case
+              good@(ExitSuccess, _, _) -> print good
+              bad -> error $ show bad
             loop $ n + 1
-  loop 0
+  Right _ <- loop 1
 
   putStrLn "All done - network can be stopped now"
 
@@ -212,6 +230,9 @@ solanaGenesisPath = $(staticWhich "solana-genesis")
 
 solanaFaucetPath :: FilePath
 solanaFaucetPath = $(staticWhich "solana-faucet")
+
+solanaBridgeToolPath :: FilePath
+solanaBridgeToolPath = $(staticWhich "solana-bridge-tool")
 
 genesisPath :: FilePath
 genesisPath = "ethereum/Genesis.json"
