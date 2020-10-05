@@ -48,22 +48,6 @@ pub struct TransactionData {
     pub bytes: Vec<u8>,
 }
 
-impl Encodable for TransactionData {
-    fn rlp_append(&self, stream: &mut RlpStream) {
-        stream.begin_list(1);
-        stream.append(&self.bytes);
-    }
-}
-
-impl Decodable for TransactionData {
-    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
-        let res = TransactionData {
-            bytes: serialized.val_at(0)?,
-        };
-        return Ok(res);
-    }
-}
-
 pub enum TransactionAction {
     Call(H160), //TODO: transfer?
     Create,
@@ -108,7 +92,7 @@ impl Encodable for Transaction {
         stream.append(&self.gas_limit);
         stream.append(&self.to);
         stream.append(&self.value);
-        stream.append(&self.data);
+        stream.append(&self.data.bytes);
         stream.append(&self.v);
         stream.append(&self.r);
         stream.append(&self.s);
@@ -123,7 +107,7 @@ impl Decodable for Transaction {
             gas_limit: serialized.val_at(2)?,
             to: serialized.val_at(3)?,
             value: serialized.val_at(4)?,
-            data: serialized.val_at(5)?,
+            data: TransactionData { bytes: serialized.val_at(5)? },
             v: serialized.val_at(6)?,
             r: serialized.val_at(7)?,
             s: serialized.val_at(8)?,

@@ -55,7 +55,6 @@ mod test {
         let instruction_init: Vec<u8> = Instruction::Initialize(block_400000).pack();
         let instruction_new: Vec<u8> = Instruction::NewBlock(block_400001).pack();
 
-
         let accounts = vec![account];
         process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
@@ -122,8 +121,11 @@ mod test {
         assert_eq!(header_400k.difficulty, U256::from(6022643743806 as u64));
         assert_eq!(hash_header(&header_400k, false), H256::from_str("5d15649e25d8f3e2c0374946078539d200710afc977cdfc6a977bd23f20fa8e8").map_err(|_| TestError::HexError)?);
 
-        let test_block_1: Block = decode_rlp(TEST_BLOCK_0_TX)?;
-        assert_eq!(test_block_1.header.number, 4);
+        let test_block_0_tx: Block = decode_rlp(TEST_BLOCK_0_TX)?;
+        assert_eq!(test_block_0_tx.header.number, 4);
+
+        let test_block_1_tx: Block = decode_rlp(TEST_BLOCK_1_TX)?;
+        assert_eq!(test_block_0_tx.header.number, 4);
 
         return Ok(());
     }
