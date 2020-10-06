@@ -218,7 +218,7 @@ let
     sha256 = solana-ethereum-client-dep-sha256;
   };
 
-  solana-ethereum-client = nixpkgs.rustPlatform.buildRustPackage {
+  mk-solana-ethereum-client = cargoBuildFlags: nixpkgs.rustPlatform.buildRustPackage {
     name = "solana-ethereum-client";
     src = solana-ethereum-client-src;
     #cargoVendorDir = solana-ethereum-client-dep-srcs;
@@ -226,14 +226,21 @@ let
     #buildInputs = [ rustPackages.rust-std ];
     verifyCargoDeps = true;
 
+    inherit cargoBuildFlags;
+
     cargoSha256 = solana-ethereum-client-dep-sha256;
   };
 
   client-tool = (import ./client-tool {pkgs = nixpkgs;}).package;
 
+  solana-ethereum-client-no-prog = mk-solana-ethereum-client [ ];
+
+  solana-ethereum-client-prog = mk-solana-ethereum-client [ "--features" "program" ];
+
 in {
   inherit nixpkgs shell solc solana solana-rust-bpf solana-llvm spl
-    solana-ethereum-client
+    solana-ethereum-client-prog
+    solana-ethereum-client-no-prog
     solana-ethereum-client-dep-srcs;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 
