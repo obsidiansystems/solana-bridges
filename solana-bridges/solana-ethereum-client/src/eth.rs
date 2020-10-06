@@ -167,33 +167,6 @@ pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
     return BlockHeader::decode(header_rlp).map_err(|_| CustomError::DecodeHeaderFailed.to_program_error());
 }
 
-pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
-    if !verify_block(&header, None) {
-        return Err(CustomError::VerifyHeaderFailed.to_program_error());
-    };
-
-    let mut initial = State {
-        headers: Vec::new(),
-    };
-
-    initial.headers.push(header);
-    return Ok(initial);
-}
-
-pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
-    let parent = match state.headers.get(state.headers.len() - 1) {
-        None => return Err(CustomError::NoParentBlock.to_program_error()),
-        Some(h) => h,
-    };
-
-    if !verify_block(&header, Some(parent)) {
-        return Err(CustomError::VerifyHeaderFailed.to_program_error());
-    };
-
-    state.headers.push(header);
-    return Ok(state);
-}
-
 pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool {
     let parent_check = match parent {
         None => true,
@@ -228,7 +201,7 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
 
 impl Sealed for State {}
 impl Pack for State {
-    const LEN: usize = 1 + BlockHeader::LEN * HEADER_HISTORY_SIZE;
+    const LEN: usize = mem::size_of::<usize>() + BlockHeader::LEN * HEADER_HISTORY_SIZE;
     fn pack_into_slice(&self, dst: &mut [u8]) {
         const LENGTH_SIZE: usize = mem::size_of::<usize>();
         let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
