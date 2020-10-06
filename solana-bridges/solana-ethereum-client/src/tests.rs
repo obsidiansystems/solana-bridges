@@ -60,7 +60,8 @@ mod test {
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
 
-        assert_eq!([2], data[0..1]);
+        assert_eq!(2, read_block_count(&data));
+        assert_eq!(400001, read_block_height(&data));
         return Ok(());
     }
 
