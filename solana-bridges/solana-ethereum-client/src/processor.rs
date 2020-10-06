@@ -1,9 +1,13 @@
 #![cfg(feature = "program")]
 
 use crate::{
-    eth::{State, initialize, new_block},
-    instruction::Instruction,
+    eth::*,
+    instruction::*,
+    parameters::*,
+    types::*,
 };
+
+use arrayref::{array_mut_ref, array_ref};
 
 use solana_sdk::{
     account_info::{next_account_info, AccountInfo},
@@ -31,14 +35,69 @@ pub fn process_instruction<'a>(
 
     guard_sufficient_storage(&account)?;
 
-    let new_state = match Instruction::unpack(instruction_data)? {
+    match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
-        Instruction::Initialize(block) => initialize(block),
-        Instruction::NewBlock(block) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, block),
+        Instruction::Initialize(block_header) => {
+            if !verify_block(&block_header, None) {
+                return Err(CustomError::VerifyHeaderFailed.to_program_error());
+            };
+
+            write_new_block(account, block_header)?;
+        }
+        Instruction::NewBlock(block_header) => match read_prev_block(account) {
+            Err(e) => return Err(e),
+            Ok(parent) => {
+                if !verify_block(&block_header, Some(&parent)) {
+                    return Err(CustomError::VerifyHeaderFailed.to_program_error());
+                };
+                write_new_block(account, block_header)?;
+            }
+        }
     };
 
-    account_serialize_data(account, &new_state?)?;
+    return Ok(());
+}
 
+pub fn read_block_count(data: &[u8]) -> u64 {
+    let count_src = array_ref![data, COUNT_OFFSET, COUNT_SIZE];
+    return u64::from_le_bytes(*count_src);
+}
+pub fn read_block_height(data: &[u8]) -> u64 {
+    let count_src = array_ref![data, HEIGHT_OFFSET, HEIGHT_SIZE];
+    return u64::from_le_bytes(*count_src);
+}
+
+pub fn write_block_count(data: &mut [u8], new_count: u64) {
+    let count_dst = array_mut_ref![data, COUNT_OFFSET, COUNT_SIZE];
+    *count_dst = new_count.to_le_bytes();
+}
+pub fn write_block_height(data: &mut [u8], new_height: u64) {
+    let height_dst = array_mut_ref![data, HEIGHT_OFFSET, HEIGHT_SIZE];
+    *height_dst = new_height.to_le_bytes();
+}
+
+pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramError> {
+    let data = account.try_borrow_mut_data()?;
+
+    match read_block_count(&data) {
+        0 => return Err(CustomError::NoParentBlock.to_program_error()),
+        count => {
+            let header_src = array_ref![data, BLOCKS_OFFSET + BlockHeader::LEN * ((count - 1) as usize), BlockHeader::LEN];
+            let header = BlockHeader::unpack_from_slice(header_src)?;
+            return Ok(header);
+        }
+    }
+}
+
+pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(), ProgramError> {
+    let mut data = account.try_borrow_mut_data()?;
+
+    let count = read_block_count(&data);
+    write_block_count(&mut data, count+1);
+    write_block_height(&mut data, header.number);
+
+    let header_dst = array_mut_ref![data, BLOCKS_OFFSET + BlockHeader::LEN * (count as usize), BlockHeader::LEN];
+    header.pack_into_slice(header_dst);
     return Ok(());
 }
 

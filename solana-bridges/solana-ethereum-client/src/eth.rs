@@ -1,4 +1,5 @@
 use crate::parameters::*;
+use crate::types::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
@@ -159,38 +160,11 @@ fn keccak256(bytes: &[u8]) -> H256 {
 }
 
 pub fn decode_block(block_rlp: &Rlp) -> Result<Block, ProgramError> {
-    return Block::decode(block_rlp).map_err(|_| ProgramError::InvalidInstructionData);
+    return Block::decode(block_rlp).map_err(|_| CustomError::DecodeBlockFailed.to_program_error());
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
-    return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
-}
-
-pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
-    if !verify_block(&header, None) {
-        return Err(ProgramError::InvalidInstructionData);
-    };
-
-    let mut initial = State {
-        headers: Vec::new(),
-    };
-
-    initial.headers.push(header);
-    return Ok(initial);
-}
-
-pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
-    let parent = match state.headers.get(state.headers.len() - 1) {
-        None => return Err(ProgramError::InvalidInstructionData),
-        Some(h) => h,
-    };
-
-    if !verify_block(&header, Some(parent)) {
-        return Err(ProgramError::InvalidInstructionData);
-    };
-
-    state.headers.push(header);
-    return Ok(state);
+    return BlockHeader::decode(header_rlp).map_err(|_| CustomError::DecodeHeaderFailed.to_program_error());
 }
 
 pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool {
@@ -204,7 +178,6 @@ pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool 
 
     let self_check =
         header.extra_data.bytes.len() <= 32;
-        // && verify_pow(header);
 
     return self_check && parent_check;
 }
@@ -218,7 +191,7 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let full_size = get_full_size(epoch);
 
     let mut cache = vec![0; cache_size];
-    make_cache(&mut cache, seed);
+    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
 
     let (_mix_hash, result) = hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
     let target = cross_boundary(header.difficulty);
@@ -228,7 +201,7 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
 
 impl Sealed for State {}
 impl Pack for State {
-    const LEN: usize = 1 + BlockHeader::LEN * HEADER_HISTORY_SIZE;
+    const LEN: usize = mem::size_of::<usize>() + BlockHeader::LEN * HEADER_HISTORY_SIZE;
     fn pack_into_slice(&self, dst: &mut [u8]) {
         const LENGTH_SIZE: usize = mem::size_of::<usize>();
         let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
@@ -264,7 +237,7 @@ impl Pack for ExtraData {
         dst[1..len+1].copy_from_slice(&self.bytes);
     }
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let (&size, rest) = src.split_first().ok_or(ProgramError::InvalidInstructionData)?;
+        let (&size, rest) = src.split_first().ok_or(CustomError::DecodeHeaderFailed.to_program_error())?;
         return Ok(ExtraData { bytes: rest[0..size as usize].to_vec() });
     }
 }

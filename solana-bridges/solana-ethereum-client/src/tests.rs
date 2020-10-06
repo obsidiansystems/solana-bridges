@@ -60,7 +60,8 @@ mod test {
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
 
-        assert_eq!([2], data[0..1]);
+        assert_eq!(2, read_block_count(&data));
+        assert_eq!(400001, read_block_height(&data));
         return Ok(());
     }
 
@@ -125,7 +126,8 @@ mod test {
         assert_eq!(test_block_0_tx.header.number, 4);
 
         let test_block_1_tx: Block = decode_rlp(TEST_BLOCK_1_TX)?;
-        assert_eq!(test_block_0_tx.header.number, 4);
+        assert_eq!(test_block_1_tx.header.number, 2);
+        assert_eq!(test_block_1_tx.transactions.len(), 1);
 
         return Ok(());
     }
