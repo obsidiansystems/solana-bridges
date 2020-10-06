@@ -21,6 +21,7 @@ let
           });
           web3 = doJailbreak (dontCheck (self.callCabal2nix "solana-bridges" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
+          ethereum-rlp = self.callCabal2nix "ethereum-rlp" sources.ethereum-rlp {};
         };
       });
   };

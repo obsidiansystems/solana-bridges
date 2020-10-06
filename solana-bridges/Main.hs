@@ -22,6 +22,7 @@ import           Data.Solidity.Prim.Address (Address)
 import           Data.String (IsString)
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import           Network.Web3 (runWeb3)
 import           Network.JsonRpc.TinyClient as Eth
@@ -39,6 +40,9 @@ import           System.Process (CreateProcess(..), StdStream(..), callCommand, 
 import           System.Which (staticWhich)
 import           System.Environment
 import           System.Exit
+import qualified Data.ByteString.Base16 as B16
+import qualified Blockchain.Data.RLP as RLP
+import qualified Data.ByteString as B
 
 main :: IO ()
 main = do
@@ -158,9 +162,8 @@ runEthereum runDir = withGeth runDir $ do
   let contract = "solidity/helloWorld.sol"
   putStrLn $ "Compiling " <> contract
 
-  config :: ContractConfig <- case
-      eitherDecode "{\"programId\":\"GruoV4CLWxRazyqgfsJw3B1VbLxdgb7zGFyAEtj7xZ9P\",\"accountId\":\"DPpr2MjTSSzpGMxmXHVs4GrVcrwJ8sCeBQv5HkbTdWsm\"}"
-    of
+  configData <- BS.readFile "steve.json"
+  config :: ContractConfig <- case eitherDecodeStrict' configData of
       Right c -> pure c
       Left e -> fail $ show e
 
@@ -188,6 +191,7 @@ runEthereum runDir = withGeth runDir $ do
         Left err -> putStrLn $ "Query failed: " <> show err
         Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
 
+  let loopStart = 1
   let loop n = do
         res <- catch
           (runWeb3 $ Eth.getBlockRlp n)
@@ -200,13 +204,18 @@ runEthereum runDir = withGeth runDir $ do
         case res of
           Left e -> fail $ show e
           Right rlp -> do
+            let
+              (blockData, "") = B16.decode $ T.encodeUtf8 rlp
+              RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
+              blockHeaderHex = B16.encode $ RLP.rlpSerialize blockHeader
+
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
-            let p = (proc solanaBridgeToolPath
+            let p = (proc solanaBridgeToolPath $ T.unpack <$>
                       [ "call"
-                      , "--program-id", T.unpack $ _contractConfig_programId config
-                      , "--storage-id", T.unpack $ _contractConfig_accountId config
+                      , "--program-id", _contractConfig_programId config
+                      , "--storage-id", _contractConfig_accountId config
                       -- , "--payer", "/dev/null"
-                      , "--instruction", (if n == 0 then "01" else "02") <> T.unpack rlp
+                      , "--instruction", (if n == loopStart then "01" else "02") <> T.decodeLatin1 blockHeaderHex
                       ])
                   { std_out = UseHandle h
                   , std_err = UseHandle h
@@ -215,7 +224,7 @@ runEthereum runDir = withGeth runDir $ do
               good@(ExitSuccess, _, _) -> print good
               bad -> error $ show bad
             loop $ n + 1
-  Right _ <- loop 1
+  Right _ <- loop loopStart
 
   putStrLn "All done - network can be stopped now"
 

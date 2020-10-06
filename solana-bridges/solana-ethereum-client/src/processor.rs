@@ -33,8 +33,8 @@ pub fn process_instruction<'a>(
 
     let new_state = match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
-        Instruction::Initialize(block) => initialize(block.header),
-        Instruction::NewBlock(block) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, block.header),
+        Instruction::Initialize(block) => initialize(block),
+        Instruction::NewBlock(block) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, block),
     };
 
     account_serialize_data(account, &new_state?)?;

@@ -13,12 +13,14 @@ executable solana-bridges
   build-depends:       base >=4.13 && <4.14
                      , aeson
                      , async
+                     , base16-bytestring
                      , bytestring
                      , containers
                      , exceptions
                      , directory
                      , lens
                      , mtl
+                     , ethereum-rlp
                      , process
                      , temporary
                      , text
