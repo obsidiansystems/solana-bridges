@@ -204,8 +204,7 @@ pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool 
     };
 
     let self_check =
-        header.extra_data.bytes.len() <= 32
-        && verify_pow(header);
+        header.extra_data.bytes.len() <= 32;
 
     return self_check && parent_check;
 }
@@ -219,7 +218,7 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let full_size = get_full_size(epoch);
 
     let mut cache = vec![0; cache_size];
-    make_cache(&mut cache, seed);
+    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
 
     let (_mix_hash, result) = hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
     let target = cross_boundary(header.difficulty);
