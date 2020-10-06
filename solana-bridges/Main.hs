@@ -40,6 +40,8 @@ import           System.Process (CreateProcess(..), StdStream(..), callCommand, 
 import           System.Which (staticWhich)
 import           System.Environment
 import           System.Exit
+import           Data.Word
+import Data.Maybe(fromMaybe)
 import qualified Data.ByteString.Base16 as B16
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.ByteString as B
@@ -48,9 +50,14 @@ main :: IO ()
 main = do
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
-  solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
   setup currentDir runDir
-  runEthereum runDir
+
+  configData <- BS.readFile "steve.json"
+  config :: ContractConfig <- case eitherDecodeStrict' configData of
+      Right c -> pure c
+      Left e -> fail $ show e
+
+  runEthereum runDir config
 
 data SolanaSpecialPaths = SolanaSpecialPaths
   { _solanaSpecialPaths_splToken :: !FilePath
@@ -157,15 +164,10 @@ createContract addr hex = Eth.Call
     , callNonce = Nothing
     }
 
-runEthereum :: FilePath -> IO ()
-runEthereum runDir = withGeth runDir $ do
+runEthereum :: FilePath -> ContractConfig -> IO ()
+runEthereum runDir config = withGeth runDir $ do
   let contract = "solidity/helloWorld.sol"
   putStrLn $ "Compiling " <> contract
-
-  configData <- BS.readFile "steve.json"
-  config :: ContractConfig <- case eitherDecodeStrict' configData of
-      Right c -> pure c
-      Left e -> fail $ show e
 
   h <- openFile "/dev/null" ReadMode
   do
@@ -191,7 +193,7 @@ runEthereum runDir = withGeth runDir $ do
         Left err -> putStrLn $ "Query failed: " <> show err
         Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
 
-  let loopStart = 1
+  let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop n = do
         res <- catch
           (runWeb3 $ Eth.getBlockRlp n)
@@ -232,6 +234,7 @@ runEthereum runDir = withGeth runDir $ do
 data ContractConfig = ContractConfig
  { _contractConfig_programId :: Text
  , _contractConfig_accountId :: Text
+ , _contractConfig_loopStart :: Maybe Word64
  } deriving (Show, Eq, Ord)
 
 solcPath :: FilePath
