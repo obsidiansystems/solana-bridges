@@ -125,7 +125,8 @@ mod test {
         assert_eq!(test_block_0_tx.header.number, 4);
 
         let test_block_1_tx: Block = decode_rlp(TEST_BLOCK_1_TX)?;
-        assert_eq!(test_block_0_tx.header.number, 4);
+        assert_eq!(test_block_1_tx.header.number, 2);
+        assert_eq!(test_block_1_tx.transactions.len(), 1);
 
         return Ok(());
     }
