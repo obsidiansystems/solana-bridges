@@ -1,4 +1,5 @@
 use crate::eth::*;
+use crate::types::*;
 use rlp::Rlp;
 use std::mem::size_of;
 
@@ -31,7 +32,7 @@ impl Instruction {
     }
 
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        let (&tag, rest) = input.split_first().ok_or(ProgramError::InvalidInstructionData)?;
+        let (&tag, rest) = input.split_first().ok_or(CustomError::UnpackInstructionFailed.to_program_error())?;
         return match tag {
             0 => Ok(Self::Noop),
             1 => {
@@ -42,7 +43,7 @@ impl Instruction {
                 let block = decode_block(&Rlp::new(rest))?;
                 Ok(Self::NewBlock(block))
             }
-            _ => return Err(ProgramError::InvalidInstructionData)
+            _ => return Err(CustomError::UnpackInstructionFailed.to_program_error())
         };
     }
 

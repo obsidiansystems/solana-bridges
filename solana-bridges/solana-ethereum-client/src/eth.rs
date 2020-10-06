@@ -1,4 +1,5 @@
 use crate::parameters::*;
+use crate::types::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
@@ -159,16 +160,16 @@ fn keccak256(bytes: &[u8]) -> H256 {
 }
 
 pub fn decode_block(block_rlp: &Rlp) -> Result<Block, ProgramError> {
-    return Block::decode(block_rlp).map_err(|_| ProgramError::InvalidInstructionData);
+    return Block::decode(block_rlp).map_err(|_| CustomError::DecodeBlockFailed.to_program_error());
 }
 
 pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
-    return BlockHeader::decode(header_rlp).map_err(|_| ProgramError::InvalidInstructionData);
+    return BlockHeader::decode(header_rlp).map_err(|_| CustomError::DecodeHeaderFailed.to_program_error());
 }
 
 pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
     if !verify_block(&header, None) {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(CustomError::VerifyHeaderFailed.to_program_error());
     };
 
     let mut initial = State {
@@ -181,12 +182,12 @@ pub fn initialize (header: BlockHeader) -> Result<State, ProgramError> {
 
 pub fn new_block (mut state: State, header: BlockHeader) -> Result<State, ProgramError> {
     let parent = match state.headers.get(state.headers.len() - 1) {
-        None => return Err(ProgramError::InvalidInstructionData),
+        None => return Err(CustomError::NoParentBlock.to_program_error()),
         Some(h) => h,
     };
 
     if !verify_block(&header, Some(parent)) {
-        return Err(ProgramError::InvalidInstructionData);
+        return Err(CustomError::VerifyHeaderFailed.to_program_error());
     };
 
     state.headers.push(header);
@@ -264,7 +265,7 @@ impl Pack for ExtraData {
         dst[1..len+1].copy_from_slice(&self.bytes);
     }
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let (&size, rest) = src.split_first().ok_or(ProgramError::InvalidInstructionData)?;
+        let (&size, rest) = src.split_first().ok_or(CustomError::DecodeHeaderFailed.to_program_error())?;
         return Ok(ExtraData { bytes: rest[0..size as usize].to_vec() });
     }
 }
