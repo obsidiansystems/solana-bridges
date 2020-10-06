@@ -3,6 +3,7 @@ pub mod eth;
 pub mod instruction;
 pub mod parameters;
 pub mod processor;
+pub mod types;
 
 #[cfg(test)]
 mod tests;

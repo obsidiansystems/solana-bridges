@@ -3,6 +3,7 @@
 use crate::{
     eth::{State, initialize, new_block},
     instruction::Instruction,
+    types::*,
 };
 
 use solana_sdk::{
@@ -34,7 +35,7 @@ pub fn process_instruction<'a>(
     let new_state = match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
         Instruction::Initialize(block) => initialize(block.header),
-        Instruction::NewBlock(block) => new_block(account_deserialize_data(account).map_err(|_| ProgramError::InvalidAccountData)?, block.header),
+        Instruction::NewBlock(block) => new_block(account_deserialize_data(account).map_err(|_| CustomError::DeserializeStorageFailed.to_program_error())?, block.header),
     };
 
     account_serialize_data(account, &new_state?)?;
