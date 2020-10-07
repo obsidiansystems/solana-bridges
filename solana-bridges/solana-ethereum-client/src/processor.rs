@@ -7,8 +7,6 @@ use crate::{
     types::*,
 };
 
-use arrayref::{array_mut_ref, array_ref};
-
 use solana_sdk::{
     account_info::{next_account_info, AccountInfo},
     entrypoint_deprecated::ProgramResult,
@@ -33,8 +31,6 @@ pub fn process_instruction<'a>(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    guard_sufficient_storage(&account)?;
-
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
         Instruction::Initialize(block_header) => {
@@ -58,31 +54,50 @@ pub fn process_instruction<'a>(
     return Ok(());
 }
 
-pub fn read_block_count(data: &[u8]) -> u64 {
-    let count_src = array_ref![data, COUNT_OFFSET, COUNT_SIZE];
-    return u64::from_le_bytes(*count_src);
-}
-pub fn read_block_height(data: &[u8]) -> u64 {
-    let count_src = array_ref![data, HEIGHT_OFFSET, HEIGHT_SIZE];
-    return u64::from_le_bytes(*count_src);
+pub fn interp(mut data: &[u8]) -> &Storage {
+    let block_len = data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    data = &data[..block_len];
+    // FIXME use proper DST stuff once it exists
+    let res: &Storage = unsafe { std::mem::transmute(data) };
+    debug_assert_eq!(res.headers.len(), block_len);
+    res
 }
 
-pub fn write_block_count(data: &mut [u8], new_count: u64) {
-    let count_dst = array_mut_ref![data, COUNT_OFFSET, COUNT_SIZE];
-    *count_dst = new_count.to_le_bytes();
+pub fn interp_mut(mut data: &mut [u8]) -> &mut Storage {
+    let block_len = data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    data = &mut data[..block_len];
+    // FIXME use proper DST stuff once it exists
+    let res: &mut Storage = unsafe { std::mem::transmute(data) };
+    debug_assert_eq!(res.headers.len(), block_len);
+    res
 }
-pub fn write_block_height(data: &mut [u8], new_height: u64) {
-    let height_dst = array_mut_ref![data, HEIGHT_OFFSET, HEIGHT_SIZE];
-    *height_dst = new_height.to_le_bytes();
+
+/// This is a number in [0, len * 2).
+///
+/// n in [0, len) means we've filled:
+///
+///   [height - n + 1, ... height]
+///
+/// n in [len, len * 2) means we've filled:
+///
+///   [height - n + 1 ... height, height - ring_len + 1 ... height - n]
+///
+pub fn normalize_count(data: &Storage, new_count: u64) -> u64 {
+    let len = data.headers.len() as u64;
+    let wrapped = new_count >= len;
+    new_count % len + if wrapped { len } else { 0 }
 }
 
 pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramError> {
-    let data = account.try_borrow_mut_data()?;
+    guard_sufficient_storage(&account)?;
+    let mut raw_data = account.try_borrow_mut_data()?;
+    let data = interp_mut(&mut *raw_data);
 
-    match read_block_count(&data) {
+    match u64::from_le_bytes(data.count) {
         0 => return Err(CustomError::NoParentBlock.to_program_error()),
         count => {
-            let header_src = array_ref![data, BLOCKS_OFFSET + BlockHeader::LEN * ((count - 1) as usize), BlockHeader::LEN];
+            let len = data.headers.len();
+            let ref header_src = data.headers[(count - 1) as usize % len];
             let header = BlockHeader::unpack_from_slice(header_src)?;
             return Ok(header);
         }
@@ -90,18 +105,21 @@ pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramErro
 }
 
 pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(), ProgramError> {
-    let mut data = account.try_borrow_mut_data()?;
+    guard_sufficient_storage(&account)?;
+    let mut raw_data = account.try_borrow_mut_data()?;
+    let data = interp_mut(&mut *raw_data);
 
-    let count = read_block_count(&data);
-    write_block_count(&mut data, count+1);
-    write_block_height(&mut data, header.number);
+    let count = u64::from_le_bytes(data.count);
+    data.count = normalize_count(data, count+1).to_le_bytes();
+    data.height = header.number.to_le_bytes();
 
-    let header_dst = array_mut_ref![data, BLOCKS_OFFSET + BlockHeader::LEN * (count as usize), BlockHeader::LEN];
-    header.pack_into_slice(header_dst);
+    let len = data.headers.len();
+    header.pack_into_slice(&mut data.headers[count as usize % len]);
     return Ok(());
 }
 
 pub fn account_deserialize_data (account: &AccountInfo) -> Result<State, ProgramError> {
+    guard_sufficient_storage(&account)?;
     let data = account.try_borrow_mut_data()?;
     return State::unpack_from_slice(&data);
 }
@@ -114,7 +132,7 @@ pub fn account_serialize_data (account: &AccountInfo, state: &State) -> Result<(
 }
 
 fn guard_sufficient_storage(account: &AccountInfo) -> Result<(), ProgramError> {
-    if State::LEN > account.data_len() {
+    if MIN_BUF_SIZE > account.data_len() {
         info!("Account data length too small for holding state");
         return Err(ProgramError::AccountDataTooSmall);
     }
