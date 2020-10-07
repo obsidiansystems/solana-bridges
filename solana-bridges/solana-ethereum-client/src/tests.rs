@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 
+use quickcheck_macros::quickcheck;
+
 use crate::{
     instruction::*,
     processor::*,
+    parameters::*,
 };
 
 use solana_sdk::{
@@ -19,6 +22,7 @@ solana_sdk::program_stubs!();
 mod test {
     use super::*;
     use crate::eth::*;
+    use crate::parameters::MIN_BUF_SIZE;
     use solana_sdk::clock::Epoch;
     use std::str::FromStr;
     use rlp::{Decodable, Encodable, Rlp};
@@ -26,7 +30,21 @@ mod test {
     use hex_literal::hex;
 
     #[test]
-    fn test_instructions() -> Result<(), TestError> {
+    fn headers_offset_correct() -> Result<(), TestError> {
+        let p0 = 0 as *const StorageScrach;
+        let p1 = p0 as *const Storage;
+        let p2 = unsafe { &(*p1).headers[0] as *const _ };
+        let offset = p2 as usize - p0 as usize;
+        assert_eq!(offset, BLOCKS_OFFSET);
+        Ok(())
+    }
+
+
+    #[quickcheck]
+    fn test_instructions(mut buf_len: usize) -> Result<(), TestError> {
+        if buf_len <= MIN_BUF_SIZE {
+            buf_len += MIN_BUF_SIZE;
+        }
         let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
         let header_400001 = decode_rlp(&hex_to_bytes(HEADER_400001)?)?;
 
@@ -36,7 +54,7 @@ mod test {
         let program_id = Pubkey::default();
         let key = Pubkey::default();
         let mut lamports = 0;
-        let mut data = vec![0;State::LEN];
+        let mut raw_data = vec![0; buf_len];
 
         let owner = Pubkey::default();
         let account = AccountInfo::new(
@@ -44,7 +62,7 @@ mod test {
             false,
             true,
             &mut lamports,
-            &mut data,
+            &mut raw_data,
             &owner,
             false,
             Epoch::default(),
@@ -60,8 +78,10 @@ mod test {
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
 
-        assert_eq!(2, read_block_count(&data));
-        assert_eq!(400001, read_block_height(&data));
+        let data = interp(&*raw_data);
+        assert_eq!(2 % data.headers.len(), data.offset.0);
+        assert_eq!(400001, data.height);
+        assert_eq!(2 >= data.headers.len(), data.full);
         return Ok(());
     }
 
