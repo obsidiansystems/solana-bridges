@@ -200,9 +200,9 @@ runRelayer config = do
 
     bad -> error $ show bad
 
-  let contractState = if highestBlock /= 0 || nextBlockOffset /= 0 || isFull /= 0
-        then Just $ succ highestBlock
-        else Nothing
+  let contractState = case (highestBlock, nextBlockOffset, isFull) of
+        (0, 0, 0) -> Nothing
+        _ -> Just $ succ highestBlock
 
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop n = do

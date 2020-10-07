@@ -94,10 +94,12 @@ pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramErro
     guard_sufficient_storage(&account)?;
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
-
-    if data.height == 0 || data.offset.0 == 0 && !data.full {
-        return Err(CustomError::NoParentBlock.to_program_error());
-    }
+    match data {
+        Storage { offset: Wrapping(0), full: false, .. } =>
+            return Err(CustomError::NoParentBlock.to_program_error()),
+        _ => (),
+    };
+    assert!(data.height != 0);
     let len = data.headers.len();
     let ref header_src = data.headers[(data.offset - Wrapping(1)).0 % len];
     let header = BlockHeader::unpack_from_slice(header_src)?;
