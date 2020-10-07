@@ -38,6 +38,10 @@ pub fn process_instruction<'a>(
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
         Instruction::Initialize(block) => {
+            if !account.is_signer {
+                info!("Account does not have the correct program id");
+                return Err(ProgramError::MissingRequiredSignature);
+            }
             if !verify_block(&block.header, None) {
                 return Err(CustomError::VerifyHeaderFailed.to_program_error());
             };
@@ -55,16 +59,16 @@ pub fn process_instruction<'a>(
         }
     };
 
-    return Ok(());
+    Ok(())
 }
 
 pub fn read_block_count(data: &[u8]) -> u64 {
     let count_src = array_ref![data, COUNT_OFFSET, COUNT_SIZE];
-    return u64::from_le_bytes(*count_src);
+    u64::from_le_bytes(*count_src)
 }
 pub fn read_block_height(data: &[u8]) -> u64 {
     let count_src = array_ref![data, HEIGHT_OFFSET, HEIGHT_SIZE];
-    return u64::from_le_bytes(*count_src);
+    u64::from_le_bytes(*count_src)
 }
 
 pub fn write_block_count(data: &mut [u8], new_count: u64) {

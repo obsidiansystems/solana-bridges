@@ -5,6 +5,9 @@ use crate::{
     processor::*,
 };
 
+use std::rc::Rc;
+use std::cell::RefCell;
+
 use solana_sdk::{
     account_info::{AccountInfo},
     pubkey::Pubkey,
@@ -39,16 +42,16 @@ mod test {
         let mut data = vec![0;State::LEN];
 
         let owner = Pubkey::default();
-        let account = AccountInfo::new(
-            &key,
-            false,
-            true,
-            &mut lamports,
-            &mut data,
-            &owner,
-            false,
-            Epoch::default(),
-        );
+        let account = AccountInfo {
+            key: &key,
+            is_signer: true,
+            is_writable: true,
+            lamports: Rc::new(RefCell::new(&mut lamports)),
+            data: Rc::new(RefCell::new(&mut data)),
+            owner: &owner,
+            executable: false,
+            rent_epoch: Epoch::default(),
+        };
 
         assert_eq!(block_400000.transactions.len(), 0);
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
