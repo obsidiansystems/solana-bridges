@@ -103,7 +103,8 @@ async function doAlloc(argv) {
 
     return {
         programId: programId.toBase58(),
-        accountId: storageAccount.publicKey.toBase58()
+        accountId: storageAccount.publicKey.toBase58(),
+        accountKey: Array.prototype.slice.call(storageAccount.secretKey),
     };
 
 };
@@ -114,25 +115,13 @@ function doCall(fn) {
     return async function (argv) {
         logger.log("args", argv);
 
-        const storageId = argv.storageId;
+        const storageId = argv.accountKey.publicKey;
         const programId = argv.programId;
         const payerAccount = argv.payer;
         logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
         const connection = new web3.Connection(argv.url);
         logger.log(await connection.getVersion());
-
-        // for (var i = 0; i < argv.signers.length ; ++i) {
-        //     const signer = argv.signers[i];
-        //     const signerAccount = await readAccount(signer);
-        //     logger.log("signer id:" + signerAccount.publicKey.toBase58());
-        //     signers.push(signerAccount);
-        // }
-
-        // const instructionData = argv.hasOwnProperty("instruction")
-        //     ? Buffer.from(argv.instruction, argv.instructionEncoding)
-        //     : Buffer.alloc(0)
-        //     ;
 
         const {instructionData, isSigner, isWritable} = await fn(argv);
 
@@ -144,12 +133,11 @@ function doCall(fn) {
         logger.log("txn", txn);
         logger.log("txn", JSON.stringify(txn));
 
-        let signers0 = argv.hasOwnProperty("signers")
-                ? ([payerAccount].concat(argv.signers))
+        let signers0 = isSigner
+                ? [payerAccount, argv.accountKey]
                 : [payerAccount]
                 ;
         logger.log("signers", signers0.map(x => x.publicKey.toBase58()));
-        // logger.log("signers", signers0);
 
         var v = await connection.simulateTransaction(
             txn,
@@ -158,7 +146,6 @@ function doCall(fn) {
         logger.log("simulation", JSON.stringify(v));
 
         var v = await web3.sendAndConfirmTransaction(connection,
-        // var v = await connection.sendTransaction(
             txn,
             signers0
             );
@@ -201,26 +188,20 @@ function callCmd (fn) {
 }
 
 function commandArgs(yargv) {
-    return yargv.options(
-      { 'storage-id' :
-        { demand: true
-        , coerce: arg => new web3.PublicKey(arg)
-        , alias: ['account-id']
-        }
-      , 'program-id' :
+    return (yargv.config("config", x => JSON.parse(fs.readFileSync(x)))
+     .options(
+      { 'program-id' :
         { demand: true
         , coerce: arg => new web3.PublicKey(arg)
         }
-      , 'signers' :
-        { array: true
-        , coerce: args => args.map(readAccountSync)
-        }
-
-      });
+      , 'account-key':
+       { demand: true
+       , coerce: arg => new web3.Account(typeof arg === "string" ? JSON.parse(arg) : arg)
+       }
+      }));
 }
 
 yargs
-    .config()
     .options(
         { 'url': { default: "http://localhost:8899" }
         , 'payer' :
@@ -237,7 +218,8 @@ yargs
         , callCmd(doAlloc))
 
     .command('noop', 'noop'
-        , (yargv) => commandArgs(yargv).options({ })
+        , (yargv) => commandArgs(yargv).options({
+        })
         , callCmd(doCall(noop)))
 
     .command('initialize', 'initialize'
@@ -253,14 +235,5 @@ yargs
             })
         , callCmd(doCall(newBlock)))
 
-    // .command('call', 'Call program'
-    //     , (yargv) => yargv.options(
-    //         { 'storage-id' : {demand: true}
-    //         , 'program-id' : {demand: true}
-    //         , 'signers' : {array: true}
-    //         , 'instruction': {}
-    //         , 'instruction-encoding': {default: 'hex'}
-    //         })
-    //     , callCmd(doCall))
     .help().alias('help', 'h').argv;
 
