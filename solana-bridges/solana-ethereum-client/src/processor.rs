@@ -37,20 +37,20 @@ pub fn process_instruction<'a>(
 
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
-        Instruction::Initialize(block) => {
-            if !verify_block(&block.header, None) {
+        Instruction::Initialize(block_header) => {
+            if !verify_block(&block_header, None) {
                 return Err(CustomError::VerifyHeaderFailed.to_program_error());
             };
 
-            write_new_block(account, block.header)?;
+            write_new_block(account, block_header)?;
         }
-        Instruction::NewBlock(block) => match read_prev_block(account) {
+        Instruction::NewBlock(block_header) => match read_prev_block(account) {
             Err(e) => return Err(e),
             Ok(parent) => {
-                if !verify_block(&block.header, Some(&parent)) {
+                if !verify_block(&block_header, Some(&parent)) {
                     return Err(CustomError::VerifyHeaderFailed.to_program_error());
                 };
-                write_new_block(account, block.header)?;
+                write_new_block(account, block_header)?;
             }
         }
     };
