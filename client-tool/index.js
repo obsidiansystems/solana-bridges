@@ -28,6 +28,9 @@ async function calcFees (connection, data, storageSize) {
 async function readAccount(filename) {
     return new web3.Account(JSON.parse(await fs.readFile(filename)));
 }
+function readAccountSync(filename) {
+    return new web3.Account(JSON.parse(fs.readFileSync(filename)));
+}
 async function readOrGenerateAccount(filename, hint) {
     if (!!filename) {
          return readAccount(filename);
@@ -39,62 +42,8 @@ async function readOrGenerateAccount(filename, hint) {
 }
 
 
-// todo solana cli can do this (better with check_elf patch)
-async function doDeploy(argv) {
-
-    const progData = await fs.readFile(argv.program);
-
-    const programAccount = await readOrGenerateAccount(argv.programId, "program");
-    logger.log ("program id:" + programAccount.publicKey.toBase58());
-
-    const storageAccount = await readOrGenerateAccount(argv.storageAccount, "storage");
-    logger.log ("storage id:" + storageAccount.publicKey.toBase58());
-
-    const payerAccount = await readAccount(argv.payer);
-    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
-
-    const connection = new web3.Connection(argv.url);
-    logger.log(await connection.getVersion());
-
-    const payerInfo = await connection.getAccountInfo(payerAccount.publicKey);
-
-    if (null !== await connection.getAccountInfo(programAccount.publicKey)) {
-        logger.log("already deployed");
-        return;
-    }
-
-    const fees = await calcFees(connection, progData, argv.space);
-
-    logger.log( "payer balance: " + payerInfo.lamports);
-    logger.log( "deployment fees: " + fees);
-
-    if (fees > payerInfo.lamports) {
-        logger.log("balance too low");
-        process.exit(1);
-    }
-
-    const loaderVersion = argv.useDeprecatedLoader
-        ? web3.BPF_LOADER_DEPRECATED_PROGRAM_ID
-        : web3.BPF_LOADER_PROGRAM_ID
-        ;
-
-    logger.log("loaderVersion:" + loaderVersion);
-
-    var v = await web3.Loader.load(
-        connection,
-        payerAccount,
-        programAccount,
-        loaderVersion,
-        progData,
-        );
-
-    logger.log("loader result:" + v);
-    return {programId: programAccount.publicKey.toBase58()};
-}
-
 async function doAlloc(argv) {
-
-    const payerAccount = await readAccount(argv.payer);
+    const payerAccount = argv.payer;
     logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
     const storageAccount = await readOrGenerateAccount(argv.storageAccount, "storage");
@@ -154,36 +103,79 @@ async function doAlloc(argv) {
 
     return {
         programId: programId.toBase58(),
-        accountId: storageAccount.publicKey.toBase58()
+        accountId: storageAccount.publicKey.toBase58(),
+        accountKey: Array.prototype.slice.call(storageAccount.secretKey),
     };
 
 };
 
-async function doCall(argv) {
-    // logger.log(argv);
-
-    const storageId = new web3.PublicKey(argv.storageId);
-    const programId = new web3.PublicKey(argv.programId);
-
-    const connection = new web3.Connection(argv.url);
-    logger.log(await connection.getVersion());
-
-    const payerAccount = await readAccount(argv.payer);
-    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
 
-    const instructionData = argv.hasOwnProperty("instruction")
-        ? Buffer.from(argv.instruction, argv.instructionEncoding)
-        : Buffer.alloc(0)
-        ;
+function doCall(fn) {
+    return async function (argv) {
+        logger.log("args", argv);
 
-    const key = { pubkey:storageId ,isSigner:false, isWritable:true };
-    const txnI = { keys:[key] , programId, data: instructionData };
-    const txn = new web3.Transaction().add(new web3.TransactionInstruction(txnI));
-    logger.log(txn);
-    var v = await web3.sendAndConfirmTransaction(connection, txn, [payerAccount]);
-    logger.log(v);
-    return {};
+        const storageId = argv.accountKey.publicKey;
+        const programId = argv.programId;
+        const payerAccount = argv.payer;
+        logger.log ("payer id:" + payerAccount.publicKey.toBase58())
+
+        const connection = new web3.Connection(argv.url);
+        logger.log(await connection.getVersion());
+
+        const {instructionData, isSigner, isWritable} = await fn(argv);
+
+        const key = { pubkey:storageId ,isSigner, isWritable };
+        logger.log("key", key.pubkey.toBase58());
+        const txnI = { keys:[key] , programId, data: instructionData };
+
+        const txn = new web3.Transaction().add(new web3.TransactionInstruction(txnI));
+        logger.log("txn", txn);
+        logger.log("txn", JSON.stringify(txn));
+
+        let signers0 = isSigner
+                ? [payerAccount, argv.accountKey]
+                : [payerAccount]
+                ;
+        logger.log("signers", signers0.map(x => x.publicKey.toBase58()));
+
+        var v = await connection.simulateTransaction(
+            txn,
+            signers0
+            );
+        logger.log("simulation", JSON.stringify(v));
+
+        var v = await web3.sendAndConfirmTransaction(connection,
+            txn,
+            signers0
+            );
+        return {"sig": v};
+    };
+}
+
+
+async function noop(argv) {
+    return {
+        instructionData :Buffer.from("00", "hex"),
+        isSigner: false,
+        isWritable: false
+    };
+}
+async function initialize(argv) {
+    const instructionData = Buffer.from("01" + argv.instruction, argv.instructionEncoding);
+    return {
+        instructionData,
+        isSigner: true,
+        isWritable: true
+    };
+}
+async function newBlock(argv) {
+    const instructionData = Buffer.from("02" + argv.instruction, argv.instructionEncoding);
+    return {
+        instructionData,
+        isSigner: false,
+        isWritable: true
+    };
 }
 
 function callCmd (fn) {
@@ -195,20 +187,28 @@ function callCmd (fn) {
     };
 }
 
+function commandArgs(yargv) {
+    return (yargv.config("config", x => JSON.parse(fs.readFileSync(x)))
+     .options(
+      { 'program-id' :
+        { demand: true
+        , coerce: arg => new web3.PublicKey(arg)
+        }
+      , 'account-key':
+       { demand: true
+       , coerce: arg => new web3.Account(typeof arg === "string" ? JSON.parse(arg) : arg)
+       }
+      }));
+}
+
 yargs
     .options(
         { 'url': { default: "http://localhost:8899" }
-        , 'payer' : { default: process.env.HOME + "/.config/solana/id.json"}
+        , 'payer' :
+            { default: process.env.HOME + "/.config/solana/id.json"
+            , coerce: readAccountSync
+            }
         })
-    .command('deploy', 'Deploy program'
-        , (yargv) => yargv.options(
-            { 'program' : { demand: true }
-            , 'program-id' : {}
-            , 'space' : { demand : true, type: 'number' }
-            , 'storage-account' : {}
-            , 'use-deprecated-loader': {type: 'boolean', default: false}
-            })
-        , callCmd(doDeploy))
     .command('alloc', 'Deploy program'
         , (yargv) => yargv.options(
             { 'program-id' : {demand : true }
@@ -216,13 +216,24 @@ yargs
             , 'storage-account' : {}
             })
         , callCmd(doAlloc))
-    .command('call', 'Call program'
-        , (yargv) => yargv.options(
-            { 'storage-id' : {demand: true}
-            , 'program-id' : {demand: true}
-            , 'instruction': {}
+
+    .command('noop', 'noop'
+        , (yargv) => commandArgs(yargv).options({
+        })
+        , callCmd(doCall(noop)))
+
+    .command('initialize', 'initialize'
+        , (yargv) => commandArgs(yargv).options(
+            { 'instruction': {demand: true}
             , 'instruction-encoding': {default: 'hex'}
             })
-        , callCmd(doCall))
+        , callCmd(doCall(initialize)))
+    .command('new-block', 'new block'
+        , (yargv) => commandArgs(yargv).options(
+            { 'instruction': {demand: true}
+            , 'instruction-encoding': {default: 'hex'}
+            })
+        , callCmd(doCall(newBlock)))
+
     .help().alias('help', 'h').argv;
 

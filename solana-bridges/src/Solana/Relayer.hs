@@ -59,7 +59,7 @@ mainRelayer = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      runRelayer config
+      runRelayer configFile config
 
     _ -> do
       putStrLn "USAGE: solana-bridges CONFIGFILE.json"
@@ -180,8 +180,8 @@ createContract addr hex = Eth.Call
     , callNonce = Nothing
     }
 
-runRelayer :: ContractConfig -> IO ()
-runRelayer config = do
+runRelayer :: FilePath -> ContractConfig -> IO ()
+runRelayer configFile config = do
   h <- openFile "/dev/null" ReadMode
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
@@ -195,7 +195,6 @@ runRelayer config = do
       x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
       () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
       x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      -- TODO, runGet is partial
       bimap (view _3) (view _3) $ runGetOrFail ((,,) <$> getWord64le <*> getWord64le <*> getWord8) $ LBS.fromStrict x2
 
     bad -> error $ show bad
@@ -224,17 +223,13 @@ runRelayer config = do
 
             T.putStrLn $ T.pack (show n) <> ": " <> rlp
             let p = (proc solanaBridgeToolPath $ T.unpack <$>
-                      [ "call"
-                      , "--program-id", _contractConfig_programId config
-                      , "--storage-id", _contractConfig_accountId config
+                      [ (if n == loopStart then "initialize" else "new-block")
+                      , "--config", T.pack configFile
                       -- , "--payer", "/dev/null"
-                      , "--instruction", (if n == loopStart then "01" else "02") <> T.decodeLatin1 blockHeaderHex
+                      , "--instruction", T.decodeLatin1 blockHeaderHex
                       ])
-                  { std_out = UseHandle h
-                  , std_err = UseHandle h
-                  }
             readCreateProcessWithExitCode p "" >>= \case
-              (ExitSuccess, _, _) -> pure ()
+              (ExitSuccess, txn, _) -> putStrLn txn
               bad -> error $ show bad
             loop $ n + 1
 
