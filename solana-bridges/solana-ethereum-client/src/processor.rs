@@ -36,6 +36,14 @@ pub fn process_instruction<'a>(
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
         Instruction::Initialize(block_header) => {
+            {
+                let raw_data = account.try_borrow_data()?;
+                let data = interp(&*raw_data);
+                match data {
+                    Storage { height: 0, offset: Wrapping(0), full: false, .. } => (),
+                    _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
+                };
+            }
             if !verify_block(&block_header, None) {
                 return Err(CustomError::VerifyHeaderFailed.to_program_error());
             };
@@ -56,6 +64,7 @@ pub fn process_instruction<'a>(
     return Ok(());
 }
 
+#[inline]
 pub fn interp(raw_data: &[u8]) -> &Storage {
     let raw_len = raw_data.len();
     let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
@@ -68,6 +77,7 @@ pub fn interp(raw_data: &[u8]) -> &Storage {
     res
 }
 
+#[inline]
 pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
     let raw_len = raw_data.len();
     let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
