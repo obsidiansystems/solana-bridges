@@ -189,18 +189,20 @@ runRelayer config = do
         , "--output", "json"
         ]
 
-  (seenBlocks, highetstBlock) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+  (highestBlock, nextBlockOffset, isFull) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
     (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
       x :: Value <- eitherDecode' accountData
       x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
       () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
       x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
       -- TODO, runGet is partial
-      bimap (view _3) (view _3) $ runGetOrFail ((,) <$> getWord64le <*> getWord64le) $ LBS.fromStrict x2
+      bimap (view _3) (view _3) $ runGetOrFail ((,,) <$> getWord64le <*> getWord64le <*> getWord8) $ LBS.fromStrict x2
 
     bad -> error $ show bad
 
-  let contractState = if (seenBlocks /= 0) then Just $ succ highetstBlock else Nothing
+  let contractState = if highestBlock /= 0 || nextBlockOffset /= 0 || isFull /= 0
+        then Just $ succ highestBlock
+        else Nothing
 
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop n = do
