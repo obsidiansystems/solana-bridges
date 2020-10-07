@@ -1,5 +1,7 @@
 #![cfg(feature = "program")]
 
+use std::num::Wrapping;
+
 use crate::{
     eth::*,
     instruction::*,
@@ -54,38 +56,28 @@ pub fn process_instruction<'a>(
     return Ok(());
 }
 
-pub fn interp(mut data: &[u8]) -> &Storage {
-    let block_len = data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
-    data = &data[..block_len];
+pub fn interp(raw_data: &[u8]) -> &Storage {
+    let raw_len = raw_data.len();
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    let hacked_data = &raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
-    let res: &Storage = unsafe { std::mem::transmute(data) };
+    let res: &Storage = unsafe { std::mem::transmute(hacked_data) };
+    // because no stride != size
+    debug_assert!(std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN);
     debug_assert_eq!(res.headers.len(), block_len);
     res
 }
 
-pub fn interp_mut(mut data: &mut [u8]) -> &mut Storage {
-    let block_len = data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
-    data = &mut data[..block_len];
+pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
+    let raw_len = raw_data.len();
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    let hacked_data = &mut raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
-    let res: &mut Storage = unsafe { std::mem::transmute(data) };
+    let res: &mut Storage = unsafe { std::mem::transmute(hacked_data) };
+    // because no stride != size
+    debug_assert!(std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN);
     debug_assert_eq!(res.headers.len(), block_len);
     res
-}
-
-/// This is a number in [0, len * 2).
-///
-/// n in [0, len) means we've filled:
-///
-///   [height - n + 1, ... height]
-///
-/// n in [len, len * 2) means we've filled:
-///
-///   [height - n + 1 ... height, height - ring_len + 1 ... height - n]
-///
-pub fn normalize_count(data: &Storage, new_count: usize) -> usize {
-    let len = data.headers.len();
-    let wrapped = new_count >= len;
-    new_count % len + if wrapped { len } else { 0 }
 }
 
 pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramError> {
@@ -93,15 +85,13 @@ pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramErro
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
 
-    match data.count {
-        0 => return Err(CustomError::NoParentBlock.to_program_error()),
-        count => {
-            let len = data.headers.len();
-            let ref header_src = data.headers[(count - 1) as usize % len];
-            let header = BlockHeader::unpack_from_slice(header_src)?;
-            return Ok(header);
-        }
+    if data.height == 0 || data.offset.0 == 0 && !data.full {
+        return Err(CustomError::NoParentBlock.to_program_error());
     }
+    let len = data.headers.len();
+    let ref header_src = data.headers[(data.offset - Wrapping(1)).0 % len];
+    let header = BlockHeader::unpack_from_slice(header_src)?;
+    Ok(header)
 }
 
 pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(), ProgramError> {
@@ -109,12 +99,12 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
 
-    let count = data.count;
-    data.count = normalize_count(data, count + 1);
+    let old_offset = data.offset;
+    data.offset = (old_offset + Wrapping(1)) % Wrapping(data.headers.len());
+    data.full |= data.offset <= old_offset;
     data.height = header.number;
 
-    let len = data.headers.len();
-    header.pack_into_slice(&mut data.headers[count as usize % len]);
+    header.pack_into_slice(&mut data.headers[data.offset.0]);
     return Ok(());
 }
 

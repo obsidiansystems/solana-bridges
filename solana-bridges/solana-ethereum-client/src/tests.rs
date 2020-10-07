@@ -5,6 +5,7 @@ use quickcheck_macros::quickcheck;
 use crate::{
     instruction::*,
     processor::*,
+    parameters::*,
 };
 
 use solana_sdk::{
@@ -27,6 +28,17 @@ mod test {
     use rlp::{Decodable, Encodable, Rlp};
     use ethereum_types::{U256, H64, H160, H256, Bloom};
     use hex_literal::hex;
+
+    #[test]
+    fn headers_offset_correct() -> Result<(), TestError> {
+        let p0 = 0 as *const StorageScrach;
+        let p1 = p0 as *const Storage;
+        let p2 = unsafe { &(*p1).headers[0] as *const _ };
+        let offset = p2 as usize - p0 as usize;
+        assert_eq!(offset, BLOCKS_OFFSET);
+        Ok(())
+    }
+
 
     #[quickcheck]
     fn test_instructions(mut buf_len: usize) -> Result<(), TestError> {
@@ -67,8 +79,9 @@ mod test {
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
 
         let data = interp(&*raw_data);
-        assert_eq!(normalize_count(data, 2), data.count);
+        assert_eq!(2 % data.headers.len(), data.offset.0);
         assert_eq!(400001, data.height);
+        assert_eq!(2 >= data.headers.len(), data.full);
         return Ok(());
     }
 
