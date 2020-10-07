@@ -82,8 +82,8 @@ pub fn interp_mut(mut data: &mut [u8]) -> &mut Storage {
 ///
 ///   [height - n + 1 ... height, height - ring_len + 1 ... height - n]
 ///
-pub fn normalize_count(data: &Storage, new_count: u64) -> u64 {
-    let len = data.headers.len() as u64;
+pub fn normalize_count(data: &Storage, new_count: usize) -> usize {
+    let len = data.headers.len();
     let wrapped = new_count >= len;
     new_count % len + if wrapped { len } else { 0 }
 }
@@ -93,7 +93,7 @@ pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramErro
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
 
-    match u64::from_le_bytes(data.count) {
+    match data.count {
         0 => return Err(CustomError::NoParentBlock.to_program_error()),
         count => {
             let len = data.headers.len();
@@ -109,9 +109,9 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
 
-    let count = u64::from_le_bytes(data.count);
-    data.count = normalize_count(data, count+1).to_le_bytes();
-    data.height = header.number.to_le_bytes();
+    let count = data.count;
+    data.count = normalize_count(data, count + 1);
+    data.height = header.number;
 
     let len = data.headers.len();
     header.pack_into_slice(&mut data.headers[count as usize % len]);

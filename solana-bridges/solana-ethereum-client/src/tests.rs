@@ -67,8 +67,8 @@ mod test {
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
 
         let data = interp(&*raw_data);
-        assert_eq!(normalize_count(data, 2), u64::from_le_bytes(data.count));
-        assert_eq!(400001, u64::from_le_bytes(data.height));
+        assert_eq!(normalize_count(data, 2), data.count);
+        assert_eq!(400001, data.height);
         return Ok(());
     }
 
