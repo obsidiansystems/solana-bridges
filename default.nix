@@ -17,7 +17,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana] ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = doJailbreak (dontCheck (self.callCabal2nix "solana-bridges" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
@@ -176,6 +176,7 @@ let
         go-ethereum solana
         xargo rustup cargo-deps cargo-watch
         shellcheck ninja cmake
+        jq
         client-tool
       ]);
 
