@@ -37,24 +37,24 @@ pub fn process_instruction<'a>(
 
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
-        Instruction::Initialize(block) => {
+        Instruction::Initialize(block_header) => {
             if !account.is_signer {
                 info!("Account does not have the correct program id");
                 return Err(ProgramError::MissingRequiredSignature);
             }
-            if !verify_block(&block.header, None) {
+            if !verify_block(&block_header, None) {
                 return Err(CustomError::VerifyHeaderFailed.to_program_error());
             };
 
-            write_new_block(account, block.header)?;
+            write_new_block(account, block_header)?;
         }
-        Instruction::NewBlock(block) => match read_prev_block(account) {
+        Instruction::NewBlock(block_header) => match read_prev_block(account) {
             Err(e) => return Err(e),
             Ok(parent) => {
-                if !verify_block(&block.header, Some(&parent)) {
+                if !verify_block(&block_header, Some(&parent)) {
                     return Err(CustomError::VerifyHeaderFailed.to_program_error());
                 };
-                write_new_block(account, block.header)?;
+                write_new_block(account, block_header)?;
             }
         }
     };

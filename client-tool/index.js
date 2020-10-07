@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const logger = new console.Console(process.stderr, process.stderr);
 const web3 = require("@solana/web3.js");
 const fs = require("mz/fs");
 const yargs = require("yargs");
@@ -32,7 +33,7 @@ async function readOrGenerateAccount(filename, hint) {
          return readAccount(filename);
     } else {
         var programAccount = new web3.Account();
-        console.log(hint + " keypair:" + JSON.stringify(Array.prototype.slice.call(programAccount.secretKey)));
+        logger.log(hint + " keypair:" + JSON.stringify(Array.prototype.slice.call(programAccount.secretKey)));
         return programAccount;
     }
 }
@@ -44,31 +45,31 @@ async function doDeploy(argv) {
     const progData = await fs.readFile(argv.program);
 
     const programAccount = await readOrGenerateAccount(argv.programId, "program");
-    console.log ("program id:" + programAccount.publicKey.toBase58());
+    logger.log ("program id:" + programAccount.publicKey.toBase58());
 
     const storageAccount = await readOrGenerateAccount(argv.storageAccount, "storage");
-    console.log ("storage id:" + storageAccount.publicKey.toBase58());
+    logger.log ("storage id:" + storageAccount.publicKey.toBase58());
 
     const payerAccount = await readAccount(argv.payer);
-    console.log ("payer id:" + payerAccount.publicKey.toBase58())
+    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
     const connection = new web3.Connection(argv.url);
-    console.log(await connection.getVersion());
+    logger.log(await connection.getVersion());
 
     const payerInfo = await connection.getAccountInfo(payerAccount.publicKey);
 
     if (null !== await connection.getAccountInfo(programAccount.publicKey)) {
-        console.log("already deployed");
+        logger.log("already deployed");
         return;
     }
 
     const fees = await calcFees(connection, progData, argv.space);
 
-    console.log( "payer balance: " + payerInfo.lamports);
-    console.log( "deployment fees: " + fees);
+    logger.log( "payer balance: " + payerInfo.lamports);
+    logger.log( "deployment fees: " + fees);
 
     if (fees > payerInfo.lamports) {
-        console.log("balance too low");
+        logger.log("balance too low");
         process.exit(1);
     }
 
@@ -77,7 +78,7 @@ async function doDeploy(argv) {
         : web3.BPF_LOADER_PROGRAM_ID
         ;
 
-    console.log("loaderVersion:" + loaderVersion);
+    logger.log("loaderVersion:" + loaderVersion);
 
     var v = await web3.Loader.load(
         connection,
@@ -87,22 +88,22 @@ async function doDeploy(argv) {
         progData,
         );
 
-    console.log("loader result:" + v);
+    logger.log("loader result:" + v);
     return {programId: programAccount.publicKey.toBase58()};
 }
 
 async function doAlloc(argv) {
 
     const payerAccount = await readAccount(argv.payer);
-    console.log ("payer id:" + payerAccount.publicKey.toBase58())
+    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
     const storageAccount = await readOrGenerateAccount(argv.storageAccount, "storage");
-    console.log ("storage id:" + storageAccount.publicKey.toBase58());
+    logger.log ("storage id:" + storageAccount.publicKey.toBase58());
 
     const programId = new web3.PublicKey(argv.programId);
 
     const connection = new web3.Connection(argv.url);
-    console.log(await connection.getVersion());
+    logger.log(await connection.getVersion());
 
     const fees = await calcFees(connection, new Buffer(0), argv.space);
 
@@ -115,16 +116,16 @@ async function doAlloc(argv) {
             , programId: programId
             }))
         ;
-    console.log(await progAcctTxn)
-    console.log("storageAccount:" + storageAccount.publicKey.toBase58());
+    logger.log(await progAcctTxn)
+    logger.log("storageAccount:" + storageAccount.publicKey.toBase58());
 
     const payerInfo = await connection.getAccountInfo(payerAccount.publicKey);
 
-    console.log( "payer balance: " + payerInfo.lamports);
-    console.log( "deployment fees: " + fees);
+    logger.log( "payer balance: " + payerInfo.lamports);
+    logger.log( "deployment fees: " + fees);
 
     if (fees > payerInfo.lamports) {
-        console.log("balance too low");
+        logger.log("balance too low");
         process.exit(1);
     }
 
@@ -134,7 +135,7 @@ async function doAlloc(argv) {
         [payerAccount, storageAccount],
         {skipPreflight: true, commitment: 'recent'});
 
-    console.log("alloc txn id: " + await v);
+    logger.log("alloc txn id: " + await v);
 
     const sleep = (milliseconds) => {
       return new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -144,12 +145,12 @@ async function doAlloc(argv) {
     while (stgInfo === null) {
         stgInfo = await connection.getAccountInfo(storageAccount.publicKey);
         if (stgInfo === null) {
-            console.log("...");
+            logger.log("...");
             await sleep(1000);
         }
     }
-    console.log(stgInfo);
-    console.log("owner:" + stgInfo.owner.toBase58());
+    logger.log(stgInfo);
+    logger.log("owner:" + stgInfo.owner.toBase58());
 
     return {
         programId: programId.toBase58(),
@@ -159,16 +160,16 @@ async function doAlloc(argv) {
 };
 
 async function doCall(argv) {
-    // console.log(argv);
+    // logger.log(argv);
 
     const storageId = new web3.PublicKey(argv.storageId);
     const programId = new web3.PublicKey(argv.programId);
 
     const connection = new web3.Connection(argv.url);
-    console.log(await connection.getVersion());
+    logger.log(await connection.getVersion());
 
     const payerAccount = await readAccount(argv.payer);
-    console.log ("payer id:" + payerAccount.publicKey.toBase58())
+    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
 
     const instructionData = argv.hasOwnProperty("instruction")
@@ -179,9 +180,9 @@ async function doCall(argv) {
     const key = { pubkey:storageId ,isSigner:false, isWritable:true };
     const txnI = { keys:[key] , programId, data: instructionData };
     const txn = new web3.Transaction().add(new web3.TransactionInstruction(txnI));
-    console.log(txn);
+    logger.log(txn);
     var v = await web3.sendAndConfirmTransaction(connection, txn, [payerAccount]);
-    console.log(v);
+    logger.log(v);
     return {};
 }
 
@@ -189,7 +190,7 @@ function callCmd (fn) {
     return function (argv) {
         return fn(argv)
             .then(result => {process.stdout.write(JSON.stringify(result)); process.exit();})
-            .catch(bad => {console.error(bad); process.exit(99)})
+            .catch(bad => {logger.error(bad); process.exit(99)})
             ;
     };
 }

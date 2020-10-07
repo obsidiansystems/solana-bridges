@@ -19,8 +19,9 @@ let
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
             executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
-          web3 = markUnbroken (doJailbreak (dontCheck super.web3));
+          web3 = doJailbreak (dontCheck (self.callCabal2nix "solana-bridges" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
+          ethereum-rlp = self.callCabal2nix "ethereum-rlp" sources.ethereum-rlp {};
         };
       });
   };
@@ -168,7 +169,8 @@ let
 
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
-    packages = p: [ p.solana-bridges ];
+    #packages = p: with p; [ solana-bridges web3 ];
+    packages = p: with p; [ solana-bridges ];
     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
       [ cabal-install ghcid hlint
         go-ethereum solana

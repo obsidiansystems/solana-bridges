@@ -55,8 +55,8 @@ mod test {
 
         assert_eq!(block_400000.transactions.len(), 0);
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-        let instruction_init: Vec<u8> = Instruction::Initialize(block_400000).pack();
-        let instruction_new: Vec<u8> = Instruction::NewBlock(block_400001).pack();
+        let instruction_init: Vec<u8> = Instruction::Initialize(block_400000.header).pack();
+        let instruction_new: Vec<u8> = Instruction::NewBlock(block_400001.header).pack();
 
         let accounts = vec![account];
         process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
