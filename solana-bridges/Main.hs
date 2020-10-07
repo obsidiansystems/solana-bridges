@@ -15,7 +15,6 @@ import           Data.Aeson.TH
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Foldable (fold)
-import           Data.Function ((&))
 import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
@@ -43,21 +42,37 @@ import           System.Exit
 import           Data.Word
 import Data.Maybe(fromMaybe)
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Base64 as Base64
 import qualified Blockchain.Data.RLP as RLP
-import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as LBS
+import qualified System.Process.ByteString.Lazy
+import Control.Lens
+import Data.Aeson.Lens (_String, key, nth)
+import Data.Binary.Get
+import Control.Concurrent.Async
+import Data.Traversable
 
 main :: IO ()
 main = do
+  cmd <- getArgs
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
-  setup currentDir runDir
 
   configData <- BS.readFile "steve.json"
   config :: ContractConfig <- case eitherDecodeStrict' configData of
       Right c -> pure c
       Left e -> fail $ show e
 
-  runEthereum runDir config
+  void $ (waitAny =<<) $ for cmd $ \case
+    "eth-network" -> async $ do
+      setupEth currentDir runDir
+      runEthereum runDir
+    "sol-network" -> async $ do
+      solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
+      setupSolana runDir solanaSpecialPaths
+    "relayer" -> async $ do
+      runRelayer config
+
 
 data SolanaSpecialPaths = SolanaSpecialPaths
   { _solanaSpecialPaths_splToken :: !FilePath
@@ -140,8 +155,8 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
   pure ()
 
 
-setup :: FilePath -> FilePath -> IO ()
-setup currentDir runDir = do
+setupEth :: FilePath -> FilePath -> IO ()
+setupEth currentDir runDir = do
   let latestSymlinks = currentDir <> "/.run-latest"
   let logsSymlink = logsSubdir latestSymlinks
   createDirectory latestSymlinks & allow isAlreadyExistsError
@@ -164,34 +179,28 @@ createContract addr hex = Eth.Call
     , callNonce = Nothing
     }
 
-runEthereum :: FilePath -> ContractConfig -> IO ()
-runEthereum runDir config = withGeth runDir $ do
-  let contract = "solidity/helloWorld.sol"
-  putStrLn $ "Compiling " <> contract
-
+runRelayer :: ContractConfig -> IO ()
+runRelayer config = do
   h <- openFile "/dev/null" ReadMode
-  do
-    let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
-          { std_out = UseHandle h
-          , std_err = UseHandle h
-          }
-    readCreateProcessWithExitCode p "" >>= \case
-      good@(ExitSuccess, _, _) -> print good
-      bad -> error $ show bad
-  bin <- BS.readFile "solidity/HelloWorld.bin"
+  let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
+        [ "account"
+        , _contractConfig_accountId config
+        , "--output", "json"
+        ]
 
-  runWeb3 (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
-    Left err -> putStrLn $ "Balance query failed: " <> show err
-    Right balance -> putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
-  putStrLn "Sending transaction"
-  runWeb3 (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
-    Left err -> putStrLn $ "Transaction failed: " <> show err
-    Right hex -> do
-      putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-      threadDelay 5e6
-      runWeb3 (Eth.getTransactionReceipt hex) >>= \case
-        Left err -> putStrLn $ "Query failed: " <> show err
-        Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
+  contractState <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+    (ExitSuccess, accountData, _) -> maybe (error "bad") pure $ do
+      x :: Value <- decode' accountData
+      () <- preview (key "account" . key "data" . nth 1 . _String . only "base64") x
+      x1 <- preview (key "account" . key "data" . nth 0 . _String) x
+      x2 <- preview _Right $ Base64.decode $ T.encodeUtf8 x1
+      -- TODO, runGet is partial
+      let (seenBlocks, highetstBlock, _) = runGet ((,,) <$> getWord64le <*> getWord64le <*> getRemainingLazyByteString) $ LBS.fromStrict x2
+      Just $ if (seenBlocks /= 0)
+        then Just highetstBlock
+        else Nothing
+
+    bad -> error $ show bad
 
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop n = do
@@ -223,10 +232,43 @@ runEthereum runDir config = withGeth runDir $ do
                   , std_err = UseHandle h
                   }
             readCreateProcessWithExitCode p "" >>= \case
-              good@(ExitSuccess, _, _) -> print good
+              (ExitSuccess, _, _) -> pure ()
               bad -> error $ show bad
             loop $ n + 1
-  Right _ <- loop loopStart
+
+  loop (fromMaybe loopStart contractState) >>= \case
+    Right good -> T.putStrLn good
+    Left bad -> error $ show bad
+
+runEthereum :: FilePath -> IO ()
+runEthereum runDir = withGeth runDir $ do
+  let contract = "solidity/helloWorld.sol"
+  putStrLn $ "Compiling " <> contract
+
+  h <- openFile "/dev/null" ReadMode
+  do
+    let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
+          { std_out = UseHandle h
+          , std_err = UseHandle h
+          }
+    readCreateProcessWithExitCode p "" >>= \case
+      good@(ExitSuccess, _, _) -> print good
+      bad -> error $ show bad
+  bin <- BS.readFile "solidity/HelloWorld.bin"
+
+  runWeb3 (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
+    Left err -> putStrLn $ "Balance query failed: " <> show err
+    Right balance -> putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
+  putStrLn "Sending transaction"
+  runWeb3 (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
+    Left err -> putStrLn $ "Transaction failed: " <> show err
+    Right hex -> do
+      putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
+      threadDelay 5e6
+      runWeb3 (Eth.getTransactionReceipt hex) >>= \case
+        Left err -> putStrLn $ "Query failed: " <> show err
+        Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
+
 
   putStrLn "All done - network can be stopped now"
 

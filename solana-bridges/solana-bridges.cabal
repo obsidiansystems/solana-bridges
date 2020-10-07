@@ -14,14 +14,18 @@ executable solana-bridges
                      , aeson
                      , async
                      , base16-bytestring
+                     , base64-bytestring
                      , bytestring
+                     , binary
                      , containers
                      , exceptions
                      , directory
                      , lens
+                     , lens-aeson
                      , mtl
                      , ethereum-rlp
                      , process
+                     , process-extras
                      , temporary
                      , text
                      , unix
