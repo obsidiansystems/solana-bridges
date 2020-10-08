@@ -45,9 +45,8 @@ mod test {
 
     #[quickcheck]
     fn test_instructions(mut buf_len: usize) -> Result<(), TestError> {
-        if buf_len <= MIN_BUF_SIZE {
-            buf_len += MIN_BUF_SIZE;
-        }
+        buf_len *= BlockHeader::LEN / 7;
+        buf_len += MIN_BUF_SIZE;
         let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
         let header_400001 = decode_rlp(&hex_to_bytes(HEADER_400001)?)?;
 
@@ -79,10 +78,15 @@ mod test {
         let accounts = vec![account];
         process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
-        process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
+        let mut count = 5;
+        for n in 0..count {
+            println!("{}", n);
+            process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
+        }
+        count += 1; // for first block
 
         let data = interp(&*raw_data);
-        assert_eq!(2 % data.headers.len(), data.offset.0);
+        assert_eq!(count % data.headers.len(), data.offset.0);
         assert_eq!(400001, data.height);
         assert_eq!(2 >= data.headers.len(), data.full);
         return Ok(());
