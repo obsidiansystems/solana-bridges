@@ -219,14 +219,14 @@ runRelayer configFile config = do
             let
               (blockData, "") = B16.decode $ T.encodeUtf8 rlp
               RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
-              blockHeaderHex = B16.encode $ RLP.rlpSerialize blockHeader
+              blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
-            T.putStrLn $ T.pack (show n) <> ": " <> rlp
+            T.putStrLn $ T.pack (show n) <> ": " <> blockHeaderHex
             let p = (proc solanaBridgeToolPath $ T.unpack <$>
                       [ (if n == loopStart then "initialize" else "new-block")
                       , "--config", T.pack configFile
                       -- , "--payer", "/dev/null"
-                      , "--instruction", T.decodeLatin1 blockHeaderHex
+                      , "--instruction", blockHeaderHex
                       ])
             readCreateProcessWithExitCode p "" >>= \case
               (ExitSuccess, txn, _) -> putStrLn txn
