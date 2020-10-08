@@ -116,11 +116,13 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
     let data = interp_mut(&mut *raw_data);
 
     let old_offset = data.offset;
+
+    header.pack_into_slice(&mut data.headers[old_offset.0]);
+
+    data.height = header.number;
     data.offset = (old_offset + Wrapping(1)) % Wrapping(data.headers.len());
     data.full |= data.offset <= old_offset;
-    data.height = header.number;
 
-    header.pack_into_slice(&mut data.headers[data.offset.0]);
     return Ok(());
 }
 
