@@ -14,6 +14,8 @@ use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
+use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
+
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use tiny_keccak::{Hasher, Keccak};
@@ -40,6 +42,41 @@ pub struct BlockHeader {
     pub extra_data: ExtraData,
     pub mix_hash: H256,
     pub nonce: H64,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct Receipt {
+    pub status: bool,
+    pub gas_used: U256,
+    pub log_bloom: Bloom,
+    pub logs: Vec<LogEntry>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct LogEntry {
+    pub address: H160,
+    pub topics: Vec<H256>,
+    pub data: Vec<u8>,
+}
+
+impl rlp::Decodable for LogEntry {
+    fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
+        let result = LogEntry {
+            address: rlp.val_at(0)?,
+            topics: rlp.list_at(1)?,
+            data: rlp.val_at(2)?,
+        };
+        Ok(result)
+    }
+}
+
+impl rlp::Encodable for LogEntry {
+    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
+        stream.begin_list(3usize);
+        stream.append(&self.address);
+        stream.append_list::<H256, _>(&self.topics);
+        stream.append(&self.data);
+    }
 }
 
 //TODO: determine maximum widths to support per field
@@ -151,7 +188,7 @@ pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
     return keccak256(stream.out().as_slice());
 }
 
-fn keccak256(bytes: &[u8]) -> H256 {
+pub fn keccak256(bytes: &[u8]) -> H256 {
     let mut keccak256 = Keccak::v256();
     let mut out = [0u8; 32];
     keccak256.update(bytes);
