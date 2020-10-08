@@ -36,6 +36,10 @@ pub fn process_instruction<'a>(
     match Instruction::unpack(instruction_data)? {
         Instruction::Noop => return Ok(()),
         Instruction::Initialize(block_header) => {
+            if !account.is_signer {
+                info!("Account does not have the correct program id");
+                return Err(ProgramError::MissingRequiredSignature);
+            }
             {
                 let raw_data = account.try_borrow_data()?;
                 let data = interp(&*raw_data);
@@ -61,7 +65,7 @@ pub fn process_instruction<'a>(
         }
     };
 
-    return Ok(());
+    Ok(())
 }
 
 #[inline]
