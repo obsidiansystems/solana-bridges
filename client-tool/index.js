@@ -41,6 +41,11 @@ async function readOrGenerateAccount(filename, hint) {
     }
 }
 
+async function openConnection(url) {
+    const connection = new web3.Connection(argv.url);
+    logger.log(await connection.getVersion());
+    return connection;
+}
 
 async function doAlloc(argv) {
     const payerAccount = argv.payer;
@@ -51,17 +56,22 @@ async function doAlloc(argv) {
 
     const programId = new web3.PublicKey(argv.programId);
 
-    const connection = new web3.Connection(argv.url);
-    logger.log(await connection.getVersion());
+    const connection = openConnection(argv.url);
 
-    const fees = await calcFees(connection, new Buffer(0), argv.space);
+    const { space } = argv;
+
+    return doAllocReal(connection, payerAccount, storageAccount, programId, space);
+}
+
+async function doAllocReal(connection, payerAccount, storageAccount, programId, space) {
+    const fees = await calcFees(connection, new Buffer(0), space);
 
     const progAcctTxn = new web3.Transaction()
         .add(web3.SystemProgram.createAccount(
             { fromPubkey: payerAccount.publicKey
             , newAccountPubkey: storageAccount.publicKey
             , lamports: fees
-            , space: argv.space
+            , space: space
             , programId: programId
             }))
         ;
@@ -120,8 +130,7 @@ function doCall(fn) {
         const payerAccount = argv.payer;
         logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
-        const connection = new web3.Connection(argv.url);
-        logger.log(await connection.getVersion());
+        const connection = openConnection(argv.url);
 
         const {instructionData, isSigner, isWritable} = await fn(argv);
 
@@ -178,6 +187,73 @@ async function newBlock(argv) {
     };
 }
 
+async function doInclusionProof(argv) {
+    logger.log("args", argv);
+
+    const chainLogId = argv.accountId;
+    const programId = argv.programId;
+    const payerAccount = argv.payer;
+    logger.log ("payer id:" + payerAccount.publicKey.toBase58())
+
+    const connection = openConnection(argv.url);
+
+    const proofAccount = new web3.Account();
+    logger.log ("proof storage id:" + proofAccount.publicKey.toBase58());
+
+    const space = 9999; // ?
+    const newAccountInfo = await doAllocReal(connection, payerAccount, proofAccount, chainLogId, space);
+
+    const chainLogKey =
+        { pubkey: chainLogId
+        , isSigner: false
+        , isWritable: false
+        };
+    logger.log("chain log key", chainLogKey.pubkey.toBase58());
+
+    const proofKey =
+        { pubkey: proofAccount.publicKey
+        , isSigner: true
+        , isWritable: true
+        };
+    logger.log("proof key", proofKey.pubkey.toBase58());
+
+    async function doTx(data) {
+        const txnI =
+            { keys: [ chainLogKey, proofKey ]
+            , programId
+            , data
+            };
+
+        const txn = new web3.Transaction().add(new web3.TransactionInstruction(txnI));
+        logger.log("txn", txn);
+        logger.log("txn", JSON.stringify(txn));
+
+        let signers0 = [payerAccount, proofAccount];
+        logger.log("signers", signers0.map(x => x.publicKey.toBase58()));
+
+        var v = await connection.simulateTransaction(
+            txn,
+            signers0
+            );
+        logger.log("simulation", JSON.stringify(v));
+
+        var v = await web3.sendAndConfirmTransaction(connection,
+            txn,
+            signers0
+            );
+        return v;
+    }
+
+    //doTx(Buffer.from("04", "hex"));
+    const v = doTx(Buffer.from("05" + argv.inclusionProof, argv.inclusionProofEncoding));
+    //doTx(Buffer.from("05" + argv.inclusionProof, argv.inclusionProofEncoding));
+    //doTx(Buffer.from("05" + argv.inclusionProof, argv.inclusionProofEncoding));
+    //doTx(Buffer.from("06", "hex"));
+
+    return {"sig": v};
+}
+
+
 function callCmd (fn) {
     return function (argv) {
         return fn(argv)
@@ -202,6 +278,8 @@ function commandArgs(yargv) {
 }
 
 yargs
+    .demandCommand().recommendCommands().strict()
+
     .options(
         { 'url': { default: "http://localhost:8899" }
         , 'payer' :
@@ -209,6 +287,7 @@ yargs
             , coerce: readAccountSync
             }
         })
+
     .command('alloc', 'Deploy program'
         , (yargv) => yargv.options(
             { 'program-id' : {demand : true }
@@ -235,5 +314,19 @@ yargs
             })
         , callCmd(doCall(newBlock)))
 
-    .help().alias('help', 'h').argv;
+    .command('inclusion-proof', 'inclusion proof'
+        , (yargv) => yargv.options(
+            { 'program-id' :
+                  { demand: true
+                  , coerce: arg => new web3.PublicKey(arg)
+                  }
+            , 'account-id':
+                  { demand: true
+                  , coerce: arg => new web3.PublicKey(arg)
+                  }
+            , 'inclusion-proof': {demand: true}
+            , 'inclusino-proof-encoding': {default: 'hex'}
+            })
+        , callCmd(doInclusionProof))
 
+    .help().alias('help', 'h').argv;
