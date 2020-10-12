@@ -88,17 +88,19 @@ mod test {
         return Ok(());
     }
 
-    fn test_header_pow(header: &str) -> Result<(), TestError> {
-        assert_eq!(true, verify_pow(&decode_rlp(&hex_to_bytes(header)?)?));
-        return Ok(());
-    }
-
-    // Slow tests ~ 1min each
+    // Slow tests ~ 1min each without cache sharing
     //#[test]
     fn test_pow() -> Result<(), TestError> {
-        test_header_pow(HEADER_400000)?;
-        test_header_pow(HEADER_400001)?;
-        test_header_pow(HEADER_8996776)?;
+        fn test_header_pow(header: &str) -> Result<bool, TestError> {
+            Ok(verify_pow(&decode_rlp(&hex_to_bytes(header)?)?))
+        }
+
+        let mut header_400000: BlockHeader = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+        assert!(verify_pow(&header_400000));
+        header_400000.nonce = H64::zero();
+        assert!(!verify_pow(&header_400000));
+        assert!(test_header_pow(HEADER_400001)?);
+        assert!(test_header_pow(HEADER_8996776)?);
         return Ok (());
     }
 
