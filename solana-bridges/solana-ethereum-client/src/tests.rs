@@ -40,16 +40,20 @@ fn headers_offset_correct() -> Result<(), TestError> {
     Ok(())
 }
 
+#[test]
+fn block_construction() -> Result<(), TestError> {
+    let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+    let block_400000 = Block { header: header_400000, transactions: Vec::new() };
+    assert_eq!(block_400000.transactions.len(), 0);
+    Ok(())
+}
 
 #[quickcheck]
-fn test_instructions(mut buf_len: usize) -> Result<(), TestError> {
+fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
     buf_len *= BlockHeader::LEN / 7;
     buf_len += MIN_BUF_SIZE;
-    let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
-    let header_400001 = decode_rlp(&hex_to_bytes(HEADER_400001)?)?;
 
-    let block_400000 = Block { header: header_400000, transactions: Vec::new() };
-    let block_400001 = Block { header: header_400001, transactions: Vec::new() };
+    block_count += 1;
 
     let program_id = Pubkey::default();
     let key = Pubkey::default();
@@ -68,25 +72,28 @@ fn test_instructions(mut buf_len: usize) -> Result<(), TestError> {
         rent_epoch: Epoch::default(),
     };
 
-    assert_eq!(block_400000.transactions.len(), 0);
-    let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-    let instruction_init: Vec<u8> = Instruction::Initialize(block_400000.header).pack();
-    let instruction_new: Vec<u8> = Instruction::NewBlock(block_400001.header).pack();
-
     let accounts = vec![account];
+
+    let instruction_noop: Vec<u8> = Instruction::Noop.pack();
     process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
-    process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
-    let mut count = 5;
-    for n in 0..count {
+
+    {
+        let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+        let instruction_init: Vec<u8> = Instruction::Initialize(header_400000).pack();
+        process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
+    }
+
+    for n in 1..block_count {
         println!("{}", n);
+        let header_4000xx = decode_rlp(&hex_to_bytes(HEADER_4000XX[n])?)?;
+        let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
     }
-    count += 1; // for first block
 
     let data = interp(&*raw_data);
-    assert_eq!(count % data.headers.len(), data.offset.0);
-    assert_eq!(400001, data.height);
-    assert_eq!(2 >= data.headers.len(), data.full);
+    assert_eq!(block_count % data.headers.len(), data.offset.0);
+    assert_eq!(400000 - 1 + block_count as u64, data.height);
+    assert_eq!(block_count >= data.headers.len(), data.full);
     return Ok(());
 }
 
