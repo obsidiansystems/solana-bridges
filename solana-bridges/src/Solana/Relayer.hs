@@ -14,6 +14,7 @@ import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
+import           Data.Default (def)
 import           Data.Foldable (fold)
 import           Data.Functor (void)
 import           Data.List (intercalate)
@@ -23,7 +24,8 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import           Network.Web3 (runWeb3)
+import           Network.Web3.Provider (runWeb3, runWeb3')
+import qualified Network.Web3.Provider as Eth
 import           Network.JsonRpc.TinyClient as Eth
 import qualified Network.Ethereum.Api.Eth as Eth
 import qualified Network.Ethereum.Api.Debug as Eth
@@ -70,7 +72,7 @@ mainEthTestnet = do
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
   setupEth currentDir runDir
-  runEthereum runDir
+  runEthereum def runDir
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -216,11 +218,7 @@ runRelayer configFile config = do
         case res of
           Left e -> fail $ show e
           Right rlp -> do
-            let
-              (blockData, "") = B16.decode $ T.encodeUtf8 rlp
-              RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
-              blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
-
+            let blockHeaderHex = blockToHeader rlp
             T.putStrLn $ T.pack (show n) <> ": " <> blockHeaderHex
             let p = (proc solanaBridgeToolPath $ T.unpack <$>
                       [ (if n == loopStart then "initialize" else "new-block")
@@ -237,8 +235,15 @@ runRelayer configFile config = do
     Right good -> T.putStrLn good
     Left bad -> error $ show bad
 
-runEthereum :: FilePath -> IO ()
-runEthereum runDir = withGeth runDir $ do
+blockToHeader :: Text -> Text
+blockToHeader rlp = blockHeaderHex
+  where
+    (blockData, "") = B16.decode $ T.encodeUtf8 rlp
+    RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
+    blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
+
+runEthereum :: Eth.Provider -> FilePath -> IO ()
+runEthereum node runDir = withGeth runDir $ do
   let contract = "solidity/helloWorld.sol"
   putStrLn $ "Compiling " <> contract
 
@@ -253,16 +258,18 @@ runEthereum runDir = withGeth runDir $ do
       bad -> error $ show bad
   bin <- BS.readFile "solidity/HelloWorld.bin"
 
-  runWeb3 (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
+  let runWeb3'' = runWeb3' node
+
+  runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
     Left err -> putStrLn $ "Balance query failed: " <> show err
     Right balance -> putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
   putStrLn "Sending transaction"
-  runWeb3 (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
+  runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
     Left err -> putStrLn $ "Transaction failed: " <> show err
     Right hex -> do
       putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
       threadDelay 5e6
-      runWeb3 (Eth.getTransactionReceipt hex) >>= \case
+      runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
         Left err -> putStrLn $ "Query failed: " <> show err
         Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
 
