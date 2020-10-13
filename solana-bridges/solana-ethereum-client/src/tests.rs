@@ -84,14 +84,18 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     }
 
     for n in 1..block_count {
-        println!("{}", n);
+        {
+            let r = accounts[0].data.try_borrow_mut().unwrap();
+            let data = interp(&*r);
+            println!("ring size: {}, current block short no: {}", data.headers.len(), n);
+        }
         let header_4000xx = decode_rlp(&hex_to_bytes(HEADER_4000XX[n])?)?;
         let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
     }
 
     let data = interp(&*raw_data);
-    assert_eq!(block_count % data.headers.len(), data.offset.0);
+    assert_eq!(block_count % data.headers.len(), data.offset);
     assert_eq!(400000 - 1 + block_count as u64, data.height);
     assert_eq!(block_count >= data.headers.len(), data.full);
     return Ok(());

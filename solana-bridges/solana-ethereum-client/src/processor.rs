@@ -1,7 +1,5 @@
 #![cfg(feature = "program")]
 
-use std::num::Wrapping;
-
 use crate::{
     eth::*,
     instruction::*,
@@ -44,7 +42,7 @@ pub fn process_instruction<'a>(
                 let raw_data = account.try_borrow_data()?;
                 let data = interp(&*raw_data);
                 match data {
-                    Storage { height: 0, offset: Wrapping(0), full: false, .. } => (),
+                    Storage { height: 0, offset: 0, full: false, .. } => (),
                     _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
                 };
             }
@@ -99,13 +97,13 @@ pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramErro
     let mut raw_data = account.try_borrow_mut_data()?;
     let data = interp_mut(&mut *raw_data);
     match data {
-        Storage { offset: Wrapping(0), full: false, .. } =>
+        Storage { offset: 0, full: false, .. } =>
             return Err(CustomError::NoParentBlock.to_program_error()),
         _ => (),
     };
     assert!(data.height != 0);
     let len = data.headers.len();
-    let ref header_src = data.headers[(data.offset - Wrapping(1)).0 % len];
+    let ref header_src = data.headers[(data.offset + (len - 1)) % len];
     let header = BlockHeader::unpack_from_slice(header_src)?;
     Ok(header)
 }
@@ -117,10 +115,10 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
 
     let old_offset = data.offset;
 
-    header.pack_into_slice(&mut data.headers[old_offset.0]);
+    header.pack_into_slice(&mut data.headers[old_offset]);
 
     data.height = header.number;
-    data.offset = (old_offset + Wrapping(1)) % Wrapping(data.headers.len());
+    data.offset = (old_offset + 1) % data.headers.len();
     data.full |= data.offset <= old_offset;
 
     return Ok(());
