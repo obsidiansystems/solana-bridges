@@ -169,19 +169,17 @@ let
 
   shell = nixpkgs.haskellPackages.shellFor {
     withHoogle = false; # https://github.com/NixOS/nixpkgs/issues/82245
-    #packages = p: with p; [ solana-bridges web3 ];
     packages = p: with p; [ solana-bridges ];
     nativeBuildInputs = [ solana-rust-bpf solc ] ++ (with nixpkgs;
       [ cabal-install ghcid hlint
         go-ethereum solana
-        xargo rustup cargo-deps cargo-watch
+        xargo cargo-deps cargo-watch rustfmt clippy
         shellcheck ninja cmake
         jq
         client-tool
       ]);
 
     RUST_BACKTRACE="1";
-    RUSTUP_TOOLCHAIN="bpf";
     XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
     RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
 
@@ -207,7 +205,7 @@ let
   };
 
   shell-x86 = with nixpkgs; mkShell {
-    buildInputs = [ rustc cargo cargo-watch  ];
+    buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
   };
 
   solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
