@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use quickcheck_macros::quickcheck;
 
 use crate::{
@@ -103,13 +101,9 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     return Ok(());
 }
 
-fn test_header_pow(header: &str) -> Result<(), TestError> {
-    assert_eq!(true, verify_pow(&decode_rlp(&hex_to_bytes(header)?)?));
-    return Ok(());
-}
-
 // Slow tests ~ 1min each without cache sharing
-//#[test]
+#[ignore]
+#[test]
 fn test_pow() -> Result<(), TestError> {
     fn test_header_pow(header: &str) -> Result<bool, TestError> {
         Ok(verify_pow(&decode_rlp(&hex_to_bytes(header)?)?))
