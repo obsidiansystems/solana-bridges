@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use quickcheck_macros::quickcheck;
 
 use crate::{
@@ -103,20 +101,22 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     return Ok(());
 }
 
-fn test_header_pow(header: &str) -> Result<(), TestError> {
-    assert_eq!(true, verify_pow(&decode_rlp(&hex_to_bytes(header)?)?));
-    return Ok(());
-}
-
-// Slow tests ~ 1min each
-//#[test]
+// Slow tests ~ 1min each without cache sharing
+#[ignore]
+#[test]
 fn test_pow() -> Result<(), TestError> {
-    test_header_pow(HEADER_400000)?;
-    test_header_pow(HEADER_400001)?;
-    test_header_pow(HEADER_8996776)?;
+    fn test_header_pow(header: &str) -> Result<bool, TestError> {
+        Ok(verify_pow(&decode_rlp(&hex_to_bytes(header)?)?))
+    }
+
+    let mut header_400000: BlockHeader = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+    assert!(verify_pow(&header_400000));
+    header_400000.nonce = H64::zero();
+    assert!(!verify_pow(&header_400000));
+    assert!(test_header_pow(HEADER_400001)?);
+    assert!(test_header_pow(HEADER_8996776)?);
     return Ok (());
 }
-
 
 fn test_extradata_pack(extra: ExtraData) -> Result<(), TestError> {
     let mut extra_slice = [0; ExtraData::LEN];
