@@ -1,5 +1,4 @@
 use std::mem;
-use std::num::Wrapping;
 
 use solana_sdk::program_pack::{Pack};
 
@@ -15,7 +14,7 @@ pub const STORAGE_ALIGN: usize = std::mem::align_of::<StorageScrach>();
 #[repr(C)]
 pub struct StorageT<X: ?Sized> {
     pub height: u64,
-    pub offset: Wrapping<usize>,
+    pub offset: usize,
     pub full: bool,
     pub headers: X,
 }
