@@ -19,6 +19,7 @@ library
                      , bytestring
                      , binary
                      , containers
+                     , data-default
                      , exceptions
                      , directory
                      , lens
