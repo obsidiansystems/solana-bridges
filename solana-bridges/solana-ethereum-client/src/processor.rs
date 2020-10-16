@@ -124,19 +124,6 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
     return Ok(());
 }
 
-pub fn account_deserialize_data (account: &AccountInfo) -> Result<State, ProgramError> {
-    guard_sufficient_storage(&account)?;
-    let data = account.try_borrow_mut_data()?;
-    return State::unpack_from_slice(&data);
-}
-
-pub fn account_serialize_data (account: &AccountInfo, state: &State) -> Result<(), ProgramError> {
-    guard_sufficient_storage(&account)?;
-    let mut data = account.data.borrow_mut();
-    state.pack_into_slice(&mut data);
-    return Ok(())
-}
-
 fn guard_sufficient_storage(account: &AccountInfo) -> Result<(), ProgramError> {
     if MIN_BUF_SIZE > account.data_len() {
         info!("Account data length too small for holding state");

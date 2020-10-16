@@ -1,4 +1,3 @@
-use crate::parameters::*;
 use crate::types::*;
 
 use ethereum_types::{U256, H64, H160, H256, Bloom};
@@ -177,11 +176,6 @@ impl Encodable for Block {
     }
 }
 
-#[derive(Debug)]
-pub struct State {
-    pub headers: Vec<BlockHeader>,
-}
-
 pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
     let mut stream = RlpStream::new();
     header.stream_rlp(&mut stream, truncated);
@@ -234,35 +228,6 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
-}
-
-impl Sealed for State {}
-impl Pack for State {
-    const LEN: usize = mem::size_of::<usize>() + BlockHeader::LEN * HEADER_HISTORY_SIZE;
-    fn pack_into_slice(&self, dst: &mut [u8]) {
-        const LENGTH_SIZE: usize = mem::size_of::<usize>();
-        let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
-        *length_dst = self.headers.len().to_le_bytes();
-
-        for (i, h) in self.headers.iter().enumerate() {
-            let dst_array = array_mut_ref![dst, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
-            h.pack_into_slice(dst_array);
-        }
-    }
-
-    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        const LENGTH_SIZE: usize = mem::size_of::<usize>();
-        let length_src = array_ref![src, 0, LENGTH_SIZE];
-        let length = usize::from_le_bytes(*length_src);
-
-        let mut headers: Vec<BlockHeader> = Vec::new();
-        for i in 0..length {
-            let header_src = array_ref![src, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
-            let header = BlockHeader::unpack_from_slice(header_src)?;
-            headers.push(header);
-        }
-        return Ok(State { headers })
-    }
 }
 
 impl Sealed for ExtraData {}
