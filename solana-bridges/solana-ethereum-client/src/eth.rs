@@ -1,6 +1,6 @@
 use crate::types::*;
 
-use ethereum_types::{U256, H64, H160, H256, Bloom};
+pub use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
     result::{Result},
     vec::{Vec},

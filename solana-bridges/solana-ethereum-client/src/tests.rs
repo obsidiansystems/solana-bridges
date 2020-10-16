@@ -21,7 +21,7 @@ use crate::parameters::MIN_BUF_SIZE;
 use crate::prove::*;
 use solana_sdk::clock::Epoch;
 use std::str::FromStr;
-use rlp::{Decodable, Encodable, Rlp, RlpStream};
+use rlp::{Decodable, Encodable, DecoderError, Rlp, RlpStream};
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 use hex::FromHex;
 
@@ -191,13 +191,13 @@ fn encode_header(header: &BlockHeader) -> Vec<u8> {
 }
 
 pub fn test_inclusion(receipt_index: u64,
-                      receipt_data: Vec<u8>,
-                      header_data: Vec<u8>,
-                      proof_data: Vec<Vec<Vec<u8>>>
+                      receipt_data: &[u8],
+                      header_data: &[u8],
+                      proof_data: &[Vec<Vec<u8>>],
 ) {
-    let header: BlockHeader = rlp::decode(header_data.as_slice()).unwrap();
+    let header: BlockHeader = rlp::decode(header_data).unwrap();
 
-    let proof = proof_data.iter().map(|node| {
+    let proof: Vec<_> = proof_data.iter().map(|node| {
         let mut stream = RlpStream::new();
         stream.begin_list(node.len());
         for item in node {
@@ -208,8 +208,8 @@ pub fn test_inclusion(receipt_index: u64,
 
     assert!(verify_trie_proof(
         header.receipts_root,
-        rlp::encode(&receipt_index),
-        proof,
+        &*rlp::encode(&receipt_index),
+        &*proof,
         receipt_data,
     ));
 }
@@ -227,7 +227,7 @@ pub fn test_inclusions() {
             ],
         ];
 
-        test_inclusion(receipt_index, receipt_data, header_data, proof_data);
+        test_inclusion(receipt_index, &*receipt_data, &*header_data, &*proof_data);
     }
     {
         let receipt_index: u64 = 190;
@@ -317,7 +317,7 @@ pub fn test_inclusions() {
             ],
         ];
 
-        test_inclusion(receipt_index, receipt_data, header_data, proof_data);
+        test_inclusion(receipt_index, &*receipt_data, &*header_data, &*proof_data);
     }
 }
 
