@@ -31,18 +31,22 @@ pub fn verify_trie_proof(
             actual_key.push(el % 16);
         }
     }
-    _verify_trie_proof(expected_root, &*actual_key, proof, 0, 0, expected_value)
+    let proof_iter = proof.iter().map(std::ops::Deref::deref);
+
+    _verify_trie_proof(expected_root, &*actual_key, proof_iter, 0, expected_value)
 }
 
-pub fn _verify_trie_proof(
+pub fn _verify_trie_proof<'a, I>(
     expected_root: H256,
     key: &[u8],
-    proof: &[&[u8]],
+    mut proof: I,
     key_index: usize,
-    proof_index: usize,
     expected_value: &[u8],
-) -> Result<bool, DecoderError> {
-    let node = &proof[proof_index];
+) -> Result<bool, DecoderError>
+where I: Iterator<Item=&'a [u8]>
+{
+    let node = proof.next().expect("TODO");
+
     let dec = Rlp::new(node);
 
     if key_index == 0 {
@@ -83,7 +87,6 @@ pub fn _verify_trie_proof(
                     key,
                     proof,
                     key_index + 1,
-                    proof_index + 1,
                     expected_value,
                 );
             }
@@ -131,7 +134,6 @@ pub fn _verify_trie_proof(
                     key,
                     proof,
                     key_index + extension_length,
-                    proof_index + 1,
                     expected_value,
                 );
             }
@@ -150,7 +152,6 @@ pub fn _verify_trie_proof(
                     key,
                     proof,
                     key_index + extension_length,
-                    proof_index + 1,
                     expected_value,
                 );
             }

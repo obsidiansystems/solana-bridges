@@ -1,3 +1,5 @@
+//use rlp::DecodeError;
+
 use solana_sdk::{
     program_error::ProgramError,
 };
@@ -14,6 +16,9 @@ pub enum CustomError {
     InvalidAccountOwner,
     DeserializeStorageFailed,
     AlreadyInitialized,
+    //ProofTooShort,
+
+    //DecodeError(DecodeError),
 }
 
 impl CustomError {
