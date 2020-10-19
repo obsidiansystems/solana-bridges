@@ -20,7 +20,7 @@ pub fn verify_trie_proof(
     key: &[u8],
     proof: &[&[u8]],
     expected_value: &[u8],
-) -> bool {
+) -> Result<bool, DecoderError> {
     let mut actual_key = vec![];
     for &el in key {
         if actual_key.len() + 1 == proof.len() {
@@ -30,7 +30,7 @@ pub fn verify_trie_proof(
             actual_key.push(el % 16);
         }
     }
-    _verify_trie_proof(expected_root, &*actual_key, proof, 0, 0, expected_value).unwrap()
+    _verify_trie_proof(expected_root, &*actual_key, proof, 0, 0, expected_value)
 }
 
 pub fn _verify_trie_proof(
