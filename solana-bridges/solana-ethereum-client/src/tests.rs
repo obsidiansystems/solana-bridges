@@ -207,12 +207,10 @@ pub fn test_inclusion(receipt_index: u64,
         stream.out()
     }).collect();
 
-    let proof_slices: Vec<&[u8]> = proof_vecs.iter().map(Deref::deref).collect();
-
     assert!(verify_trie_proof(
         header.receipts_root,
         &*rlp::encode(&receipt_index),
-        &*proof_slices,
+        proof_vecs.iter().map(Deref::deref),
         receipt_data,
     )?);
     Ok(())

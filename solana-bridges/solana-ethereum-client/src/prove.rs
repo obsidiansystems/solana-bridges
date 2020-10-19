@@ -16,12 +16,14 @@ fn concat_nibbles(a: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-pub fn verify_trie_proof(
+pub fn verify_trie_proof<'a, I>(
     expected_root: ethereum_types::H256,
     key: &[u8],
-    proof: &[&[u8]],
+    proof: I,
     expected_value: &[u8],
-) -> Result<bool, DecoderError> {
+) -> Result<bool, DecoderError>
+where I: ExactSizeIterator<Item=&'a [u8]>
+{
     let mut actual_key = vec![];
     for &el in key {
         if actual_key.len() + 1 == proof.len() {
@@ -31,9 +33,8 @@ pub fn verify_trie_proof(
             actual_key.push(el % 16);
         }
     }
-    let proof_iter = proof.iter().map(std::ops::Deref::deref);
 
-    _verify_trie_proof(expected_root, &*actual_key, proof_iter, 0, expected_value)
+    _verify_trie_proof(expected_root, &*actual_key, proof, 0, expected_value)
 }
 
 pub fn _verify_trie_proof<'a, I>(
