@@ -21,7 +21,8 @@ use crate::parameters::MIN_BUF_SIZE;
 use crate::prove::*;
 use solana_sdk::clock::Epoch;
 use std::str::FromStr;
-use rlp::{Decodable, Encodable, DecoderError, Rlp, RlpStream};
+use std::ops::Deref;
+use rlp::{Decodable, Encodable, Rlp, RlpStream};
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 use hex::FromHex;
 
@@ -197,7 +198,7 @@ pub fn test_inclusion(receipt_index: u64,
 ) {
     let header: BlockHeader = rlp::decode(header_data).unwrap();
 
-    let proof: Vec<_> = proof_data.iter().map(|node| {
+    let proof_vecs: Vec<_> = proof_data.iter().map(|node| {
         let mut stream = RlpStream::new();
         stream.begin_list(node.len());
         for item in node {
@@ -206,10 +207,12 @@ pub fn test_inclusion(receipt_index: u64,
         stream.out()
     }).collect();
 
+    let proof_slices: Vec<&[u8]> = proof_vecs.iter().map(Deref::deref).collect();
+
     assert!(verify_trie_proof(
         header.receipts_root,
         &*rlp::encode(&receipt_index),
-        &*proof,
+        &*proof_slices,
         receipt_data,
     ));
 }

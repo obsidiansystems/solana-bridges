@@ -18,7 +18,7 @@ fn concat_nibbles(a: &[u8]) -> Vec<u8> {
 pub fn verify_trie_proof(
     expected_root: ethereum_types::H256,
     key: &[u8],
-    proof: &[Vec<u8>],
+    proof: &[&[u8]],
     expected_value: &[u8],
 ) -> bool {
     let mut actual_key = vec![];
@@ -36,13 +36,13 @@ pub fn verify_trie_proof(
 pub fn _verify_trie_proof(
     expected_root: H256,
     key: &[u8],
-    proof: &[Vec<u8>],
+    proof: &[&[u8]],
     key_index: usize,
     proof_index: usize,
     expected_value: &[u8],
 ) -> Result<bool, DecoderError> {
     let node = &proof[proof_index];
-    let dec = Rlp::new(&node.as_slice());
+    let dec = Rlp::new(node);
 
     if key_index == 0 {
         // trie root is always a hash
