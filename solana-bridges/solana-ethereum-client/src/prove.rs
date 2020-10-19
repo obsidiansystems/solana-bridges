@@ -1,5 +1,6 @@
 use ethereum_types::{self, H256};
 use rlp::{Rlp, DecoderError};
+use std::cmp::Ordering;
 use crate::eth::*;
 
 fn extract_nibbles(a: &[u8]) -> Vec<u8> {
@@ -54,9 +55,11 @@ pub fn _verify_trie_proof(
         assert_eq!(keccak256(node), expected_root);
     }
 
-    if dec.iter().count() == 17 {
+    match dec.iter().count() {
+    17 => {
         // branch node
-        if key_index == key.len() {
+        match Ord::cmp(&key_index, &key.len()) {
+        Ordering::Equal =>{
             if dec
                 .at(dec.iter().count() - 1)
                 ?
@@ -67,7 +70,8 @@ pub fn _verify_trie_proof(
                 // value stored in the branch
                 return Ok(true);
             }
-        } else if key_index < key.len() {
+        },
+        Ordering::Less => {
             let new_expected_root = dec
                 .at(key[key_index] as usize)
                 ?
@@ -83,16 +87,19 @@ pub fn _verify_trie_proof(
                     expected_value,
                 );
             }
-        } else {
-            panic!("This should not be reached if the proof has the correct format");
+        },
+        Ordering::Greater =>
+            panic!("This should not be reached if the proof has the correct format"),
         }
-    } else if dec.iter().count() == 2 {
+    },
+    2 => {
         // leaf or extension node
         // get prefix and optional nibble from the first byte
         let nibbles = extract_nibbles(dec.at(0)?.data()?);
         let (prefix, nibble) = (nibbles[0], nibbles[1]);
 
-        if prefix == 2 {
+        match prefix {
+        2 => {
             // even leaf node
             let key_end = &nibbles[2..];
             if concat_nibbles(key_end) == &key[key_index..]
@@ -100,7 +107,8 @@ pub fn _verify_trie_proof(
             {
                 return Ok(true);
             }
-        } else if prefix == 3 {
+        },
+        3 => {
             // odd leaf node
             let key_end = &nibbles[2..];
             if nibble == key[key_index]
@@ -109,7 +117,8 @@ pub fn _verify_trie_proof(
             {
                 return Ok(true);
             }
-        } else if prefix == 0 {
+        },
+        0 => {
             // even extension node
             let shared_nibbles = &nibbles[2..];
             let extension_length = shared_nibbles.len();
@@ -126,7 +135,8 @@ pub fn _verify_trie_proof(
                     expected_value,
                 );
             }
-        } else if prefix == 1 {
+        },
+        1 => {
             // odd extension node
             let shared_nibbles = &nibbles[2..];
             let extension_length = 1 + shared_nibbles.len();
@@ -144,11 +154,11 @@ pub fn _verify_trie_proof(
                     expected_value,
                 );
             }
-        } else {
-            panic!("This should not be reached if the proof has the correct format");
+        },
+        _ => panic!("This should not be reached if the proof has the correct format"),
         }
-    } else {
-        panic!("This should not be reached if the proof has the correct format");
+    },
+    _ => panic!("This should not be reached if the proof has the correct format"),
     }
 
     Ok(expected_value.len() == 0)
