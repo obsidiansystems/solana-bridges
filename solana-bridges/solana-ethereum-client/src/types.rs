@@ -16,7 +16,7 @@ pub enum CustomError {
     InvalidAccountOwner,
     DeserializeStorageFailed,
     AlreadyInitialized,
-    //ProofTooShort,
+    InvalidProof,
 
     //DecodeError(DecodeError),
 }

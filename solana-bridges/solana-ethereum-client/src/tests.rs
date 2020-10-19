@@ -210,7 +210,7 @@ pub fn test_inclusion(receipt_index: u64,
     assert!(verify_trie_proof(
         header.receipts_root,
         &*rlp::encode(&receipt_index),
-        proof_vecs.iter().map(Deref::deref),
+        proof_vecs.iter().map(Deref::deref).map(Ok),
         receipt_data,
     )?);
     Ok(())

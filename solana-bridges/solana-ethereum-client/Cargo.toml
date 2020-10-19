@@ -30,7 +30,8 @@ quickcheck = "0.9"
 quickcheck_macros = "0.9"
 
 [patch.crates-io]
-parity-scale-codec = { git = "https://github.com/obsidiansystems/parity-scale-codec", rev = "2290261cd3cc9df22493452e10cf3ed44a417b25" }
+rlp = { git = "https://github.com/obsidiansystems/parity-common", branch = "solana" }
+parity-scale-codec = { git = "https://github.com/obsidiansystems/parity-scale-codec", branch = "solana" }
 uint = { git = "https://github.com/obsidiansystems/parity-common", rev = "eb39309c64e5c42f124744fc2d887f2f4648bbd8" }
 
 [lib]

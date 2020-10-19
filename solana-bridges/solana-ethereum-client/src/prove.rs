@@ -22,7 +22,7 @@ pub fn verify_trie_proof<'a, I>(
     proof: I,
     expected_value: &[u8],
 ) -> Result<bool, DecoderError>
-where I: ExactSizeIterator<Item=&'a [u8]>
+where I: ExactSizeIterator<Item=Result<&'a [u8], DecoderError>>
 {
     let mut actual_key = vec![];
     for &el in key {
@@ -44,9 +44,9 @@ pub fn _verify_trie_proof<'a, I>(
     key_index: usize,
     expected_value: &[u8],
 ) -> Result<bool, DecoderError>
-where I: Iterator<Item=&'a [u8]>
+where I: Iterator<Item=Result<&'a [u8], DecoderError>>
 {
-    let node = proof.next().expect("TODO");
+    let node = proof.next().expect("TODO")?;
 
     let dec = Rlp::new(node);
 

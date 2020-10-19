@@ -5,7 +5,10 @@ use crate::{
     instruction::*,
     parameters::*,
     types::*,
+    prove::*,
 };
+
+use rlp::Rlp;
 
 use solana_sdk::{
     account_info::{next_account_info, AccountInfo},
@@ -51,7 +54,7 @@ pub fn process_instruction<'a>(
             };
 
             write_new_block(account, block_header)?;
-        }
+        },
         Instruction::NewBlock(block_header) => match read_prev_block(account) {
             Err(e) => return Err(e),
             Ok(parent) => {
@@ -60,7 +63,13 @@ pub fn process_instruction<'a>(
                 };
                 write_new_block(account, block_header)?;
             }
-        }
+        },
+        Instruction::ProveInclusion(pi) => {
+            let expected_root = panic!(); // pi.block_hash
+            let proof = Rlp::new(&*pi.proof).iter().map(|rlp| rlp.data());
+            verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
+                .map_err(|_| CustomError::InvalidProof.to_program_error())?;
+        },
     };
 
     Ok(())
@@ -123,6 +132,7 @@ pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(),
 
     return Ok(());
 }
+
 
 fn guard_sufficient_storage(account: &AccountInfo) -> Result<(), ProgramError> {
     if MIN_BUF_SIZE > account.data_len() {
