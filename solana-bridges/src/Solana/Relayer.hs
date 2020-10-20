@@ -8,14 +8,12 @@
 
 module Solana.Relayer where
 
-import           Control.Applicative
 import           Control.Concurrent (threadDelay, forkIO, killThread)
 import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad
 import           Control.Monad.Catch (catch, finally)
 import           Data.Aeson
-import           Data.Aeson.Types (FromJSONKey(..), toJSONKeyText)
 import           Data.Aeson.TH
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
@@ -40,7 +38,7 @@ import           System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import           System.IO.Temp (createTempDirectory)
 import           System.Posix.Files (createSymbolicLink)
 import           System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess
-                                , proc, readProcess, readCreateProcessWithExitCode, waitForProcess)
+                                , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import           System.Which (staticWhich)
 import           System.Environment
 import           System.Exit
@@ -48,7 +46,6 @@ import           Data.Word
 import Data.Maybe(fromMaybe)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
-import qualified Data.ByteString.Base58 as Base58
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.ByteString.Lazy as LBS
 import qualified System.Process.ByteString.Lazy
@@ -60,18 +57,17 @@ import Data.IORef
 import Control.Concurrent.MVar
 import Data.IntMap (IntMap)
 import qualified Data.IntMap.Strict as IntMap
-import Data.Map (Map)
-import qualified Data.Map.Strict as Map
 import Network.Socket(withSocketsDo)
 import Data.Foldable
 import Data.Bifunctor
 import Data.Void
-import Data.Time
 
 
 import qualified Network.HTTP.Client as HTTPClient
 import qualified Network.HTTP.Types.Status as HTTP
 import Network.HTTP.Client.TLS (newTlsManager)
+
+import Solana.Types
 
 decodeMsg :: WebSockets.DataMessage -> Either String (Either SolanaRpcNotification SolanaRpcResult)
 decodeMsg = \case
@@ -81,160 +77,6 @@ decodeMsg = \case
     go x = first (<> show x) $ case decode' x of
       Just rpcresult -> Right (Right rpcresult)
       Nothing -> Left <$> eitherDecode' x
-
-data JsonRpcVersion = JsonRpcVersion
-instance ToJSON JsonRpcVersion where toJSON _ = toJSON ("2.0" :: T.Text)
-instance FromJSON JsonRpcVersion where parseJSON _ = pure JsonRpcVersion
-
-type SolanaRpcRequest = SolanaRpcRequestF Value
-data SolanaRpcRequestF a = SolanaRpcRequest
-  { _solanaRpcRequest_jsonrpc :: !JsonRpcVersion
-  , _solanaRpcRequest_id :: !Int
-  , _solanaRpcRequest_method :: !T.Text
-  , _solanaRpcRequest_params :: !(Maybe a)
-  }
-
-type SolanaRpcResult = SolanaRpcResultF Value
-data SolanaRpcResultF a = SolanaRpcResult
-  { _solanaRpcResult_jsonrpc :: !JsonRpcVersion
-  , _solanaRpcResult_id :: !Int
-  , _solanaRpcResult_result :: !a
-  }
-
-data SolanaRpcError = SolanaRpcError
-  { _solanaRpcError_jsonrpc :: !JsonRpcVersion
-  , _solanaRpcError_id :: !Int
-  , _solanaRpcError_error :: !Value
-  }
-
-type SolanaRpcNotification = SolanaRpcNotificationF Value
-data SolanaRpcNotificationF a = SolanaRpcNotification
-  { _solanaRpcNotification_jsonrpc :: !JsonRpcVersion
-  , _solanaRpcNotification_method :: !T.Text
-  , _solanaRpcNotification_params :: !(SolanaRpcNotificationParamsF a)
-  }
-
-type SolanaRpcNotificationParams = SolanaRpcNotificationParamsF Value
-data SolanaRpcNotificationParamsF a = SolanaRpcNotificationParams
-  { _solanaRpcNotificationParams_result :: !a
-  , _solanaRpcNotificationParams_subscription :: !Int
-  }
-
-newtype Base58ByteString = Base58ByteString { unBase58ByteString :: BS.ByteString }
-  deriving (Eq, Ord, Show)
-
-data SolanaEpochInfo = SolanaEpochInfo
-  { _solanaEpochInfo_slotsInEpoch :: !Word64
-  , _solanaEpochInfo_slotIndex :: !Word64
-  , _solanaEpochInfo_absoluteSlot :: !Word64
-  , _solanaEpochInfo_blockHeight :: !Word64
-  , _solanaEpochInfo_epoch :: !Word64
-  } deriving Show
-
-data SolanaEpochSchedule = SolanaEpochSchedule
-  { _solanaEpochSchedule_warmup :: !Bool
-  , _solanaEpochSchedule_firstNormalEpoch :: !Word64
-  , _solanaEpochSchedule_leaderScheduleSlotOffset :: !Word64
-  , _solanaEpochSchedule_firstNormalSlot :: !Word64
-  , _solanaEpochSchedule_slotsPerEpoch :: !Word64
-  } deriving Show
-
-epochFromSlot :: SolanaEpochSchedule -> Word64 -> SolanaEpochInfo
-epochFromSlot schedule =
-  let
-    warmup0 = (\x -> div (_solanaEpochSchedule_slotsPerEpoch schedule) $ 2 ^ x)
-      <$> reverse [1.._solanaEpochSchedule_firstNormalEpoch schedule]
-    warmup = zip [0..] $ zip warmup0 $ drop 1 $ scanl (+) 0 warmup0
-  in \absoluteSlot ->
-    let
-      (epoch, (slotsInEpoch, firstSlotInEpoch)) = if absoluteSlot >= _solanaEpochSchedule_firstNormalSlot schedule
-        then
-          ((absoluteSlot - _solanaEpochSchedule_firstNormalSlot schedule) `div` _solanaEpochSchedule_slotsPerEpoch schedule
-          , ( _solanaEpochSchedule_slotsPerEpoch schedule
-            , _solanaEpochSchedule_firstNormalSlot schedule + (epoch - _solanaEpochSchedule_firstNormalEpoch schedule) * _solanaEpochSchedule_slotsPerEpoch schedule
-            )
-          )
-        else
-          head $ dropWhile (\(epoch, (slotsInEpoch, firstSlotInEpoch)) -> firstSlotInEpoch < absoluteSlot) warmup
-    in SolanaEpochInfo
-      { _solanaEpochInfo_slotsInEpoch = slotsInEpoch
-      , _solanaEpochInfo_slotIndex = absoluteSlot - (firstSlotInEpoch - slotsInEpoch)
-      , _solanaEpochInfo_absoluteSlot = absoluteSlot
-      , _solanaEpochInfo_blockHeight = 0 -- or maybe this should be undefined?
-      , _solanaEpochInfo_epoch = epoch
-      }
---
---
---
--- SolanaEpochInfo {_solanaEpochInfo_slotsInEpoch = 8192, _solanaEpochInfo_slotIndex = 6661, _solanaEpochInfo_absoluteSlot = 31205, _solanaEpochInfo_blockHeight = 31205, _solanaEpochInfo_epoch = 10}
--- SolanaEpochSchedule {_solanaEpochSchedule_warmup = True, _solanaEpochSchedule_firstNormalEpoch = 8, _solanaEpochSchedule_leaderScheduleSlotOffset = 8192, _solanaEpochSchedule_firstNormalSlot = 8160, _solanaEpochSchedule_slotsPerEpoch = 8192}
---       
-
-data SolanaSlotNotification = SolanaSlotNotification
-  { _solanaSlotNotification_parent :: !Word64
-  , _solanaSlotNotification_root :: !Word64
-  , _solanaSlotNotification_slot :: !Word64
-  } deriving Show
-
-data SolanaBlockCommitment = SolanaBlockCommitment
-  { _solanaBlockCommitment_totalStake :: !Word64
-  , _solanaBlockCommitment_commitment :: ![Word64]
-  } deriving Show
-
-
-data SolanaVote = SolanaVote
-  { _solanaVote_slots :: ![Word64]
-  , _solanaVote_hash :: !Base58ByteString -- TODO different type
-  , _solanaVote_timestamp :: !(Maybe UTCTime)
-  } deriving Show
-
-
-parseBase58ByteString :: Text -> Maybe Base58ByteString
-parseBase58ByteString pk58Text = Base58ByteString <$> Base58.decodeBase58 Base58.bitcoinAlphabet (T.encodeUtf8 pk58Text)
-base58ByteStringToText :: Base58ByteString -> Text
-base58ByteStringToText = T.decodeLatin1 . Base58.encodeBase58 Base58.bitcoinAlphabet . unBase58ByteString
-
-instance FromJSON Base58ByteString where
-  parseJSON = withText "Base58ByteString" $ maybe (fail "invalid base58") pure . parseBase58ByteString
-instance ToJSON Base58ByteString where
-  toJSON = toJSON . base58ByteStringToText
-
-instance ToJSONKey Base58ByteString where
-  toJSONKey = toJSONKeyText base58ByteStringToText
-instance FromJSONKey Base58ByteString where
-  fromJSONKey = FromJSONKeyTextParser (maybe (fail "invalid base58") pure . parseBase58ByteString)
-
-data SolanaCommitment
-   = SolanaCommitment_Max
-   | SolanaCommitment_Root
-   | SolanaCommitment_SingleGossip
-   | SolanaCommitment_Recent
-   deriving (Eq, Ord, Show, Enum)
-
-instance ToJSON SolanaCommitment where
-  toJSON x = object ["commitment" Data.Aeson..= case x of
-      SolanaCommitment_Max -> "max" :: Text
-      SolanaCommitment_Root -> "root"
-      SolanaCommitment_SingleGossip -> "singleGossip"
-      SolanaCommitment_Recent -> "recent"
-    ]
-
-data SolanaCommittedBlock = SolanaCommittedBlock
-  { _solanaCommittedBlock_blockhash :: !Base58ByteString
-  , _solanaCommittedBlock_previousBlockhash :: !Base58ByteString
-  , _solanaCommittedBlock_parentSlot :: !Word64
-  -- , _solanaCommittedBlock_transactions :: ![Value]
-  -- , _solanaCommittedBlock_rewards :: ![Value]
-  , _solanaCommittedBlock_blockTime :: !(Maybe Word64)
-  } deriving Show
-
-type SolanaLeaderSchedule = Map Base58ByteString [Word64]
-
-newtype SolanaRpcErrorOrResult a = SolanaRpcErrorOrResult { unSolanaRpcErrorOrResult :: Either SolanaRpcError (SolanaRpcResultF a) }
-
-instance FromJSON a => FromJSON (SolanaRpcErrorOrResult a) where
-  parseJSON x = (SolanaRpcErrorOrResult . Left <$> parseJSON x)
-            <|> (SolanaRpcErrorOrResult . Right <$> parseJSON x)
 
 
 -- solana -> eth
@@ -282,11 +124,11 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
     rpcWSRequest :: forall a. ToJSON a => T.Text -> Maybe a -> IO Value
     rpcWSRequest method params = withMVar rpcCriticalSection $ \() -> do
       result <- newEmptyMVar
-      sendRPCRequest method params (putMVar result)
+      sendRPCRequest (putMVar result)
       readMVar result
       where
-        sendRPCRequest :: T.Text -> Maybe a -> (Value -> (IO ())) -> IO ()
-        sendRPCRequest method params handler = do
+        sendRPCRequest :: (Value -> (IO ())) -> IO ()
+        sendRPCRequest handler = do
           newId <- atomicModifyIORef' requestId $ \x -> (x, succ x)
           join $ atomicModifyIORef' requestHandlers $ \oldState -> (,) (IntMap.insert newId handler oldState) $ do
             WebSockets.sendBinaryData conn $ Data.Aeson.encode $ SolanaRpcRequest
@@ -307,8 +149,8 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
         let
           handler' :: Value -> IO ()
           handler' x = handler $ case fromJSON x of
-            Success x -> Right x
-            Error x -> Left $ x <> ": " <> show subIdJSON
+            Success x' -> Right x'
+            Error x' -> Left $ x' <> ": " <> show subIdJSON
           newState = IntMap.insert subId (Right handler') oldState
           pendingNotifications = traverse_ handler' $ view (ix subId . _Left) oldState
         in (newState, pendingNotifications)
@@ -332,7 +174,7 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
 
   print epochInfo0
 
-  epochInfoRef <- newMVar epochInfo0
+  -- epochInfoRef <- newMVar epochInfo0
 
   -- leaderSchedule :: SolanaLeaderSchedule <- rpcWebRequest' "getLeaderSchedule" $ Just (_solanaEpochInfo_absoluteSlot epochInfo0, )
 
@@ -347,17 +189,7 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
   sendRPCSubscription @Void @Word64 "rootSubscribe" (Nothing :: Maybe Void) $ \case
     Left bad -> error bad
     Right x -> do
-      -- T.putStrLn "real Schedule:"
-      -- rpcWebRequest @SolanaEpochInfo "getEpochInfo" >>= print
-      -- T.putStrLn "computed Schedule:"
       print $ epochFromSlot' x
-      -- T.putStrLn $ T.concat [ "new root: ", T.pack $ show x ]
-      asdf <- rpcWebRequest' @_ @SolanaBlockCommitment "getBlockCommitment" $ Just [x]
-      -- print asdf
-      -- confirmedBlocks <- rpcWebRequest' @(Word64, Word64) @[Word64] "getConfirmedBlocks" $ Just $ (x `satsub` 1e2, x + 1e2) -- , "base64" :: T.Text)
-      -- case lastOf traverse confirmedBlocks of
-      --   Nothing -> putStrLn $ "now confirmed block near slot " <> show x
-      --   Just x' -> do
 
       -- fetch block in a loop; it might not be available instantly
       let
@@ -367,7 +199,7 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
             | otherwise = do
               mConfirmedBlock <- rpcWebRequest'' @_ @(Maybe SolanaCommittedBlock) "getConfirmedBlock" $ Just [x]
               case mConfirmedBlock of
-                Left bad -> pure ()
+                Left _ -> pure ()
                 Right Nothing -> do
                   T.putStrLn $ T.concat [ "retry: slot:", T.pack $ show x ]
                   threadDelay 1e5
@@ -501,7 +333,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
         }
 
   (_, _, _, validator) <- createProcess bootstrapValidator
-  waitForProcess validator
+  _ <- finally (waitForProcess validator) (terminateProcess faucet)
   pure ()
 
 
@@ -531,7 +363,6 @@ createContract addr hex = Eth.Call
 
 runRelayer :: FilePath -> ContractConfig -> IO ()
 runRelayer configFile config = do
-  h <- openFile "/dev/null" ReadMode
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -718,15 +549,4 @@ do
   let x = (defaultOptions { fieldLabelModifier = dropWhile ('_' ==) . dropWhile ('_' /=) . dropWhile ('_' ==) })
   concat <$> traverse (deriveJSON x)
     [ ''ContractConfig
-    , ''SolanaRpcResultF
-    , ''SolanaRpcError
-    , ''SolanaRpcRequestF
-    , ''SolanaRpcNotificationF
-    , ''SolanaRpcNotificationParamsF
-    , ''SolanaEpochInfo
-    , ''SolanaEpochSchedule
-    , ''SolanaSlotNotification
-    , ''SolanaVote
-    , ''SolanaBlockCommitment
-    , ''SolanaCommittedBlock
     ]
