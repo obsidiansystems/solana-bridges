@@ -41,6 +41,9 @@ contract SolanaClient {
     }
 
     function getSlotLeader(uint64 slot) external view returns (uint256) {
+        if (slot >= schedule.slotKeys.length)
+            revert("Slot out of bounds for epoch");
+
         return schedule.publicKeys[schedule.slotKeys[slot]];
     }
 
