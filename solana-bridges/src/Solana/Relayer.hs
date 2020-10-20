@@ -10,12 +10,13 @@ import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad (unless)
 import           Control.Monad.Catch (catch)
+import           Control.Monad.Except (liftIO, runExceptT, throwError)
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Default (def)
-import           Data.Foldable (fold)
+import           Data.Foldable (fold, for_)
 import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
@@ -27,10 +28,12 @@ import qualified Data.Text.IO as T
 import           Network.Web3.Provider (runWeb3, runWeb3')
 import qualified Network.Web3.Provider as Eth
 import           Network.JsonRpc.TinyClient as Eth
-import qualified Network.Ethereum.Api.Eth as Eth
+import qualified Network.Ethereum.Account as Eth
+import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getCode, getTransactionReceipt, sendTransaction)
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Types as Eth
+import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), receiptContractAddress)
 import           Network.Ethereum.Api.Types (Call(..))
+import qualified Network.Ethereum.Unit as Eth
 import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import           System.IO (IOMode(ReadMode, WriteMode), openFile)
 import           System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
@@ -51,6 +54,8 @@ import qualified System.Process.ByteString.Lazy
 import Control.Lens
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Binary.Get
+
+import qualified Ethereum.Contracts as Contracts
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -127,7 +132,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
     good@(ExitSuccess, _, _) -> print good
     bad -> error $ show bad
 
-  faucet <- spawnProcess solanaFaucetPath
+  _faucet <- spawnProcess solanaFaucetPath
     ["--keypair", solanaFaucetKeypairFile]
 
   let
@@ -154,7 +159,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
         }
 
   (_, _, _, validator) <- createProcess bootstrapValidator
-  waitForProcess validator
+  _ <- waitForProcess validator
   pure ()
 
 
@@ -172,19 +177,19 @@ setupEth currentDir runDir = do
       unless (predicate err) $ error (show err)
 
 createContract :: Address -> HexString -> Call
-createContract addr hex = Eth.Call
-    { callFrom = Just addr
+createContract fromAddr hex = Eth.Call
+    { callFrom = Just fromAddr
     , callTo = Nothing
-    , callGas = Just 1e5
+    , callGas = Just 1e6
     , callGasPrice = Just 1
-    , callValue = Just 1
+    , callValue = Nothing
     , callData = Just hex
     , callNonce = Nothing
     }
 
 runRelayer :: FilePath -> ContractConfig -> IO ()
 runRelayer configFile config = do
-  h <- openFile "/dev/null" ReadMode
+  _ <- openFile "/dev/null" ReadMode
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -242,36 +247,88 @@ blockToHeader rlp = blockHeaderHex
     RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
     blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
+
 runEthereum :: Eth.Provider -> FilePath -> IO ()
 runEthereum node runDir = withGeth runDir $ do
-  let contract = "solidity/helloWorld.sol"
+  let contract = "solidity/SolanaClient.sol"
   putStrLn $ "Compiling " <> contract
 
   h <- openFile "/dev/null" ReadMode
   do
-    let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
+    let p = (proc solcPath ["--optimize", "--bin", contract, "-o", "solidity", "--overwrite" ])
           { std_out = UseHandle h
           , std_err = UseHandle h
           }
     readCreateProcessWithExitCode p "" >>= \case
       good@(ExitSuccess, _, _) -> print good
       bad -> error $ show bad
-  bin <- BS.readFile "solidity/HelloWorld.bin"
+  bin <- BS.readFile "solidity/SolanaClient.bin"
 
-  let runWeb3'' = runWeb3' node
+  let
+    runWeb3'' = runWeb3' node
 
-  runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
-    Left err -> putStrLn $ "Balance query failed: " <> show err
-    Right balance -> putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
-  putStrLn "Sending transaction"
-  runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
-    Left err -> putStrLn $ "Transaction failed: " <> show err
-    Right hex -> do
-      putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-      threadDelay 5e6
-      runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
-        Left err -> putStrLn $ "Query failed: " <> show err
-        Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
+    invokeContract :: Address
+                   -> Eth.DefaultAccount Eth.Web3 a
+                   -> Eth.Web3 a
+    invokeContract a = Eth.withAccount ()
+                       . Eth.withParam (Eth.to .~ a)
+                       . Eth.withParam (Eth.gasLimit .~ 1e6)
+                       . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
+
+    printCurrentBalance = do
+      balance <- runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
+        Left err -> throwError $ "Balance query failed: " <> show err
+        Right balance -> pure balance
+      liftIO $ putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
+
+    printCurrentBlockNumber = do
+      height <- runWeb3'' Eth.blockNumber >>= \case
+        Left err -> throwError $ "Height query failed: " <> show err
+        Right height -> pure height
+      liftIO $ putStrLn $ "Height is " <> show height
+
+  res <- runExceptT $ do
+    printCurrentBalance
+
+    liftIO $ putStrLn "Creating contract"
+
+    hex <- runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
+      Left err -> throwError $ "Transaction failed: " <> show err
+      Right hex -> pure hex
+    liftIO $ putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
+    liftIO $ threadDelay 9e6
+
+    printCurrentBalance
+    printCurrentBlockNumber
+
+    receipt <- runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
+      Left err -> throwError $ "Query failed: " <> show err
+      Right receipt -> pure receipt
+
+    liftIO $ putStrLn $ "Transaction receipt:\n  " <> show receipt
+
+    for_ (Eth.receiptContractAddress =<< receipt) $ \ca -> do
+      liftIO $ putStrLn $ "Contract address : " <> show ca
+      runWeb3'' (Eth.getCode ca Eth.Latest) >>= \case
+        Left err -> throwError $ "Get code failed: " <> show err
+        Right hexx -> liftIO $ putStrLn $ "GetCode: " <> show hexx
+
+      _ <- runWeb3'' (invokeContract ca $ Contracts.setEpoch 123 [] []) >>= \case
+        Left err -> throwError $ "Invocation failed: " <> show err
+        Right _ -> liftIO $ putStrLn "Set epoch submitted"
+
+      liftIO $ threadDelay 6e6
+
+      r <- runWeb3'' (invokeContract ca $ Contracts.epoch) >>= \case
+        Left err -> throwError $ "Invocation failed: " <> show err
+        Right r -> pure r
+      liftIO $ putStrLn $ "Queried epoch: " <> show r
+      printCurrentBalance
+      printCurrentBlockNumber
+
+  case res of
+    Left err -> putStrLn err
+    Right _ -> pure ()
 
   putStrLn "All done - network can be stopped now"
 
@@ -313,7 +370,7 @@ runGeth ::  FilePath -> IO ()
 runGeth runDir = do
   let
     dataDirArgs = [ "--datadir", runDir <> "/.ethereum"]
-    httpArgs = [ "--http", "--rpcapi", "eth,net,web3,debug" ]
+    httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--etherbase=0x0000000000000000000000000000000000000001" ]
     initArgs = [ "init", genesisPath]
     privateArgs = [ "--nodiscover" ]
