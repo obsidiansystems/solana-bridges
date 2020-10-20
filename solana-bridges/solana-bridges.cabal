@@ -5,6 +5,7 @@ version:             0.1.0.0
 author:              Obsidian Systems LLC
 maintainer:          maintainer@obsidian.systems
 build-type:          Simple
+extra-source-files:  solana-bridges/solidity/SolanaClient.sol
 
 library
   hs-source-dirs: src
@@ -12,6 +13,7 @@ library
   ghc-options:         -Wall
   exposed-modules: Solana.Relayer
                  , Solana.Types
+                 , Ethereum.Contracts
 
   build-depends:       base >=4.13 && <4.14
                      , aeson

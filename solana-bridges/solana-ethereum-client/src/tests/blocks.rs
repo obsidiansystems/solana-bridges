@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use hex_literal::hex;
 
 pub const HEADER_400000: &str = HEADER_4000XX[0];
