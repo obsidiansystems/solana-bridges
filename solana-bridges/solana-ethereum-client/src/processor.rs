@@ -21,7 +21,7 @@ use solana_sdk::{
 
 pub fn process_instruction<'a>(
     program_id: &Pubkey,
-    accounts: &'a [AccountInfo<'a>],
+    accounts: &[AccountInfo<'a>],
     instruction_data: &[u8],
 ) -> ProgramResult {
     info!("Ethereum light client entrypoint");
@@ -65,21 +65,25 @@ pub fn process_instruction<'a>(
             }
         },
         Instruction::ProveInclusion(pi) => {
+            if account.is_writable {
+                return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
+            }
             let mut raw_data = account.try_borrow_mut_data()?;
             let data = interp(&mut *raw_data);
-            let mh = min_height(data);
-            if mh < pi.height {
-                panic!("too old")
+            let min_h = min_height(data);
+            if min_h > pi.height {
+                panic!("too old {} {}", min_h, pi.height)
             }
-            if mh + data.headers.len() as u64 >= pi.height {
-                panic!("too new")
+            let max_h = min_h + data.headers.len() as u64;
+            if max_h <= pi.height {
+                panic!("too new {} {}", max_h, pi.height)
             }
-            let offset = lowest_offset(data) + (pi.height - mh) as usize % data.headers.len();
+            let offset = lowest_offset(data) + (pi.height - min_h) as usize % data.headers.len();
             let block = read_block(data, offset)?;
             //if block.hash != pi.block_hash {
             //    panic!("wrong block at height")
             //}
-            let expected_root = block.transactions_root; // pi.block_hash
+            let expected_root = block.receipts_root; // pi.block_hash
             let rlp = Rlp::new(&*pi.proof);
             let proof = rlp.iter().map(|rlp| rlp.data());
             verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
@@ -119,8 +123,8 @@ pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
 pub fn min_height(data: &Storage) -> u64 {
     let len = data.headers.len();
     match *data {
-        Storage { full: false, offset, .. } => data.height - offset as u64,
-        Storage { full: true, .. } => data.height - len as u64,
+        Storage { full: false, offset, .. } => data.height - offset as u64 + 1,
+        Storage { full: true, .. } => data.height - len as u64 + 1,
     }
 }
 

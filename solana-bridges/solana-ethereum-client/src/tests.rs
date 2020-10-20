@@ -199,10 +199,7 @@ pub fn test_inclusion(receipt_index: u64,
 
     let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
         let mut stream = RlpStream::new();
-        stream.begin_list(node.len());
-        for item in node {
-            stream.append(item);
-        }
+        stream.append_list::<&[u8], _>(node);
         stream.out()
     }).collect();
 
@@ -212,6 +209,66 @@ pub fn test_inclusion(receipt_index: u64,
         proof_vecs.iter().map(Deref::deref).map(Ok),
         receipt_data,
     )?);
+    Ok(())
+}
+
+pub fn test_inclusion_instruction(
+    receipt_index: u64,
+    receipt_data: &[u8],
+    header_data: &[u8],
+    proof_data: &[&[&[u8]]],
+) -> Result<(), DecoderError> {
+    let program_id = Pubkey::default();
+    let key = Pubkey::default();
+    let mut lamports = 0;
+    let mut raw_data = vec![0; 1 << 16];
+
+    let owner = Pubkey::default();
+    let account = AccountInfo {
+        key: &key,
+        is_signer: true,
+        is_writable: true,
+        lamports: Rc::new(RefCell::new(&mut lamports)),
+        data: Rc::new(RefCell::new(&mut raw_data)),
+        owner: &owner,
+        executable: false,
+        rent_epoch: Epoch::default(),
+    };
+
+    let mut accounts = vec![account];
+
+    let header: BlockHeader = rlp::decode(header_data).unwrap();
+
+    {
+        let instruction_init: Vec<u8> = Instruction::Initialize(header.clone()).pack();
+        process_instruction(&program_id, &accounts, &instruction_init).unwrap();
+    }
+
+    {
+        let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
+            let mut stream = RlpStream::new();
+            stream.append_list::<&[u8], _>(node);
+            stream.out()
+        }).collect();
+
+        let proof = {
+            let mut stream = RlpStream::new();
+            stream.append_list::<Vec<u8>, _>(&*proof_vecs);
+            stream.out()
+        };
+
+        accounts[0].is_writable = false;
+
+        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(ProveInclusion {
+            height: header.number,
+            block_hash: hash_header(&header, false),
+            expected_value: receipt_data.to_vec(),
+            key: rlp::encode(&receipt_index),
+            proof,
+        }).pack();
+        process_instruction(&program_id, &accounts, &instruction_proove_incl).unwrap();
+    }
+
     Ok(())
 }
 
@@ -225,6 +282,18 @@ pub fn test_inclusion_0() -> Result<(), DecoderError> {
 pub fn test_inclusion_1() -> Result<(), DecoderError> {
     use inclusion::test_1::*;
     test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+}
+
+#[test]
+pub fn test_inclusion_instruction_0() -> Result<(), DecoderError> {
+    use inclusion::test_0::*;
+    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+}
+
+#[test]
+pub fn test_inclusion_instruction_1() -> Result<(), DecoderError> {
+    use inclusion::test_1::*;
+    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {

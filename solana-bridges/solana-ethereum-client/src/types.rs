@@ -17,6 +17,7 @@ pub enum CustomError {
     DeserializeStorageFailed,
     AlreadyInitialized,
     InvalidProof,
+    WritableHistoryDuringProofCheck,
 
     //DecodeError(DecodeError),
 }
