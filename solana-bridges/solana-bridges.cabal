@@ -13,6 +13,7 @@ library
   ghc-options:         -Wall
   exposed-modules: Solana.Relayer
                  , Solana.Types
+                 , Solana.RPC
                  , Ethereum.Contracts
 
   build-depends:       base >=4.13 && <4.14

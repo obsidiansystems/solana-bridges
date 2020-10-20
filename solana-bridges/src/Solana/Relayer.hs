@@ -8,7 +8,7 @@
 
 module Solana.Relayer where
 
-import           Control.Concurrent (threadDelay, forkIO, killThread)
+import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad
@@ -55,129 +55,27 @@ import qualified System.Process.ByteString.Lazy
 import Control.Lens
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Binary.Get
-import qualified Network.WebSockets as WebSockets
-import Data.IORef
-import Control.Concurrent.MVar
-import Data.IntMap (IntMap)
-import qualified Data.IntMap.Strict as IntMap
-import Network.Socket(withSocketsDo)
 import Data.Foldable
-import Data.Bifunctor
 import Data.Void
 
 
-import qualified Network.HTTP.Client as HTTPClient
-import qualified Network.HTTP.Types.Status as HTTP
-import Network.HTTP.Client.TLS (newTlsManager)
 import qualified Ethereum.Contracts as Contracts
+import Solana.RPC
 
 
 import Solana.Types
 
-decodeMsg :: WebSockets.DataMessage -> Either String (Either SolanaRpcNotification SolanaRpcResult)
-decodeMsg = \case
-    WebSockets.Text x _ -> go x
-    WebSockets.Binary x -> go x
-  where
-    go x = first (<> show x) $ case decode' x of
-      Just rpcresult -> Right (Right rpcresult)
-      Nothing -> Left <$> eitherDecode' x
-
 
 -- solana -> eth
 mainRelayerEth :: IO ()
-mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \conn -> do
-  httpMgr <- newTlsManager
+mainRelayerEth = withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+  liftIO $ T.putStrLn "connected"
 
-  T.putStrLn "connected"
-
-  requestId <- newIORef 0
-  requestHandlers :: IORef (IntMap (Value -> IO ())) <- newIORef IntMap.empty
-  notifyHandlers :: IORef (IntMap (Either [Value] (Value -> IO ()))) <- newIORef IntMap.empty
-
-  rpcCriticalSection <- newMVar ()
-
-  let
-    rpcWebRequest :: FromJSON b => T.Text -> IO b
-    rpcWebRequest method = rpcWebRequest' method $ (Nothing :: Maybe Void)
-
-    rpcWebRequest' :: (ToJSON a, FromJSON b) => T.Text -> Maybe a -> IO b
-    rpcWebRequest' method args = rpcWebRequest'' method args >>= either (error . show) pure
-
-    rpcWebRequest'' :: forall a b. (ToJSON a, FromJSON b) => T.Text -> Maybe a -> IO (Either Value b)
-    rpcWebRequest'' method params = do
-      req0 <- (HTTPClient.parseRequest "http://127.0.0.1:8899")
-      let req = req0
-            { HTTPClient.method = "POST"
-            , HTTPClient.requestBody = HTTPClient.RequestBodyLBS $ encode $ SolanaRpcRequest
-              { _solanaRpcRequest_jsonrpc = JsonRpcVersion
-              , _solanaRpcRequest_id = 1
-              , _solanaRpcRequest_method = method
-              , _solanaRpcRequest_params = params
-              }
-            , HTTPClient.requestHeaders = ("Content-Type", "application/json") : HTTPClient.requestHeaders req0
-            }
-
-      resultLBS <- HTTPClient.httpLbs req httpMgr
-      unless (HTTP.statusIsSuccessful $ HTTPClient.responseStatus resultLBS) $
-        error $ show $ HTTPClient.responseStatus resultLBS
-
-      either (error . (<> show (HTTPClient.responseBody resultLBS))) (pure . bimap _solanaRpcError_error _solanaRpcResult_result . unSolanaRpcErrorOrResult)
-        $ eitherDecode' @(SolanaRpcErrorOrResult b) $ HTTPClient.responseBody resultLBS
-
-
-    rpcWSRequest :: forall a. ToJSON a => T.Text -> Maybe a -> IO Value
-    rpcWSRequest method params = withMVar rpcCriticalSection $ \() -> do
-      result <- newEmptyMVar
-      sendRPCRequest (putMVar result)
-      readMVar result
-      where
-        sendRPCRequest :: (Value -> (IO ())) -> IO ()
-        sendRPCRequest handler = do
-          newId <- atomicModifyIORef' requestId $ \x -> (x, succ x)
-          join $ atomicModifyIORef' requestHandlers $ \oldState -> (,) (IntMap.insert newId handler oldState) $ do
-            WebSockets.sendBinaryData conn $ Data.Aeson.encode $ SolanaRpcRequest
-              { _solanaRpcRequest_jsonrpc = JsonRpcVersion
-              , _solanaRpcRequest_id = newId
-              , _solanaRpcRequest_method = method
-              , _solanaRpcRequest_params = params
-              }
-
-    sendRPCSubscription :: (ToJSON a, FromJSON b) => T.Text -> Maybe a -> (Either String b -> IO ()) -> IO ()
-    sendRPCSubscription method params handler = do
-      subIdJSON <- rpcWSRequest method params
-      -- sendRPCRequest method params $ \subIdJSON -> do
-      subId <- case fromJSON subIdJSON of
-        Success x -> pure x
-        Error x -> error $ x <> ": " <> show subIdJSON
-      join $ atomicModifyIORef' notifyHandlers $ \oldState ->
-        let
-          handler' :: Value -> IO ()
-          handler' x = handler $ case fromJSON x of
-            Success x' -> Right x'
-            Error x' -> Left $ x' <> ": " <> show subIdJSON
-          newState = IntMap.insert subId (Right handler') oldState
-          pendingNotifications = traverse_ handler' $ view (ix subId . _Left) oldState
-        in (newState, pendingNotifications)
-
-  threadId <- forkIO $ forever $ do
-    msgOrNotify <- either error pure . decodeMsg =<< WebSockets.receiveDataMessage conn
-    case msgOrNotify of
-      Left msg -> join $ atomicModifyIORef' notifyHandlers $ \oldState ->
-        case IntMap.lookup (_solanaRpcNotificationParams_subscription $ _solanaRpcNotification_params msg) oldState of
-          Nothing -> (IntMap.insert (_solanaRpcNotificationParams_subscription $ _solanaRpcNotification_params msg) (Left $ [_solanaRpcNotificationParams_result $ _solanaRpcNotification_params msg]) oldState, pure ())
-          Just (Right handler) -> (oldState, handler $ _solanaRpcNotificationParams_result $ _solanaRpcNotification_params msg)
-          Just (Left stillPending) -> (IntMap.insert (_solanaRpcNotificationParams_subscription $ _solanaRpcNotification_params msg) (Left $ stillPending <> [_solanaRpcNotificationParams_result $ _solanaRpcNotification_params msg]) oldState, pure ())
-      Right msg -> join $ atomicModifyIORef' requestHandlers $ \oldState ->
-        case IntMap.lookup (_solanaRpcResult_id msg) oldState of
-          Nothing -> (,) oldState $ pure ()
-          Just handler -> (,) (IntMap.delete (_solanaRpcResult_id msg) oldState) $
-            handler (_solanaRpcResult_result msg)
 
   epochSchedule :: SolanaEpochSchedule <- rpcWebRequest "getEpochSchedule"
   epochInfo0 :: SolanaEpochInfo <- rpcWebRequest "getEpochInfo"
 
-  print epochInfo0
+  liftIO $ print epochInfo0
 
   -- epochInfoRef <- newMVar epochInfo0
 
@@ -186,19 +84,21 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
 
   let epochFromSlot' = epochFromSlot epochSchedule
 
-  print epochSchedule
+  liftIO $ print epochSchedule
 
   -- print leaderSchedule
   -- sendRPCSubscription @Void @SolanaSlotNotification "slotSubscribe" Nothing print
 
+  restoreRPC <- unliftSolanaRpcM
+
   sendRPCSubscription @Void @Word64 "rootSubscribe" (Nothing :: Maybe Void) $ \case
     Left bad -> error bad
-    Right x -> do
-      print $ epochFromSlot' x
+    Right x -> restoreRPC $ do
+      liftIO $ print $ epochFromSlot' x
 
       -- fetch block in a loop; it might not be available instantly
       let
-        loop :: Int -> IO ()
+        loop :: Int -> SolanaRpcM IO ()
         loop n
             | n <= 0 = error "retries exhausted"
             | otherwise = do
@@ -206,10 +106,10 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
               case mConfirmedBlock of
                 Left _ -> pure ()
                 Right Nothing -> do
-                  T.putStrLn $ T.concat [ "retry: slot:", T.pack $ show x ]
-                  threadDelay 1e5
+                  liftIO $ T.putStrLn $ T.concat [ "retry: slot:", T.pack $ show x ]
+                  liftIO $ threadDelay 1e5
                   loop (pred n)
-                Right (Just confirmedBlock) -> T.putStrLn $ T.concat
+                Right (Just confirmedBlock) -> liftIO $ T.putStrLn $ T.concat
                   [ "this shsould get sent: slot:", T.pack $ show x
                   , ", parentSlot: ", T.pack $ show $ _solanaCommittedBlock_parentSlot confirmedBlock
                   , ", hash: ", base58ByteStringToText $ _solanaCommittedBlock_blockhash confirmedBlock
@@ -218,15 +118,9 @@ mainRelayerEth = withSocketsDo $ WebSockets.runClient "127.0.0.1" 8900 "/" $ \co
       loop 10
 
 
+  () <- forever $ liftIO $ threadDelay 1e5
 
-      -- putStr "root: " *> print x
-
-  -- sendRPCSubscription "rootSubscribe" Nothing $ \x -> putStr "root: " *> print x
-  -- sendRPCSubscription @Void @SolanaVote "voteSubscribe" Nothing $ \x -> putStr "vote: " *> print x
-
-  () <- finally (forever $ threadDelay 1e5) $ killThread threadId
-
-  T.putStrLn "oof"
+  liftIO $ T.putStrLn "oof"
 
   --
 
