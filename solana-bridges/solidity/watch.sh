@@ -9,7 +9,7 @@ watchdirs=("$root/solana-bridges/solidity")
 
 while true; do
     clear
-    solc HelloWorld.sol
+    solc SolanaClient.sol
     if ! inotifywait -qre close_write "${watchdirs[@]}"; then
         exit "inotifywait failed"
     fi

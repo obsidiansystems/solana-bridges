@@ -250,19 +250,7 @@ blockToHeader rlp = blockHeaderHex
 
 runEthereum :: Eth.Provider -> FilePath -> IO ()
 runEthereum node runDir = withGeth runDir $ do
-  let contract = "solidity/SolanaClient.sol"
-  putStrLn $ "Compiling " <> contract
-
-  h <- openFile "/dev/null" ReadMode
-  do
-    let p = (proc solcPath ["--optimize", "--bin", contract, "-o", "solidity", "--overwrite" ])
-          { std_out = UseHandle h
-          , std_err = UseHandle h
-          }
-    readCreateProcessWithExitCode p "" >>= \case
-      good@(ExitSuccess, _, _) -> print good
-      bad -> error $ show bad
-  bin <- BS.readFile "solidity/SolanaClient.bin"
+  bin <- BS.readFile "solidity/dist/SolanaClient.bin"
 
   let
     runWeb3'' = runWeb3' node
