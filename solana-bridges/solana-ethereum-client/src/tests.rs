@@ -182,9 +182,6 @@ enum TestError {
     ProgError(ProgramError),
 }
 
-fn hex_to_bytes(h: &str) -> Result<Vec<u8>, TestError> {
-    return hex::decode(h).map_err(|_| TestError::HexError);
-}
 fn decode_rlp <T:Decodable> (bytes: &[u8]) -> Result<T, TestError> {
     let rlp = Rlp::new(bytes);
     return T::decode(&rlp).map_err(|_| TestError::RlpError);
@@ -221,13 +218,13 @@ pub fn test_inclusion(receipt_index: u64,
 #[test]
 pub fn test_inclusion_0() -> Result<(), DecoderError> {
     use inclusion::test_0::*;
-    test_inclusion(receipt_index, &*receipt_data, &*header_data, &*proof_data)
+    test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
 #[test]
 pub fn test_inclusion_1() -> Result<(), DecoderError> {
     use inclusion::test_1::*;
-    test_inclusion(receipt_index, &*receipt_data, &*header_data, &*proof_data)
+    test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
