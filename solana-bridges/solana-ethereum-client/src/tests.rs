@@ -90,7 +90,8 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         {
             let r = accounts[0].data.try_borrow_mut().unwrap();
             let data = interp(&*r);
-            println!("ring size: {}, current block short no: {}", data.headers.len(), n);
+            println!("ring size: {}, full: {}, current block short no: {}",
+                     data.headers.len(), data.full, n);
         }
         let header_4000xx = decode_rlp(&hex_to_bytes(HEADER_4000XX[n])?)?;
         let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();

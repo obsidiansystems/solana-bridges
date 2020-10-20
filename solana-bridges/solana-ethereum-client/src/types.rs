@@ -10,7 +10,7 @@ pub enum CustomError {
     DecodeBlockFailed,
     DecodeHeaderFailed,
     VerifyHeaderFailed,
-    NoParentBlock,
+    BlockNotFound,
     UnpackExtraDataFailed,
     UnpackInstructionFailed,
     InvalidAccountOwner,
