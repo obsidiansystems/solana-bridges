@@ -8,8 +8,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-{-# OPTIONS_GHC -Wno-unused-local-binds #-}
-
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
@@ -27,7 +25,6 @@ import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.ByteArray.HexString
-import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.Default (def)
 import Data.Functor.Compose
 import Data.Foldable
@@ -51,28 +48,23 @@ import System.Process (CreateProcess(..), StdStream(..), callCommand, createProc
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
-import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
-import qualified Data.Solidity.Prim.Bytes
-import qualified Data.Solidity.Prim.Int
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import qualified Network.Ethereum.Account as Eth
 import qualified Network.Ethereum.Api.Debug as Eth
 import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getTransactionReceipt, sendTransaction)
 import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), TxReceipt(..))
-import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
 
+import Ethereum.Contracts as Contracts
 import Solana.RPC
 import Solana.Types
-import qualified Ethereum.Contracts as Contracts
 
 
 -- solana -> eth
@@ -337,14 +329,6 @@ runEthereum node runDir = withGeth runDir $ do
   let
     runWeb3'' = runWeb3' node
 
-    invokeContract :: Address
-                   -> Eth.DefaultAccount Eth.Web3 a
-                   -> Eth.Web3 a
-    invokeContract a = Eth.withAccount ()
-                       . Eth.withParam (Eth.to .~ a)
-                       . Eth.withParam (Eth.gasLimit .~ 1e8)
-                       . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
-
     printCurrentBalance = do
       balance <- runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
         Left err -> throwError $ "Balance query failed: " <> show err
@@ -380,53 +364,6 @@ runEthereum node runDir = withGeth runDir $ do
             liftIO $ threadDelay 1e6
             go
 
-    simulate ca name x = do
-      let qname = "'" <> name <> "'"
-      liftIO $ putStr $ "Invoking " <> qname <> " ...... "
-      runWeb3'' (invokeContract ca x) >>= \case
-        Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-        Right r -> do
-          liftIO $ putStrLn $ show r
-          pure r
-
-    submit ca name x = do
-      let qname = "'" <> name <> "'"
-      liftIO $ putStr $ "Submitting " <> qname <> " ...... "
-      runWeb3'' (invokeContract ca x) >>= \case
-        Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-        Right r ->
-          if null $ Eth.receiptLogs r
-            then throwError "Failed - no recipt"
-            else liftIO $ putStrLn "Success"
-
-
-    getInitialized ca = simulate ca "initialized" Contracts.initialized
-
-    getEpoch ca = fromInteger @Word64 . toInteger <$> simulate ca "epoch" Contracts.epoch
-    getLastSlot ca = fromInteger @Word64 . toInteger <$> simulate ca "lastSlot" Contracts.lastSlot
-    getLastHash ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate ca "lastHash" Contracts.lastHash
-
-    getSlotLeader ca s = simulate ca "getSlotLeader" $ Contracts.getSlotLeader $ fromInteger . toInteger @Word64 $ s
-
-    setEpoch :: Address -> Word64 -> SolanaLeaderSchedule -> ExceptT String IO ()
-    setEpoch ca e _ldrSched = void $ submit ca "setEpoch" $ Contracts.setEpoch (word64ToSol e) [] []
-      -- todo: leader schedule handling
-
-    word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
-    word64ToSol = fromInteger . toInteger
-
-    unsafeBytes32ToSol :: Base58ByteString -> Data.Solidity.Prim.Bytes.BytesN 32
-    unsafeBytes32ToSol = unsafeSizedByteArray . ByteArray.convert . unBase58ByteString
-
-    addBlocks ca (blocks :: [(Word64, SolanaCommittedBlock)])= void $ submit ca "addBlocks" $ Contracts.addBlocks
-      (word64ToSol . fst <$> blocks)
-      (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
-      (word64ToSol . _solanaCommittedBlock_parentSlot . snd <$> blocks)
-      (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd <$> blocks)
-
-
-    getSeenBlocks ca = simulate ca "seenBlocks" Contracts.seenBlocks
-
   res <- runExceptT $ do
     printCurrentBalance
 
@@ -439,7 +376,7 @@ runEthereum node runDir = withGeth runDir $ do
 
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
-    void $ getSeenBlocks ca
+    void $ getSeenBlocks node ca
 
     Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
       liftIO $ T.putStrLn "connected"
@@ -452,13 +389,13 @@ runEthereum node runDir = withGeth runDir $ do
         loop = do
           -- epochSchedule <- getEpochSchedule
 
-          Right initializedAtStartup <- lift $ runExceptT $ getInitialized ca
+          Right initializedAtStartup <- lift $ runExceptT $ getInitialized node ca
 
           bootEpochInfo <- getEpochInfo
 
           contractSlot <- if initializedAtStartup
             then do
-              Right contractSlot <- lift $ runExceptT $ getLastSlot ca
+              Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
               pure contractSlot
             else do
               liftIO $ putStrLn "initializing"
@@ -471,9 +408,9 @@ runEthereum node runDir = withGeth runDir $ do
                 epochInfo0 = epochFromSlot' slot0
               Right (Just block0) <- getConfirmedBlock slot0
               Right () <- lift $ runExceptT $ do
-                setEpoch ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
+                setEpoch node ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
                 liftIO $ threadDelay 4e6
-                addBlocks ca [(slot0, block0)]
+                addBlocks node ca [(slot0, block0)]
               pure slot0
 
           confirmedBlockSlots <- getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
@@ -487,7 +424,7 @@ runEthereum node runDir = withGeth runDir $ do
           liftIO $ print $ take 2 blocksAndSlots
 
           when (not $ null confirmedBlocks) $ do
-            Right () <- lift $ runExceptT $ addBlocks ca blocksAndSlots
+            Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
             pure ()
 
           -- liftIO $ print epochInfo0

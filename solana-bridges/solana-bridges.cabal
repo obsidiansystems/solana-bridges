@@ -15,6 +15,7 @@ library
                  , Solana.Types
                  , Solana.RPC
                  , Ethereum.Contracts
+                 , Ethereum.Contracts.Abi
 
   build-depends:       base >=4.13 && <4.14
                      , aeson
