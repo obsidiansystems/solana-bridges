@@ -251,8 +251,6 @@ blockToHeader rlp = blockHeaderHex
 
 runEthereum :: Eth.Provider -> FilePath -> IO ()
 runEthereum node runDir = withGeth runDir $ do
-  bin <- BS.readFile "solidity/dist/SolanaClient.bin"
-
   let
     runWeb3'' = runWeb3' node
 
@@ -276,6 +274,25 @@ runEthereum node runDir = withGeth runDir $ do
         Right height -> pure height
       liftIO $ putStrLn $ "Current block number is " <> show height
 
+    deployContract path = do
+      bin <- liftIO $ BS.readFile path
+      liftIO $ putStrLn "Creating contract"
+      runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
+        Left err -> throwError $ "Transaction failed: " <> show err
+        Right tx -> do
+          liftIO $ putStrLn $ "Submitted contract in transaction " <> T.unpack (toText tx)
+          pure tx
+
+    getContractAddress tx = do
+      receipt <- runWeb3'' (Eth.getTransactionReceipt tx) >>= \case
+        Left err -> throwError $ "Query failed: " <> show err
+        Right Nothing -> throwError $ "Receipt not found"
+        Right (Just r) -> pure r
+      case Eth.receiptContractAddress receipt of
+        Nothing -> throwError $ "Contract address not found"
+        Just ca -> pure ca
+
+
     invoke ca printReturn name x = do
       let qname = "'" <> name <> "'"
       liftIO $ putStr $ "Invoking " <> qname <> " ...... "
@@ -292,26 +309,16 @@ runEthereum node runDir = withGeth runDir $ do
 
     setEpoch ca e = void $ invoke ca False "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
 
-
   res <- runExceptT $ do
     printCurrentBalance
 
-    liftIO $ putStrLn "Creating contract"
-    hex <- runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
-      Left err -> throwError $ "Transaction failed: " <> show err
-      Right hex -> pure hex
-    liftIO $ putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
+    tx <- deployContract "solidity/dist/SolanaClient.bin"
+
     liftIO $ threadDelay 4e6
 
     printCurrentBlockNumber
 
-    receipt <- runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
-      Left err -> throwError $ "Query failed: " <> show err
-      Right Nothing -> throwError $ "Receipt not found"
-      Right (Just r) -> pure r
-    ca <- case Eth.receiptContractAddress receipt of
-      Nothing -> throwError $ "Contract address not found"
-      Just ca -> pure ca
+    ca <- getContractAddress tx
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
     setEpoch ca 123
