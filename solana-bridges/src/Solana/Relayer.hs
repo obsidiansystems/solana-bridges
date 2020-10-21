@@ -329,13 +329,13 @@ runEthereum node runDir = withGeth runDir $ do
   let
     runWeb3'' = runWeb3' node
 
-    printCurrentBalance = do
+    _printCurrentBalance = do
       balance <- runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
         Left err -> throwError $ "Balance query failed: " <> show err
         Right balance -> pure balance
       liftIO $ putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
 
-    printCurrentBlockNumber = do
+    _printCurrentBlockNumber = do
       height <- runWeb3'' Eth.blockNumber >>= \case
         Left err -> throwError $ "Block number query failed: " <> show err
         Right height -> pure height
@@ -343,7 +343,7 @@ runEthereum node runDir = withGeth runDir $ do
 
     deployContract path = do
       bin <- liftIO $ BS.readFile path
-      liftIO $ putStrLn "Creating contract"
+      liftIO $ putStrLn "Deploying contract"
       runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
         Left err -> throwError $ "Transaction failed: " <> show err
         Right tx -> do
@@ -365,21 +365,17 @@ runEthereum node runDir = withGeth runDir $ do
             go
 
   res <- runExceptT $ do
-    printCurrentBalance
-
     tx <- deployContract "solidity/dist/SolanaClient.bin"
 
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
 
-    printCurrentBlockNumber
-
-    liftIO $ putStrLn $ "Contract address: " <> show ca
+    liftIO $ putStrLn $ "Contract deployed at address: " <> show ca
 
     void $ getSeenBlocks node ca
 
     Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
-      liftIO $ T.putStrLn "connected"
+      liftIO $ T.putStrLn "Connected to solana node"
 
       epochSchedule <- getEpochSchedule
       let
@@ -398,7 +394,7 @@ runEthereum node runDir = withGeth runDir $ do
               Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
               pure contractSlot
             else do
-              liftIO $ putStrLn "initializing"
+              liftIO $ putStrLn "Initializing contract"
               -- get the latest confirmed block in
               let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
               bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
@@ -418,16 +414,20 @@ runEthereum node runDir = withGeth runDir $ do
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
 
-          liftIO $ print bootEpochInfo
-          liftIO $ print confirmedBlockSlots
-          liftIO $ print contractSlot
-          liftIO $ print $ take 2 blocksAndSlots
-
+          liftIO $ do
+            let rpcSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+            putStr $ unlines
+              [ ""
+              , "Solana RPC slot: " <> show rpcSlot
+              , "Ethereum contract slot: " <> show contractSlot
+              , "Contract is behind by " <> show (rpcSlot - contractSlot)
+              ]
           when (not $ null confirmedBlocks) $ do
             Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
-            pure ()
+            liftIO $ do
+              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
+              putStrLn "Submitted new slots to contract"
 
-          -- liftIO $ print epochInfo0
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
 
@@ -490,10 +490,9 @@ runGeth runDir = do
   putStrLn =<< canonicalizePath genesisPath
   void $ readProcess gethPath (dataDirArgs <> initArgs) ""
 
-  putStrLn "Importing account"
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching node"
+  putStrLn "Launching ethereum node"
   h <- openFile (logsSubdir runDir) WriteMode
   let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   (_,_,_,ph) <- createProcess $ p
@@ -509,7 +508,7 @@ withGeth dir action = do
   where
     action' = printErrors $ do
       threadDelay 1e6
-      putStrLn "Waiting a few seconds for node to launch"
+      putStrLn "Waiting for ethereum node to launch"
       threadDelay 3e6
       action
 
