@@ -10,8 +10,6 @@
 
 module Solana.Relayer where
 
-import Control.Concurrent (forkIO)
-import Control.Concurrent (killThread)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Exception (SomeException, handle)
@@ -59,8 +57,8 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getTransactionReceipt, sendTransaction)
-import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), TxReceipt(..))
+import qualified Network.Ethereum.Api.Eth as Eth (getTransactionReceipt, sendTransaction)
+import qualified Network.Ethereum.Api.Types as Eth (Call(..), TxReceipt(..))
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
 
@@ -68,67 +66,6 @@ import Ethereum.Contracts as Contracts
 import Solana.RPC
 import Solana.Types
 
-
--- solana -> eth
-mainRelayerEth :: IO ()
-mainRelayerEth = withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
-  liftIO $ T.putStrLn "connected"
-
-  epochSchedule <- getEpochSchedule
-  epochInfo0 <- getEpochInfo
-
-  let epochFromSlot' = epochFromSlot epochSchedule
-
-  -- latestAvailable <- liftIO $ newTVarIO epochInfo0
-
-  -- epochInfoRef <- newMVar epochInfo0
-
-  leaderSchedule <- getLeaderSchedule $ _solanaEpochInfo_absoluteSlot epochInfo0
-  liftIO $ print epochInfo0
-  liftIO $ print leaderSchedule
-
-  _ <- error "staaaaaap"
-
-
-
-  liftIO $ print epochSchedule
-
-  -- print leaderSchedule
-
-  restoreRPC <- unliftSolanaRpcM
-
-  rootSubscribe $ \case
-    Left bad -> error bad
-    Right x -> restoreRPC $ do
-      liftIO $ print $ epochFromSlot' x
-
-      -- fetch block in a loop; it might not be available instantly
-      let
-        loop :: Int -> SolanaRpcM IO ()
-        loop n
-            | n <= 0 = error "retries exhausted"
-            | otherwise = do
-              mConfirmedBlock <- rpcWebRequest'' @_ @(Maybe SolanaCommittedBlock) "getConfirmedBlock" $ Just [x]
-              case mConfirmedBlock of
-                Left _ -> pure ()
-                Right Nothing -> do
-                  liftIO $ T.putStrLn $ T.concat [ "retry: slot:", T.pack $ show x ]
-                  liftIO $ threadDelay 1e5
-                  loop (pred n)
-                Right (Just confirmedBlock) -> liftIO $ T.putStrLn $ T.concat
-                  [ "this shsould get sent: slot:", T.pack $ show x
-                  , ", parentSlot: ", T.pack $ show $ _solanaCommittedBlock_parentSlot confirmedBlock
-                  , ", hash: ", base58ByteStringToText $ _solanaCommittedBlock_blockhash confirmedBlock
-                  , ", parentHash: ", base58ByteStringToText $ _solanaCommittedBlock_previousBlockhash confirmedBlock
-                  ]
-      loop 10
-
-
-  () <- forever $ liftIO $ threadDelay 1e5
-
-  liftIO $ T.putStrLn "oof"
-
-  --
 
 satsub :: Word64 -> Word64 -> Word64
 satsub x y
@@ -155,11 +92,12 @@ mainEthTestnet = do
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
   setupEth currentDir runDir
-  nodeThreadId <- forkIO $ runEthereum runDir
+  withGeth runDir $ forever $ threadDelay 1e6
 
+deployAndRunSolanaRelayer :: IO ()
+deployAndRunSolanaRelayer = do
   ca <- deploySolanaRelayContract def
-
-  finally (runRelayerEth def ca) $ killThread nodeThreadId
+  runRelayerEth def ca
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -330,25 +268,15 @@ blockToHeader rlp = blockHeaderHex
     blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
 
-runEthereum :: FilePath -> IO ()
-runEthereum runDir = withGeth runDir $ forever $ threadDelay 1e6
-
 
 deploySolanaRelayContract :: Eth.Provider -> IO Address
 deploySolanaRelayContract node = do
   let
     runWeb3'' = runWeb3' node
 
-    printCurrentBalance = do
-      balance <- runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
-        Left err -> throwError $ "Balance query failed: " <> show err
-        Right balance -> pure balance
-      liftIO $ putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
-
-
     deployContract path = do
       bin <- liftIO $ BS.readFile path
-      liftIO $ putStrLn "Creating contract"
+      liftIO $ putStrLn "Deploying contract"
       runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
         Left err -> throwError $ "Transaction failed: " <> show err
         Right tx -> do
@@ -370,12 +298,11 @@ deploySolanaRelayContract node = do
             go
 
   res <- runExceptT $ do
-    printCurrentBalance
-
     tx <- deployContract "solidity/dist/SolanaClient.bin"
 
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
+    liftIO $ putStrLn $ "Contract deployed at address: " <> show ca
     pure ca
   case res of
     Left err -> error err
@@ -383,21 +310,12 @@ deploySolanaRelayContract node = do
 
 runRelayerEth :: Eth.Provider -> Address -> IO ()
 runRelayerEth node ca = do
-  let
-    printCurrentBlockNumber = do
-      height <- runWeb3' node Eth.blockNumber >>= \case
-        Left err -> throwError $ "Block number query failed: " <> show err
-        Right height -> pure height
-      liftIO $ putStrLn $ "Current block number is " <> show height
   res <- runExceptT $ do
-    printCurrentBlockNumber
-
-    liftIO $ putStrLn $ "Contract address: " <> show ca
 
     void $ getSeenBlocks node ca
 
     Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
-      liftIO $ T.putStrLn "connected"
+      liftIO $ T.putStrLn "Connected to solana node"
 
       epochSchedule <- getEpochSchedule
       let
@@ -416,7 +334,7 @@ runRelayerEth node ca = do
               Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
               pure contractSlot
             else do
-              liftIO $ putStrLn "initializing"
+              liftIO $ putStrLn "Initializing contract"
               -- get the latest confirmed block in
               let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
               bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
@@ -436,16 +354,20 @@ runRelayerEth node ca = do
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
 
-          liftIO $ print bootEpochInfo
-          liftIO $ print confirmedBlockSlots
-          liftIO $ print contractSlot
-          liftIO $ print $ take 2 blocksAndSlots
-
+          liftIO $ do
+            let rpcSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+            putStr $ unlines
+              [ ""
+              , "Solana RPC slot: " <> show rpcSlot
+              , "Ethereum contract slot: " <> show contractSlot
+              , "Contract is behind by " <> show (rpcSlot - contractSlot)
+              ]
           when (not $ null confirmedBlocks) $ do
             Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
-            pure ()
+            liftIO $ do
+              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
+              putStrLn "Submitted new slots to contract"
 
-          -- liftIO $ print epochInfo0
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
 
@@ -508,10 +430,9 @@ runGeth runDir = do
   putStrLn =<< canonicalizePath genesisPath
   void $ readProcess gethPath (dataDirArgs <> initArgs) ""
 
-  putStrLn "Importing account"
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching node"
+  putStrLn "Launching ethereum node"
   h <- openFile (logsSubdir runDir) WriteMode
   let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   (_,_,_,ph) <- createProcess $ p
@@ -527,7 +448,7 @@ withGeth dir action = do
   where
     action' = printErrors $ do
       threadDelay 1e6
-      putStrLn "Waiting a few seconds for node to launch"
+      putStrLn "Waiting for ethereum node to launch"
       threadDelay 3e6
       action
 

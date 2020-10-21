@@ -86,21 +86,13 @@ invokeContract a = Eth.withAccount ()
 simulate :: (MonadIO m, MonadError String m, Show a) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 a -> m a
 simulate node ca name x = do
   let qname = "'" <> name <> "'"
-  liftIO $ putStr $ "Invoking " <> qname <> " ...... "
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-    Right r -> do
-      liftIO $ putStrLn $ show r
-      pure r
+    Right r -> pure r
 
 submit :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 Eth.TxReceipt -> m ()
 submit node ca name x = do
   let qname = "'" <> name <> "'"
-  liftIO $ putStr $ "Submitting " <> qname <> " ...... "
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-    Right r ->
-      if null $ Eth.receiptLogs r
-        then throwError "Failed - no recipt"
-        else liftIO $ putStrLn "Success"
-
+    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not finish"
