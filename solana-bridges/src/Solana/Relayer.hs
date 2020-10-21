@@ -16,9 +16,12 @@ import           Control.Monad.Catch (catch, finally)
 import           Control.Monad.Except (liftIO, runExceptT, throwError)
 import           Data.Aeson
 import           Data.Aeson.TH
+import           Data.Bool (bool)
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Default (def)
+import           Data.Foldable (fold)
+import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
 import           Data.String (IsString)
@@ -30,7 +33,7 @@ import           Network.Web3.Provider (runWeb3, runWeb3')
 import qualified Network.Web3.Provider as Eth
 import           Network.JsonRpc.TinyClient as Eth
 import qualified Network.Ethereum.Account as Eth
-import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getCode, getTransactionReceipt, sendTransaction)
+import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getTransactionReceipt, sendTransaction)
 import qualified Network.Ethereum.Api.Debug as Eth
 import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), receiptContractAddress)
 import           Network.Ethereum.Api.Types (Call(..))
@@ -321,19 +324,7 @@ blockToHeader rlp = blockHeaderHex
 
 runEthereum :: Eth.Provider -> FilePath -> IO ()
 runEthereum node runDir = withGeth runDir $ do
-  let contract = "solidity/SolanaClient.sol"
-  putStrLn $ "Compiling " <> contract
-
-  h <- openFile "/dev/null" ReadMode
-  do
-    let p = (proc solcPath ["--optimize", "--bin", contract, "-o", "solidity", "--overwrite" ])
-          { std_out = UseHandle h
-          , std_err = UseHandle h
-          }
-    readCreateProcessWithExitCode p "" >>= \case
-      good@(ExitSuccess, _, _) -> print good
-      bad -> error $ show bad
-  bin <- BS.readFile "solidity/SolanaClient.bin"
+  bin <- BS.readFile "solidity/dist/SolanaClient.bin"
 
   let
     runWeb3'' = runWeb3' node
@@ -354,48 +345,59 @@ runEthereum node runDir = withGeth runDir $ do
 
     printCurrentBlockNumber = do
       height <- runWeb3'' Eth.blockNumber >>= \case
-        Left err -> throwError $ "Height query failed: " <> show err
+        Left err -> throwError $ "Block number query failed: " <> show err
         Right height -> pure height
-      liftIO $ putStrLn $ "Height is " <> show height
+      liftIO $ putStrLn $ "Current block number is " <> show height
+
+    invoke ca printReturn name x = do
+      let qname = "'" <> name <> "'"
+      liftIO $ putStr $ "Invoking " <> qname <> " ...... "
+      runWeb3'' (invokeContract ca x) >>= \case
+        Left err -> throwError $ "Failed " <> qname <> ": " <> show err
+        Right r -> do
+          liftIO $ putStrLn $ bool "OK" (show r) printReturn
+          pure r
+
+    getEpoch ca = invoke ca True "epoch" Contracts.epoch
+    getLastSlot ca = invoke ca True "lastSlot" Contracts.lastSlot
+    getLastHash ca = invoke ca True "lastHash" Contracts.lastHash
+    getSlotLeader ca s = invoke ca True "getSlotLeader" $ Contracts.getSlotLeader s
+
+    setEpoch ca e = void $ invoke ca False "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
+
 
   res <- runExceptT $ do
     printCurrentBalance
 
     liftIO $ putStrLn "Creating contract"
-
     hex <- runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
       Left err -> throwError $ "Transaction failed: " <> show err
       Right hex -> pure hex
     liftIO $ putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-    liftIO $ threadDelay 9e6
+    liftIO $ threadDelay 4e6
 
-    printCurrentBalance
     printCurrentBlockNumber
 
     receipt <- runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
       Left err -> throwError $ "Query failed: " <> show err
-      Right receipt -> pure receipt
+      Right Nothing -> throwError $ "Receipt not found"
+      Right (Just r) -> pure r
+    ca <- case Eth.receiptContractAddress receipt of
+      Nothing -> throwError $ "Contract address not found"
+      Just ca -> pure ca
+    liftIO $ putStrLn $ "Contract address: " <> show ca
 
-    liftIO $ putStrLn $ "Transaction receipt:\n  " <> show receipt
+    setEpoch ca 123
+    liftIO $ threadDelay 4e6
 
-    for_ (Eth.receiptContractAddress =<< receipt) $ \ca -> do
-      liftIO $ putStrLn $ "Contract address : " <> show ca
-      runWeb3'' (Eth.getCode ca Eth.Latest) >>= \case
-        Left err -> throwError $ "Get code failed: " <> show err
-        Right hexx -> liftIO $ putStrLn $ "GetCode: " <> show hexx
+    printCurrentBlockNumber
 
-      _ <- runWeb3'' (invokeContract ca $ Contracts.setEpoch 123 [] []) >>= \case
-        Left err -> throwError $ "Invocation failed: " <> show err
-        Right _ -> liftIO $ putStrLn "Set epoch submitted"
-
-      liftIO $ threadDelay 6e6
-
-      r <- runWeb3'' (invokeContract ca $ Contracts.epoch) >>= \case
-        Left err -> throwError $ "Invocation failed: " <> show err
-        Right r -> pure r
-      liftIO $ putStrLn $ "Queried epoch: " <> show r
-      printCurrentBalance
-      printCurrentBlockNumber
+    void $ getEpoch ca
+    void $ getLastSlot ca
+    void $ getLastHash ca
+    void $ getSlotLeader ca 0
+    void $ getSlotLeader ca 1
+    void $ getSlotLeader ca 2
 
   case res of
     Left err -> putStrLn err
