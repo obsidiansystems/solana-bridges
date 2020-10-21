@@ -1,4 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -12,8 +14,10 @@ import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad
+import           Control.Monad.Trans (lift)
 import           Control.Monad.Catch (catch, finally)
-import           Control.Monad.Except (liftIO, runExceptT, throwError, ExceptT(..))
+import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Except (runExceptT, throwError, ExceptT(..))
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bool (bool)
@@ -62,13 +66,15 @@ import qualified Data.Map.Strict as Map
 
 import qualified Ethereum.Contracts as Contracts
 import Solana.RPC
-
+-- import qualified Data.Serialize.Get as Cereal
 
 import Solana.Types
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import qualified Data.ByteArray as ByteArray
 import qualified Data.Solidity.Prim.Int
 import qualified Data.Solidity.Prim.Bytes
+
+-- import Control.Concurrent.STM
 
 
 -- solana -> eth
@@ -88,6 +94,8 @@ mainRelayerEth = withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ d
   leaderSchedule <- getLeaderSchedule $ _solanaEpochInfo_absoluteSlot epochInfo0
   liftIO $ print epochInfo0
   liftIO $ print leaderSchedule
+
+  _ <- error "staaaaaap"
 
 
 
@@ -363,6 +371,8 @@ runEthereum node runDir = withGeth runDir $ do
           pure r
 
 
+    getInitialized ca = invoke ca True "initialized" Contracts.initialized
+
     getEpoch ca = fromInteger @Word64 . toInteger <$> invoke ca True "epoch" Contracts.epoch
     getLastSlot ca = fromInteger @Word64 . toInteger <$> invoke ca True "lastSlot" Contracts.lastSlot
     getLastHash ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> invoke ca True "lastHash" Contracts.lastHash
@@ -396,7 +406,7 @@ runEthereum node runDir = withGeth runDir $ do
       Left err -> throwError $ "Transaction failed: " <> show err
       Right hex -> pure hex
     liftIO $ putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-    liftIO $ threadDelay 4e6
+    liftIO $ threadDelay 10e6
 
     printCurrentBlockNumber
 
@@ -409,6 +419,42 @@ runEthereum node runDir = withGeth runDir $ do
       Just ca -> pure ca
 
     liftIO $ putStrLn $ "Contract address: " <> show ca
+
+    initializedAtStartup <- getInitialized ca
+
+    _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+      liftIO $ T.putStrLn "connected"
+
+      epochSchedule <- getEpochSchedule
+      let epochFromSlot' = epochFromSlot epochSchedule
+      -- epochSchedule <- getEpochSchedule
+      bootEpochInfo <- getEpochInfo
+      let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+      confirmedBlocks <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+
+      let
+        slot0 = fromMaybe (error "no block found") $ lastOf traverse confirmedBlocks
+        epochInfo0 = epochFromSlot' slot0
+
+      Right (Just block0) <- getConfirmedBlock slot0
+
+
+      contractSlot <- if initializedAtStartup
+        then do
+          getLastSlot ca
+        else do
+          liftIO $ putStrLn "initializing"
+          -- get the latest confirmed block in
+          Right () <- lift $ runExceptT $ do
+            setEpoch ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
+            addBlocks ca [(slot0, block0)]
+          pure slot0
+
+      liftIO $ print epochInfo0
+
+      undefined
+
+
 
     setEpoch ca 123 Map.empty
     liftIO $ threadDelay 4e6

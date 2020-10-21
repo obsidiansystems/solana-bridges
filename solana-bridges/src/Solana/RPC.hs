@@ -175,7 +175,7 @@ sendRPCSubscription method params handler = do
     in (newState, pendingNotifications)
 
 newtype SolanaRpcM m a = SolanaRpcM { runSolanaRpcM :: ReaderT SolanaRpcContext m a }
-  deriving (Functor, Applicative, Monad, MonadIO, MonadTrans)
+  deriving (Functor, Applicative, Monad, MonadIO, MonadTrans, MonadFail)
 
 -- TODO: tls
 data SolanaRpcConfig = SolanaRpcConfig
