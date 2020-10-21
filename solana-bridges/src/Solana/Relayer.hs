@@ -56,7 +56,6 @@ import Control.Lens
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Binary.Get
 import Data.Foldable
-import Data.Void
 
 
 import qualified Ethereum.Contracts as Contracts
@@ -64,6 +63,7 @@ import Solana.RPC
 
 
 import Solana.Types
+import Control.Concurrent.STM
 
 
 -- solana -> eth
@@ -71,27 +71,26 @@ mainRelayerEth :: IO ()
 mainRelayerEth = withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
   liftIO $ T.putStrLn "connected"
 
+  epochSchedule <- getEpochSchedule
+  epochInfo0 <- getEpochInfo
 
-  epochSchedule :: SolanaEpochSchedule <- rpcWebRequest "getEpochSchedule"
-  epochInfo0 :: SolanaEpochInfo <- rpcWebRequest "getEpochInfo"
+  let epochFromSlot' = epochFromSlot epochSchedule
 
-  liftIO $ print epochInfo0
+  -- latestAvailable <- liftIO $ newTVarIO epochInfo0
 
   -- epochInfoRef <- newMVar epochInfo0
 
-  -- leaderSchedule :: SolanaLeaderSchedule <- rpcWebRequest' "getLeaderSchedule" $ Just (_solanaEpochInfo_absoluteSlot epochInfo0, )
+  -- leaderSchedule :: SolanaLeaderSchedule <- rpcWebRequest' @[Word64] @SolanaLeaderSchedule "getLeaderSchedule" $ Just [_solanaEpochInfo_absoluteSlot epochInfo0]
 
 
-  let epochFromSlot' = epochFromSlot epochSchedule
 
   liftIO $ print epochSchedule
 
   -- print leaderSchedule
-  -- sendRPCSubscription @Void @SolanaSlotNotification "slotSubscribe" Nothing print
 
   restoreRPC <- unliftSolanaRpcM
 
-  sendRPCSubscription @Void @Word64 "rootSubscribe" (Nothing :: Maybe Void) $ \case
+  rootSubscribe $ \case
     Left bad -> error bad
     Right x -> restoreRPC $ do
       liftIO $ print $ epochFromSlot' x
