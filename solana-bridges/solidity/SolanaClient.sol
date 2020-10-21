@@ -2,7 +2,7 @@ pragma solidity >=0.6.0 <0.8.0;
 
 struct Slot {
     bool hasBlock;
-    uint256 blockHash;
+    bytes32 blockHash;
 }
 
 struct LeaderSchedule {
@@ -17,7 +17,7 @@ contract SolanaClient {
     bool public initialized;
 
     uint64 public seenBlocks;
-    uint256 public lastHash;
+    bytes32 public lastHash;
     uint64 public lastSlot;
     Slot[] public slots;
 
@@ -48,20 +48,20 @@ contract SolanaClient {
     }
 
     function addBlocks(uint64[] calldata blockSlots,
-                       uint256[] calldata blockHashes,
+                       bytes32[] calldata blockHashes,
                        uint64[] calldata parentSlots,
-                       uint256[] calldata parentBlockHashes) external {
+                       bytes32[] calldata parentBlockHashes) external {
         authorize();
         for(uint i = 0; i < blockSlots.length; i++)
             addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i]);
     }
 
-    function addBlock(uint64 slot, uint256 blockHash, uint64 parentSlot, uint256 parentBlockHash) external {
+    function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash) external {
         authorize();
         addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash);
     }
 
-    function addBlockAuthorized(uint64 slot, uint256 blockHash, uint64 parentSlot, uint256 parentBlockHash) private {
+    function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash) private {
         if(initialized) {
             if(slot <= lastSlot)
                 revert("Already seen slot");
@@ -86,7 +86,7 @@ contract SolanaClient {
         return s % HISTORY_SIZE;
     }
 
-    function fillSlot(uint64 s, uint256 hash) private {
+    function fillSlot(uint64 s, bytes32 hash) private {
         Slot storage slot = slots[slotOffset(s)];
         slot.blockHash = hash;
         slot.hasBlock = true;

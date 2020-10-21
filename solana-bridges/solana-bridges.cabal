@@ -25,6 +25,7 @@ library
                      , bytestring
                      , binary
                      , containers
+                     , memory
                      , data-default
                      , exceptions
                      , directory

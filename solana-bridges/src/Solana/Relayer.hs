@@ -13,15 +13,13 @@ import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad
 import           Control.Monad.Catch (catch, finally)
-import           Control.Monad.Except (liftIO, runExceptT, throwError)
+import           Control.Monad.Except (liftIO, runExceptT, throwError, ExceptT(..))
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bool (bool)
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Default (def)
-import           Data.Foldable (fold)
-import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
 import           Data.String (IsString)
@@ -39,7 +37,7 @@ import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), 
 import           Network.Ethereum.Api.Types (Call(..))
 import qualified Network.Ethereum.Unit as Eth
 import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
-import           System.IO (IOMode(ReadMode, WriteMode), openFile)
+import           System.IO (IOMode(..), openFile)
 import           System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import           System.IO.Temp (createTempDirectory)
 import           System.Posix.Files (createSymbolicLink)
@@ -57,8 +55,9 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified System.Process.ByteString.Lazy
 import Control.Lens
 import Data.Aeson.Lens (_String, key, nth)
-import Data.Binary.Get
+import qualified Data.Binary.Get as Binary
 import Data.Foldable
+import qualified Data.Map.Strict as Map
 
 
 import qualified Ethereum.Contracts as Contracts
@@ -66,7 +65,10 @@ import Solana.RPC
 
 
 import Solana.Types
-import Control.Concurrent.STM
+import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
+import qualified Data.ByteArray as ByteArray
+import qualified Data.Solidity.Prim.Int
+import qualified Data.Solidity.Prim.Bytes
 
 
 -- solana -> eth
@@ -83,7 +85,9 @@ mainRelayerEth = withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ d
 
   -- epochInfoRef <- newMVar epochInfo0
 
-  -- leaderSchedule :: SolanaLeaderSchedule <- rpcWebRequest' @[Word64] @SolanaLeaderSchedule "getLeaderSchedule" $ Just [_solanaEpochInfo_absoluteSlot epochInfo0]
+  leaderSchedule <- getLeaderSchedule $ _solanaEpochInfo_absoluteSlot epochInfo0
+  liftIO $ print epochInfo0
+  liftIO $ print leaderSchedule
 
 
 
@@ -276,7 +280,7 @@ runRelayer configFile config = do
       x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
       () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
       x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ runGetOrFail ((,,) <$> getWord64le <*> getWord64le <*> getWord8) $ LBS.fromStrict x2
+      bimap (view _3) (view _3) $ Binary.runGetOrFail ((,,) <$> Binary.getWord64le <*> Binary.getWord64le <*> Binary.getWord8) $ LBS.fromStrict x2
 
     bad -> error $ show bad
 
@@ -358,12 +362,30 @@ runEthereum node runDir = withGeth runDir $ do
           liftIO $ putStrLn $ bool "OK" (show r) printReturn
           pure r
 
-    getEpoch ca = invoke ca True "epoch" Contracts.epoch
-    getLastSlot ca = invoke ca True "lastSlot" Contracts.lastSlot
-    getLastHash ca = invoke ca True "lastHash" Contracts.lastHash
-    getSlotLeader ca s = invoke ca True "getSlotLeader" $ Contracts.getSlotLeader s
 
-    setEpoch ca e = void $ invoke ca False "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
+    getEpoch ca = fromInteger @Word64 . toInteger <$> invoke ca True "epoch" Contracts.epoch
+    getLastSlot ca = fromInteger @Word64 . toInteger <$> invoke ca True "lastSlot" Contracts.lastSlot
+    getLastHash ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> invoke ca True "lastHash" Contracts.lastHash
+
+    getSlotLeader ca s = invoke ca True "getSlotLeader" $ Contracts.getSlotLeader $ fromInteger . toInteger @Word64 $ s
+
+    setEpoch :: Address -> Word64 -> SolanaLeaderSchedule -> ExceptT String IO ()
+    setEpoch ca e _ldrSched = void $ invoke ca False "setEpoch" $ Contracts.setEpoch (word64ToSol e) [] []
+      -- todo: leader schedule handling
+
+    word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
+    word64ToSol = fromInteger . toInteger
+
+    unsafeBytes32ToSol :: Base58ByteString -> Data.Solidity.Prim.Bytes.BytesN 32
+    unsafeBytes32ToSol = unsafeSizedByteArray . ByteArray.convert . unBase58ByteString
+
+    addBlocks ca (blocks :: [(Word64, SolanaCommittedBlock)])= void $ invoke ca False "addBlocks" $ Contracts.addBlocks
+      (word64ToSol . fst <$> blocks)
+      (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
+      (word64ToSol . _solanaCommittedBlock_parentSlot . snd <$> blocks)
+      (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd <$> blocks)
+
+
 
 
   res <- runExceptT $ do
@@ -385,19 +407,28 @@ runEthereum node runDir = withGeth runDir $ do
     ca <- case Eth.receiptContractAddress receipt of
       Nothing -> throwError $ "Contract address not found"
       Just ca -> pure ca
+
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
-    setEpoch ca 123
+    setEpoch ca 123 Map.empty
+    liftIO $ threadDelay 4e6
+    addBlocks ca [(124, SolanaCommittedBlock
+      { _solanaCommittedBlock_blockhash = Base58ByteString $ BS.pack $ take 32 $ repeat 0
+      , _solanaCommittedBlock_previousBlockhash = Base58ByteString $ BS.pack $ take 32 $ repeat 1
+      , _solanaCommittedBlock_parentSlot = 123
+      , _solanaCommittedBlock_blockTime = Nothing
+      })]
     liftIO $ threadDelay 4e6
 
     printCurrentBlockNumber
 
-    void $ getEpoch ca
-    void $ getLastSlot ca
-    void $ getLastHash ca
-    void $ getSlotLeader ca 0
-    void $ getSlotLeader ca 1
-    void $ getSlotLeader ca 2
+    getEpoch ca >>= liftIO . print
+    getLastSlot ca >>= liftIO . print
+    getLastHash ca >>= liftIO . print
+    getSlotLeader ca 0 >>= liftIO . print
+
+    -- getSlotLeader ca 1 >>= liftIO . print
+    -- getSlotLeader ca 2 >>= liftIO . print
 
   case res of
     Left err -> putStrLn err
