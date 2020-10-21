@@ -8,6 +8,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+{-# OPTIONS_GHC -Wno-unused-local-binds #-}
+
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
@@ -24,7 +26,6 @@ import Control.Monad.Trans (lift)
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
-import Data.Bool (bool)
 import Data.ByteArray.HexString
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.Default (def)
@@ -393,7 +394,10 @@ runEthereum node runDir = withGeth runDir $ do
       liftIO $ putStr $ "Submitting " <> qname <> " ...... "
       runWeb3'' (invokeContract ca x) >>= \case
         Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-        Right r -> liftIO $ putStrLn $ bool "Success" "Failed" $ null $ Eth.receiptLogs r
+        Right r ->
+          if null $ Eth.receiptLogs r
+            then throwError "Failed - no recipt"
+            else liftIO $ putStrLn "Success"
 
 
     getInitialized ca = simulate ca "initialized" Contracts.initialized
@@ -492,6 +496,7 @@ runEthereum node runDir = withGeth runDir $ do
 
       loop
       pure $ Left "not reachable"
+    pure ()
 
   case res of
     Left err -> putStrLn err
