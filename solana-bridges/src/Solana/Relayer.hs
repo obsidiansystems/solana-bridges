@@ -18,7 +18,7 @@ import           Data.Bool (bool)
 import           Data.ByteArray.HexString
 import qualified Data.ByteString as BS
 import           Data.Default (def)
-import           Data.Foldable (fold)
+import           Data.Foldable (fold, for_)
 import           Data.Functor (void)
 import           Data.List (intercalate)
 import           Data.Solidity.Prim.Address (Address)
@@ -33,7 +33,7 @@ import           Network.JsonRpc.TinyClient as Eth
 import qualified Network.Ethereum.Account as Eth
 import qualified Network.Ethereum.Api.Eth as Eth (blockNumber, getBalance, getTransactionReceipt, sendTransaction)
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), receiptContractAddress)
+import qualified Network.Ethereum.Api.Types as Eth (Call(..), DefaultBlock(..), TxReceipt(..))
 import           Network.Ethereum.Api.Types (Call(..))
 import qualified Network.Ethereum.Unit as Eth
 import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
@@ -298,21 +298,30 @@ runEthereum node runDir = withGeth runDir $ do
             liftIO $ threadDelay 1e6
             go
 
-    invoke ca printReturn name x = do
+    invoke ca name x = do
       let qname = "'" <> name <> "'"
       liftIO $ putStr $ "Invoking " <> qname <> " ...... "
       runWeb3'' (invokeContract ca x) >>= \case
         Left err -> throwError $ "Failed " <> qname <> ": " <> show err
         Right r -> do
-          liftIO $ putStrLn $ bool "OK" (show r) printReturn
+          liftIO $ putStrLn $ show r
           pure r
 
-    getEpoch ca = invoke ca True "epoch" Contracts.epoch
-    getLastSlot ca = invoke ca True "lastSlot" Contracts.lastSlot
-    getLastHash ca = invoke ca True "lastHash" Contracts.lastHash
-    getSlotLeader ca s = invoke ca True "getSlotLeader" $ Contracts.getSlotLeader s
+    invoke' ca name x = do
+      let qname = "'" <> name <> "'"
+      liftIO $ putStr $ "Invoking " <> qname <> " ...... "
+      runWeb3'' (invokeContract ca x) >>= \case
+        Left err -> throwError $ "Failed " <> qname <> ": " <> show err
+        Right r -> liftIO $ putStrLn $ bool "Success" "Failed" $ null $ Eth.receiptLogs r
 
-    setEpoch ca e = void $ invoke ca False "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
+    getEpoch ca = invoke ca "epoch" Contracts.epoch
+    getLastSlot ca = invoke ca "lastSlot" Contracts.lastSlot
+    getLastHash ca = invoke ca "lastHash" Contracts.lastHash
+    getSeenBlocks ca = invoke ca "seenBlocks" Contracts.seenBlocks
+    getSlotLeader ca s = invoke ca "getSlotLeader" $ Contracts.getSlotLeader s
+
+    setEpoch ca e = invoke' ca "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
+    addBlock ca slot hash parentSlot parentHash = void $ invoke' ca "addBlock" $ Contracts.addBlock slot hash parentSlot parentHash
 
   res <- runExceptT $ do
     printCurrentBalance
@@ -326,16 +335,17 @@ runEthereum node runDir = withGeth runDir $ do
 
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
-    setEpoch ca 123
+    _ <- setEpoch ca 123
+    addBlock ca 11 22 33 44
+    addBlock ca 12 23 11 22
 
     printCurrentBlockNumber
 
     void $ getEpoch ca
     void $ getLastSlot ca
     void $ getLastHash ca
-    void $ getSlotLeader ca 0
-    void $ getSlotLeader ca 1
-    void $ getSlotLeader ca 2
+    void $ getSeenBlocks ca
+    for_ [0,1,2] $ getSlotLeader ca
 
   case res of
     Left err -> putStrLn err
