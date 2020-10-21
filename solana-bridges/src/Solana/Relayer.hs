@@ -298,7 +298,7 @@ runEthereum node runDir = withGeth runDir $ do
             liftIO $ threadDelay 1e6
             go
 
-    invoke ca name x = do
+    simulate ca name x = do
       let qname = "'" <> name <> "'"
       liftIO $ putStr $ "Invoking " <> qname <> " ...... "
       runWeb3'' (invokeContract ca x) >>= \case
@@ -307,21 +307,21 @@ runEthereum node runDir = withGeth runDir $ do
           liftIO $ putStrLn $ show r
           pure r
 
-    invoke' ca name x = do
+    submit ca name x = do
       let qname = "'" <> name <> "'"
-      liftIO $ putStr $ "Invoking " <> qname <> " ...... "
+      liftIO $ putStr $ "Submitting " <> qname <> " ...... "
       runWeb3'' (invokeContract ca x) >>= \case
         Left err -> throwError $ "Failed " <> qname <> ": " <> show err
         Right r -> liftIO $ putStrLn $ bool "Success" "Failed" $ null $ Eth.receiptLogs r
 
-    getEpoch ca = invoke ca "epoch" Contracts.epoch
-    getLastSlot ca = invoke ca "lastSlot" Contracts.lastSlot
-    getLastHash ca = invoke ca "lastHash" Contracts.lastHash
-    getSeenBlocks ca = invoke ca "seenBlocks" Contracts.seenBlocks
-    getSlotLeader ca s = invoke ca "getSlotLeader" $ Contracts.getSlotLeader s
+    getEpoch ca = simulate ca "epoch" Contracts.epoch
+    getLastSlot ca = simulate ca "lastSlot" Contracts.lastSlot
+    getLastHash ca = simulate ca "lastHash" Contracts.lastHash
+    getSeenBlocks ca = simulate ca "seenBlocks" Contracts.seenBlocks
+    getSlotLeader ca s = simulate ca "getSlotLeader" $ Contracts.getSlotLeader s
 
-    setEpoch ca e = invoke' ca "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
-    addBlock ca slot hash parentSlot parentHash = void $ invoke' ca "addBlock" $ Contracts.addBlock slot hash parentSlot parentHash
+    setEpoch ca e = submit ca "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
+    addBlock ca slot hash parentSlot parentHash = void $ submit ca "addBlock" $ Contracts.addBlock slot hash parentSlot parentHash
 
   res <- runExceptT $ do
     printCurrentBalance
