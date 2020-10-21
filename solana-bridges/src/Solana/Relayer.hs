@@ -10,6 +10,8 @@
 
 module Solana.Relayer where
 
+import Control.Concurrent (forkIO)
+import Control.Concurrent (killThread)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Exception (SomeException, handle)
@@ -153,7 +155,11 @@ mainEthTestnet = do
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
   setupEth currentDir runDir
-  runEthereum def runDir
+  nodeThreadId <- forkIO $ runEthereum runDir
+
+  ca <- deploySolanaRelayContract def
+
+  finally (runRelayerEth def ca) $ killThread nodeThreadId
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -324,8 +330,12 @@ blockToHeader rlp = blockHeaderHex
     blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
 
-runEthereum :: Eth.Provider -> FilePath -> IO ()
-runEthereum node runDir = withGeth runDir $ do
+runEthereum :: FilePath -> IO ()
+runEthereum runDir = withGeth runDir $ forever $ threadDelay 1e6
+
+
+deploySolanaRelayContract :: Eth.Provider -> IO Address
+deploySolanaRelayContract node = do
   let
     runWeb3'' = runWeb3' node
 
@@ -335,11 +345,6 @@ runEthereum node runDir = withGeth runDir $ do
         Right balance -> pure balance
       liftIO $ putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
 
-    printCurrentBlockNumber = do
-      height <- runWeb3'' Eth.blockNumber >>= \case
-        Left err -> throwError $ "Block number query failed: " <> show err
-        Right height -> pure height
-      liftIO $ putStrLn $ "Current block number is " <> show height
 
     deployContract path = do
       bin <- liftIO $ BS.readFile path
@@ -371,7 +376,20 @@ runEthereum node runDir = withGeth runDir $ do
 
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
+    pure ca
+  case res of
+    Left err -> error err
+    Right ca -> pure ca
 
+runRelayerEth :: Eth.Provider -> Address -> IO ()
+runRelayerEth node ca = do
+  let
+    printCurrentBlockNumber = do
+      height <- runWeb3' node Eth.blockNumber >>= \case
+        Left err -> throwError $ "Block number query failed: " <> show err
+        Right height -> pure height
+      liftIO $ putStrLn $ "Current block number is " <> show height
+  res <- runExceptT $ do
     printCurrentBlockNumber
 
     liftIO $ putStrLn $ "Contract address: " <> show ca
