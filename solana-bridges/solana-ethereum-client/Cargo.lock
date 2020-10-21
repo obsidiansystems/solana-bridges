@@ -2077,7 +2077,7 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 [[package]]
 name = "uint"
 version = "0.8.5"
-source = "git+https://github.com/obsidiansystems/parity-common?rev=eb39309c64e5c42f124744fc2d887f2f4648bbd8#eb39309c64e5c42f124744fc2d887f2f4648bbd8"
+source = "git+https://github.com/obsidiansystems/parity-common?branch=solana#4e39cbb526d5e501f33cfa74facfb5537dcb6e99"
 dependencies = [
  "byteorder",
  "crunchy",

@@ -211,7 +211,7 @@ let
   solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
 
   # Cargo hash must be updated when Cargo.lock file changes.
-  solana-ethereum-client-dep-sha256 = "15qni711szbk8ymfbppng4jrbf39032kjdpagc0a590lvhhawicm";
+  solana-ethereum-client-dep-sha256 = "1z7x6vpwgwgyyvxyx62yqvvpy6frklxrsc00669mihgqqjrhcpk7";
   solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
     name = "solana-ethereum-client";
     src = solana-ethereum-client-src;

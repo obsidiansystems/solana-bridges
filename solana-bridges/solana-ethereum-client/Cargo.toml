@@ -32,7 +32,7 @@ quickcheck_macros = "0.9"
 [patch.crates-io]
 rlp = { git = "https://github.com/obsidiansystems/parity-common", branch = "solana" }
 parity-scale-codec = { git = "https://github.com/obsidiansystems/parity-scale-codec", branch = "solana" }
-uint = { git = "https://github.com/obsidiansystems/parity-common", rev = "eb39309c64e5c42f124744fc2d887f2f4648bbd8" }
+uint = { git = "https://github.com/obsidiansystems/parity-common", branch = "solana" }
 
 [lib]
 name = "solana_ethereum_client"
