@@ -204,8 +204,14 @@ let
       -C linker=${solana-llvm}/bin/ld.lld";
   };
 
-  shell-x86 = with nixpkgs; mkShell {
-    buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
+  shells = {
+    target-x86 = with nixpkgs; mkShell {
+      buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
+    };
+
+    solidity = with nixpkgs; mkShell {
+      buildInputs = [ inotify-tools go-ethereum solc ];
+    };
   };
 
   solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
@@ -239,7 +245,7 @@ let
   solana-ethereum-client-prog = mk-solana-ethereum-client [ "--features" "program" ];
 
 in {
-  inherit nixpkgs shell solc solana solana-rust-bpf solana-llvm spl
+  inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
     solana-ethereum-client-prog
     solana-ethereum-client-no-prog
     solana-ethereum-client-dep-srcs;
@@ -247,7 +253,4 @@ in {
 
 
   solana-ethereum-client-tool = client-tool;
-  shells = {
-    target-x86 = shell-x86;
-  };
 }

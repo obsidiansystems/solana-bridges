@@ -1,56 +1,76 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PackageImports #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Solana.Relayer where
 
-import           Control.Concurrent (threadDelay)
-import           Control.Concurrent.Async (withAsync)
-import           Control.Exception (SomeException, handle)
-import           Control.Monad (unless)
-import           Control.Monad.Catch (catch)
-import           Data.Aeson
-import           Data.Aeson.TH
-import           Data.ByteArray.HexString
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Exception (SomeException, handle)
+import Control.Lens
+import Control.Monad
+import Control.Monad.Catch (catch)
+import Control.Monad.Catch (finally)
+import Control.Monad.Except (runExceptT, throwError, ExceptT(..))
+import Control.Monad.Fix (fix)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans (lift)
+import Data.Aeson
+import Data.Aeson.Lens (_String, key, nth)
+import Data.Aeson.TH
+import Data.ByteArray.HexString
+import Data.Default (def)
+import Data.Functor.Compose
+import Data.Foldable
+import Data.List (intercalate)
+import Data.Maybe(fromMaybe)
+import Data.Solidity.Prim.Address (Address)
+import Data.String (IsString)
+import Data.Text (Text)
+import Data.Word
+import Network.Ethereum.Api.Types (Call(..))
+import Network.JsonRpc.TinyClient as Eth
+import Network.Web3.Provider (runWeb3, runWeb3')
+import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
+import System.Environment
+import System.Exit
+import System.IO (IOMode(..), openFile)
+import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
+import System.IO.Temp (createTempDirectory)
+import System.Posix.Files (createSymbolicLink)
+import System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Which (staticWhich)
+import qualified Blockchain.Data.RLP as RLP
+import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
-import           Data.Default (def)
-import           Data.Foldable (fold)
-import           Data.Functor (void)
-import           Data.List (intercalate)
-import           Data.Solidity.Prim.Address (Address)
-import           Data.String (IsString)
-import           Data.Text (Text)
+import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
-import           Network.Web3.Provider (runWeb3, runWeb3')
-import qualified Network.Web3.Provider as Eth
-import           Network.JsonRpc.TinyClient as Eth
-import qualified Network.Ethereum.Api.Eth as Eth
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Types as Eth
-import           Network.Ethereum.Api.Types (Call(..))
-import           System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
-import           System.IO (IOMode(ReadMode, WriteMode), openFile)
-import           System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
-import           System.IO.Temp (createTempDirectory)
-import           System.Posix.Files (createSymbolicLink)
-import           System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess
-                                , proc, readProcess, readCreateProcessWithExitCode, waitForProcess)
-import           System.Which (staticWhich)
-import           System.Environment
-import           System.Exit
-import           Data.Word
-import Data.Maybe(fromMaybe)
-import qualified Data.ByteString.Base16 as B16
-import qualified Data.ByteString.Base64 as Base64
-import qualified Blockchain.Data.RLP as RLP
-import qualified Data.ByteString.Lazy as LBS
+import qualified Network.Ethereum.Api.Eth as Eth (getTransactionReceipt, sendTransaction)
+import qualified Network.Ethereum.Api.Types as Eth (Call(..), TxReceipt(..))
+import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
-import Control.Lens
-import Data.Aeson.Lens (_String, key, nth)
-import Data.Binary.Get
+
+import Ethereum.Contracts as Contracts
+import Solana.RPC
+import Solana.Types
+
+
+satsub :: Word64 -> Word64 -> Word64
+satsub x y
+  | x <= y = 0
+  | otherwise = x - y
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -72,7 +92,12 @@ mainEthTestnet = do
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
   setupEth currentDir runDir
-  runEthereum def runDir
+  withGeth runDir $ forever $ threadDelay 1e6
+
+deployAndRunSolanaRelayer :: IO ()
+deployAndRunSolanaRelayer = do
+  ca <- deploySolanaRelayContract def
+  runRelayerEth def ca
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -139,6 +164,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
       , "--rpc-faucet-address", "127.0.0.1:9900"
       , "--bind-address", "127.0.0.1"
       , "--enable-rpc-exit"
+      , "--enable-rpc-transaction-history"
       , "--log", "-"
       ])
         { env = Just
@@ -154,7 +180,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
         }
 
   (_, _, _, validator) <- createProcess bootstrapValidator
-  waitForProcess validator
+  _ <- finally (waitForProcess validator) (terminateProcess faucet)
   pure ()
 
 
@@ -172,19 +198,18 @@ setupEth currentDir runDir = do
       unless (predicate err) $ error (show err)
 
 createContract :: Address -> HexString -> Call
-createContract addr hex = Eth.Call
-    { callFrom = Just addr
+createContract fromAddr hex = Eth.Call
+    { callFrom = Just fromAddr
     , callTo = Nothing
-    , callGas = Just 1e5
+    , callGas = Just 1e6
     , callGasPrice = Just 1
-    , callValue = Just 1
+    , callValue = Nothing
     , callData = Just hex
     , callNonce = Nothing
     }
 
 runRelayer :: FilePath -> ContractConfig -> IO ()
 runRelayer configFile config = do
-  h <- openFile "/dev/null" ReadMode
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -197,7 +222,7 @@ runRelayer configFile config = do
       x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
       () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
       x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ runGetOrFail ((,,) <$> getWord64le <*> getWord64le <*> getWord8) $ LBS.fromStrict x2
+      bimap (view _3) (view _3) $ Binary.runGetOrFail ((,,) <$> Binary.getWord64le <*> Binary.getWord64le <*> Binary.getWord8) $ LBS.fromStrict x2
 
     bad -> error $ show bad
 
@@ -242,36 +267,117 @@ blockToHeader rlp = blockHeaderHex
     RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
     blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
-runEthereum :: Eth.Provider -> FilePath -> IO ()
-runEthereum node runDir = withGeth runDir $ do
-  let contract = "solidity/helloWorld.sol"
-  putStrLn $ "Compiling " <> contract
 
-  h <- openFile "/dev/null" ReadMode
-  do
-    let p = (proc solcPath ["--bin", contract, "-o", "solidity", "--overwrite" ])
-          { std_out = UseHandle h
-          , std_err = UseHandle h
-          }
-    readCreateProcessWithExitCode p "" >>= \case
-      good@(ExitSuccess, _, _) -> print good
-      bad -> error $ show bad
-  bin <- BS.readFile "solidity/HelloWorld.bin"
 
-  let runWeb3'' = runWeb3' node
+deploySolanaRelayContract :: Eth.Provider -> IO Address
+deploySolanaRelayContract node = do
+  let
+    runWeb3'' = runWeb3' node
 
-  runWeb3'' (Eth.getBalance unlockedAddress Eth.Latest) >>= \case
-    Left err -> putStrLn $ "Balance query failed: " <> show err
-    Right balance -> putStrLn $ intercalate " " [ "Balance for", unlockedAddress, "is", show balance]
-  putStrLn "Sending transaction"
-  runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ fromBytes bin) >>= \case
-    Left err -> putStrLn $ "Transaction failed: " <> show err
-    Right hex -> do
-      putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-      threadDelay 5e6
-      runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
-        Left err -> putStrLn $ "Query failed: " <> show err
-        Right tr -> putStrLn $ "Transaction receipt:\n  " <> show tr
+    deployContract path = do
+      bin <- liftIO $ BS.readFile path
+      liftIO $ putStrLn "Deploying contract"
+      runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
+        Left err -> throwError $ "Transaction failed: " <> show err
+        Right tx -> do
+          liftIO $ putStrLn $ "Submitted contract in transaction " <> T.unpack (toText tx)
+          pure tx
+
+    getContractAddress receipt = case Eth.receiptContractAddress receipt of
+      Nothing -> throwError $ "Contract address not found"
+      Just ca -> pure ca
+
+    waitForTx tx = do
+      liftIO $ putStrLn "Waiting for transaction to be committed"
+      fix $ \go -> do
+        runWeb3'' (Eth.getTransactionReceipt tx) >>= \case
+          Left err -> throwError $ "getTransactionReceipt error: " <> show err
+          Right (Just r) -> pure r
+          Right Nothing -> do
+            liftIO $ threadDelay 1e6
+            go
+
+  res <- runExceptT $ do
+    tx <- deployContract "solidity/dist/SolanaClient.bin"
+
+    receipt <- waitForTx tx
+    ca <- getContractAddress receipt
+    liftIO $ putStrLn $ "Contract deployed at address: " <> show ca
+    pure ca
+  case res of
+    Left err -> error err
+    Right ca -> pure ca
+
+runRelayerEth :: Eth.Provider -> Address -> IO ()
+runRelayerEth node ca = do
+  res <- runExceptT $ do
+
+    void $ getSeenBlocks node ca
+
+    Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+      liftIO $ T.putStrLn "Connected to solana node"
+
+      epochSchedule <- getEpochSchedule
+      let
+        epochFromSlot' = epochFromSlot epochSchedule
+
+        loop :: SolanaRpcM IO ()
+        loop = do
+          -- epochSchedule <- getEpochSchedule
+
+          Right initializedAtStartup <- lift $ runExceptT $ getInitialized node ca
+
+          bootEpochInfo <- getEpochInfo
+
+          contractSlot <- if initializedAtStartup
+            then do
+              Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
+              pure contractSlot
+            else do
+              liftIO $ putStrLn "Initializing contract"
+              -- get the latest confirmed block in
+              let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+              bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+
+              let
+                slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
+                epochInfo0 = epochFromSlot' slot0
+              Right (Just block0) <- getConfirmedBlock slot0
+              Right () <- lift $ runExceptT $ do
+                setEpoch node ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
+                liftIO $ threadDelay 4e6
+                addBlocks node ca [(slot0, block0)]
+              pure slot0
+
+          confirmedBlockSlots <- getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
+          let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
+              blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
+
+          liftIO $ do
+            let rpcSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+            putStr $ unlines
+              [ ""
+              , "Solana RPC slot: " <> show rpcSlot
+              , "Ethereum contract slot: " <> show contractSlot
+              , "Contract is behind by " <> show (rpcSlot - contractSlot)
+              ]
+          when (not $ null confirmedBlocks) $ do
+            Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
+            liftIO $ do
+              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
+              putStrLn "Submitted new slots to contract"
+
+          when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
+          loop
+
+      loop
+      pure $ Left "not reachable"
+    pure ()
+
+  case res of
+    Left err -> putStrLn err
+    Right _ -> pure ()
 
   putStrLn "All done - network can be stopped now"
 
@@ -313,7 +419,7 @@ runGeth ::  FilePath -> IO ()
 runGeth runDir = do
   let
     dataDirArgs = [ "--datadir", runDir <> "/.ethereum"]
-    httpArgs = [ "--http", "--rpcapi", "eth,net,web3,debug" ]
+    httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--etherbase=0x0000000000000000000000000000000000000001" ]
     initArgs = [ "init", genesisPath]
     privateArgs = [ "--nodiscover" ]
@@ -324,10 +430,9 @@ runGeth runDir = do
   putStrLn =<< canonicalizePath genesisPath
   void $ readProcess gethPath (dataDirArgs <> initArgs) ""
 
-  putStrLn "Importing account"
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching node"
+  putStrLn "Launching ethereum node"
   h <- openFile (logsSubdir runDir) WriteMode
   let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   (_,_,_,ph) <- createProcess $ p
@@ -343,7 +448,7 @@ withGeth dir action = do
   where
     action' = printErrors $ do
       threadDelay 1e6
-      putStrLn "Waiting a few seconds for node to launch"
+      putStrLn "Waiting for ethereum node to launch"
       threadDelay 3e6
       action
 
@@ -367,5 +472,8 @@ voteAccountKeypair = "[183,84,232,40,36,248,21,231,135,120,104,233,237,92,143,38
 stakeAccountKeypair :: T.Text
 stakeAccountKeypair = "[55,217,78,20,228,230,230,89,66,11,131,181,64,47,247,36,11,78,76,54,43,57,160,189,228,203,8,66,0,233,135,3,159,165,84,42,226,126,129,204,24,141,148,117,233,154,29,94,204,98,176,43,7,76,26,23,146,121,196,145,159,152,8,111]"
 
-deriveJSON (defaultOptions { fieldLabelModifier = dropWhile ('_' ==) . dropWhile ('_' /=) . dropWhile ('_' ==) })
-  ''ContractConfig
+do
+  let x = (defaultOptions { fieldLabelModifier = dropWhile ('_' ==) . dropWhile ('_' /=) . dropWhile ('_' ==) })
+  concat <$> traverse (deriveJSON x)
+    [ ''ContractConfig
+    ]

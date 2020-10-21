@@ -5,20 +5,28 @@ version:             0.1.0.0
 author:              Obsidian Systems LLC
 maintainer:          maintainer@obsidian.systems
 build-type:          Simple
+extra-source-files:  solana-bridges/solidity/SolanaClient.sol
 
 library
   hs-source-dirs: src
   default-language:    Haskell2010
   ghc-options:         -Wall
   exposed-modules: Solana.Relayer
+                 , Solana.Types
+                 , Solana.RPC
+                 , Ethereum.Contracts
+                 , Ethereum.Contracts.Abi
+
   build-depends:       base >=4.13 && <4.14
                      , aeson
                      , async
                      , base16-bytestring
+                     , base58-bytestring
                      , base64-bytestring
                      , bytestring
                      , binary
                      , containers
+                     , memory
                      , data-default
                      , exceptions
                      , directory
@@ -28,12 +36,17 @@ library
                      , ethereum-rlp
                      , process
                      , process-extras
+                     , time
                      , temporary
                      , text
                      , unix
                      , web3
                      , which
-  ghc-options: -threaded
+                     , websockets
+                     , network
+                     , http-client
+                     , http-types
+                     , http-client-tls
 
 executable solana-bridges
   main-is:             Main.hs
