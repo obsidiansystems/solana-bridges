@@ -57,6 +57,7 @@ contract SolanaClient {
         authorize();
         for(uint i = 0; i < blockSlots.length; i++)
             addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i]);
+        emit Success();
     }
 
     function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash) external {
@@ -73,12 +74,11 @@ contract SolanaClient {
                 revert("Unexpected parent slot");
             if(parentBlockHash != lastHash)
                 revert("Unexpected parent hash");
-        }
 
-        for(uint64 s = initialized ? lastSlot + 1 : 0; s < slot; s++) {
-            emptySlot(s);
+            for(uint64 s = lastSlot + 1; s < slot; s++) {
+                emptySlot(s);
+            }
         }
-
         fillSlot(slot, blockHash);
 
         lastSlot = slot;
