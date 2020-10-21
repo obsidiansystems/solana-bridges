@@ -28,6 +28,7 @@ import Data.Bool (bool)
 import Data.ByteArray.HexString
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.Default (def)
+import Data.Functor.Compose
 import Data.Foldable
 import Data.List (intercalate)
 import Data.Maybe(fromMaybe)
@@ -340,7 +341,7 @@ runEthereum node runDir = withGeth runDir $ do
                    -> Eth.Web3 a
     invokeContract a = Eth.withAccount ()
                        . Eth.withParam (Eth.to .~ a)
-                       . Eth.withParam (Eth.gasLimit .~ 1e6)
+                       . Eth.withParam (Eth.gasLimit .~ 1e8)
                        . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
 
     printCurrentBalance = do
@@ -422,9 +423,6 @@ runEthereum node runDir = withGeth runDir $ do
 
     getSeenBlocks ca = simulate ca "seenBlocks" Contracts.seenBlocks
 
-    -- setEpoch ca e = submit ca "setEpoch" $ Contracts.setEpoch e [111, 222, 333] [2, 1, 0]
-    -- addBlock ca slot hash parentSlot parentHash = void $ submit ca "addBlock" $ Contracts.addBlock slot hash parentSlot parentHash
-
   res <- runExceptT $ do
     printCurrentBalance
 
@@ -437,99 +435,63 @@ runEthereum node runDir = withGeth runDir $ do
 
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
--- <<<<<<< HEAD
-    -- liftIO $ putStrLn "Creating contract"
-    -- hex <- runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
-    --   Left err -> throwError $ "Transaction failed: " <> show err
-    --   Right hex -> pure hex
-    -- liftIO $ putStrLn $ "Transaction succeeded: hash is " <> T.unpack (toText hex)
-    -- liftIO $ threadDelay 10e6
-
-    -- printCurrentBlockNumber
-
-    -- receipt <- runWeb3'' (Eth.getTransactionReceipt hex) >>= \case
-    --   Left err -> throwError $ "Query failed: " <> show err
-    --   Right Nothing -> throwError $ "Receipt not found"
-    --   Right (Just r) -> pure r
-    -- ca <- case Eth.receiptContractAddress receipt of
-    --   Nothing -> throwError $ "Contract address not found"
-    --   Just ca -> pure ca
-
-    -- liftIO $ putStrLn $ "Contract address: " <> show ca
-
-    initializedAtStartup <- getInitialized ca
     void $ getSeenBlocks ca
 
-    _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+    Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
       liftIO $ T.putStrLn "connected"
 
       epochSchedule <- getEpochSchedule
-      let epochFromSlot' = epochFromSlot epochSchedule
-      -- epochSchedule <- getEpochSchedule
-      bootEpochInfo <- getEpochInfo
-      let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
-      confirmedBlocks <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
-
       let
-        slot0 = fromMaybe (error "no block found") $ lastOf traverse confirmedBlocks
-        epochInfo0 = epochFromSlot' slot0
+        epochFromSlot' = epochFromSlot epochSchedule
 
-      Right (Just block0) <- getConfirmedBlock slot0
+        loop :: SolanaRpcM IO ()
+        loop = do
+          -- epochSchedule <- getEpochSchedule
 
+          Right initializedAtStartup <- lift $ runExceptT $ getInitialized ca
 
-      contractSlot <- if initializedAtStartup
-        then do
-          Right contractSlot <- lift $ runExceptT $ getLastSlot ca
-          pure contractSlot
-        else do
-          liftIO $ putStrLn "initializing"
-          -- get the latest confirmed block in
-          Right () <- lift $ runExceptT $ do
-            setEpoch ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
-            liftIO $ threadDelay 4e6
-            addBlocks ca [(slot0, block0)]
-          pure slot0
+          bootEpochInfo <- getEpochInfo
 
-      liftIO $ print contractSlot
-      liftIO $ print epochInfo0
+          contractSlot <- if initializedAtStartup
+            then do
+              Right contractSlot <- lift $ runExceptT $ getLastSlot ca
+              pure contractSlot
+            else do
+              liftIO $ putStrLn "initializing"
+              -- get the latest confirmed block in
+              let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+              bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
 
-      undefined
+              let
+                slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
+                epochInfo0 = epochFromSlot' slot0
+              Right (Just block0) <- getConfirmedBlock slot0
+              Right () <- lift $ runExceptT $ do
+                setEpoch ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
+                liftIO $ threadDelay 4e6
+                addBlocks ca [(slot0, block0)]
+              pure slot0
 
+          confirmedBlockSlots <- getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
+          let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
+              blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
 
+          liftIO $ print bootEpochInfo
+          liftIO $ print confirmedBlockSlots
+          liftIO $ print contractSlot
+          liftIO $ print $ take 2 blocksAndSlots
 
-    setEpoch ca 123 Map.empty
-    liftIO $ threadDelay 4e6
-    addBlocks ca [(124, SolanaCommittedBlock
-      { _solanaCommittedBlock_blockhash = Base58ByteString $ BS.pack $ take 32 $ repeat 0
-      , _solanaCommittedBlock_previousBlockhash = Base58ByteString $ BS.pack $ take 32 $ repeat 1
-      , _solanaCommittedBlock_parentSlot = 123
-      , _solanaCommittedBlock_blockTime = Nothing
-      })]
-    liftIO $ threadDelay 4e6
+          when (not $ null confirmedBlocks) $ do
+            Right () <- lift $ runExceptT $ addBlocks ca blocksAndSlots
+            pure ()
 
-    printCurrentBlockNumber
+          -- liftIO $ print epochInfo0
+          when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
+          loop
 
-    getEpoch ca >>= liftIO . print
-    getLastSlot ca >>= liftIO . print
-    getLastHash ca >>= liftIO . print
-    getSlotLeader ca 0 >>= liftIO . print
-
-    -- getSlotLeader ca 1 >>= liftIO . print
-    -- getSlotLeader ca 2 >>= liftIO . print
--- =======
-
-    -- _ <- setEpoch ca 123
-    -- addBlock ca 11 22 33 44
-    -- addBlock ca 12 23 11 22
-
-    -- printCurrentBlockNumber
-
-    -- void $ getEpoch ca
-    -- void $ getLastSlot ca
-    -- void $ getLastHash ca
-    -- void $ getSeenBlocks ca
-    for_ [0,1,2] $ getSlotLeader ca
--- >>>>>>> origin/ethereum-contract
+      loop
+      pure $ Left "not reachable"
 
   case res of
     Left err -> putStrLn err
