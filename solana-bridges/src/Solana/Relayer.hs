@@ -10,6 +10,7 @@ import           Control.Concurrent.Async (withAsync)
 import           Control.Exception (SomeException, handle)
 import           Control.Monad (unless)
 import           Control.Monad.Catch (catch)
+import           Control.Monad.Fix (fix)
 import           Control.Monad.Except (liftIO, runExceptT, throwError)
 import           Data.Aeson
 import           Data.Aeson.TH
@@ -283,15 +284,19 @@ runEthereum node runDir = withGeth runDir $ do
           liftIO $ putStrLn $ "Submitted contract in transaction " <> T.unpack (toText tx)
           pure tx
 
-    getContractAddress tx = do
-      receipt <- runWeb3'' (Eth.getTransactionReceipt tx) >>= \case
-        Left err -> throwError $ "Query failed: " <> show err
-        Right Nothing -> throwError $ "Receipt not found"
-        Right (Just r) -> pure r
-      case Eth.receiptContractAddress receipt of
-        Nothing -> throwError $ "Contract address not found"
-        Just ca -> pure ca
+    getContractAddress receipt = case Eth.receiptContractAddress receipt of
+      Nothing -> throwError $ "Contract address not found"
+      Just ca -> pure ca
 
+    waitForTx tx = do
+      liftIO $ putStrLn "Waiting for transaction to be committed"
+      fix $ \go -> do
+        runWeb3'' (Eth.getTransactionReceipt tx) >>= \case
+          Left err -> throwError $ "getTransactionReceipt error: " <> show err
+          Right (Just r) -> pure r
+          Right Nothing -> do
+            liftIO $ threadDelay 1e6
+            go
 
     invoke ca printReturn name x = do
       let qname = "'" <> name <> "'"
@@ -314,15 +319,14 @@ runEthereum node runDir = withGeth runDir $ do
 
     tx <- deployContract "solidity/dist/SolanaClient.bin"
 
-    liftIO $ threadDelay 4e6
+    receipt <- waitForTx tx
+    ca <- getContractAddress receipt
 
     printCurrentBlockNumber
 
-    ca <- getContractAddress tx
     liftIO $ putStrLn $ "Contract address: " <> show ca
 
     setEpoch ca 123
-    liftIO $ threadDelay 4e6
 
     printCurrentBlockNumber
 
