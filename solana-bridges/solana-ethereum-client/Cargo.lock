@@ -1055,7 +1055,7 @@ checksum = "2839e79665f131bdb5782e51f2c6c9599c133c6098982a54c794358bf432529c"
 [[package]]
 name = "parity-scale-codec"
 version = "1.3.5"
-source = "git+https://github.com/obsidiansystems/parity-scale-codec?rev=2290261cd3cc9df22493452e10cf3ed44a417b25#2290261cd3cc9df22493452e10cf3ed44a417b25"
+source = "git+https://github.com/obsidiansystems/parity-scale-codec?branch=solana#2290261cd3cc9df22493452e10cf3ed44a417b25"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1360,8 +1360,7 @@ dependencies = [
 [[package]]
 name = "rlp"
 version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1190dcc8c3a512f1eef5d09bb8c84c7f39e1054e174d1795482e18f5272f2e73"
+source = "git+https://github.com/obsidiansystems/parity-common?branch=solana#4e39cbb526d5e501f33cfa74facfb5537dcb6e99"
 dependencies = [
  "rustc-hex",
 ]
@@ -2078,7 +2077,7 @@ checksum = "373c8a200f9e67a0c95e62a4f52fbf80c23b4381c05a17845531982fa99e6b33"
 [[package]]
 name = "uint"
 version = "0.8.5"
-source = "git+https://github.com/obsidiansystems/parity-common?rev=eb39309c64e5c42f124744fc2d887f2f4648bbd8#eb39309c64e5c42f124744fc2d887f2f4648bbd8"
+source = "git+https://github.com/obsidiansystems/parity-common?branch=solana#4e39cbb526d5e501f33cfa74facfb5537dcb6e99"
 dependencies = [
  "byteorder",
  "crunchy",

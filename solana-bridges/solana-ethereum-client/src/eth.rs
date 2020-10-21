@@ -1,7 +1,6 @@
-use crate::parameters::*;
 use crate::types::*;
 
-use ethereum_types::{U256, H64, H160, H256, Bloom};
+pub use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
     result::{Result},
     vec::{Vec},
@@ -14,6 +13,8 @@ use rlp::{
     Decodable, DecoderError, Encodable,
     Rlp, RlpStream,
 };
+use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
+
 use std::mem;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use tiny_keccak::{Hasher, Keccak};
@@ -40,6 +41,41 @@ pub struct BlockHeader {
     pub extra_data: ExtraData,
     pub mix_hash: H256,
     pub nonce: H64,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct Receipt {
+    pub status: bool,
+    pub gas_used: U256,
+    pub log_bloom: Bloom,
+    pub logs: Vec<LogEntry>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct LogEntry {
+    pub address: H160,
+    pub topics: Vec<H256>,
+    pub data: Vec<u8>,
+}
+
+impl rlp::Decodable for LogEntry {
+    fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
+        let result = LogEntry {
+            address: rlp.val_at(0)?,
+            topics: rlp.list_at(1)?,
+            data: rlp.val_at(2)?,
+        };
+        Ok(result)
+    }
+}
+
+impl rlp::Encodable for LogEntry {
+    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
+        stream.begin_list(3usize);
+        stream.append(&self.address);
+        stream.append_list::<H256, _>(&self.topics);
+        stream.append(&self.data);
+    }
 }
 
 //TODO: determine maximum widths to support per field
@@ -140,18 +176,13 @@ impl Encodable for Block {
     }
 }
 
-#[derive(Debug)]
-pub struct State {
-    pub headers: Vec<BlockHeader>,
-}
-
 pub fn hash_header(header: &BlockHeader, truncated: bool) -> H256 {
     let mut stream = RlpStream::new();
     header.stream_rlp(&mut stream, truncated);
     return keccak256(stream.out().as_slice());
 }
 
-fn keccak256(bytes: &[u8]) -> H256 {
+pub fn keccak256(bytes: &[u8]) -> H256 {
     let mut keccak256 = Keccak::v256();
     let mut out = [0u8; 32];
     keccak256.update(bytes);
@@ -197,35 +228,6 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
-}
-
-impl Sealed for State {}
-impl Pack for State {
-    const LEN: usize = mem::size_of::<usize>() + BlockHeader::LEN * HEADER_HISTORY_SIZE;
-    fn pack_into_slice(&self, dst: &mut [u8]) {
-        const LENGTH_SIZE: usize = mem::size_of::<usize>();
-        let length_dst = array_mut_ref![dst, 0, LENGTH_SIZE];
-        *length_dst = self.headers.len().to_le_bytes();
-
-        for (i, h) in self.headers.iter().enumerate() {
-            let dst_array = array_mut_ref![dst, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
-            h.pack_into_slice(dst_array);
-        }
-    }
-
-    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        const LENGTH_SIZE: usize = mem::size_of::<usize>();
-        let length_src = array_ref![src, 0, LENGTH_SIZE];
-        let length = usize::from_le_bytes(*length_src);
-
-        let mut headers: Vec<BlockHeader> = Vec::new();
-        for i in 0..length {
-            let header_src = array_ref![src, LENGTH_SIZE + BlockHeader::LEN * i, BlockHeader::LEN];
-            let header = BlockHeader::unpack_from_slice(header_src)?;
-            headers.push(header);
-        }
-        return Ok(State { headers })
-    }
 }
 
 impl Sealed for ExtraData {}

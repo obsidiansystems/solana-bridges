@@ -1,3 +1,5 @@
+//use rlp::DecodeError;
+
 use solana_sdk::{
     program_error::ProgramError,
 };
@@ -8,12 +10,16 @@ pub enum CustomError {
     DecodeBlockFailed,
     DecodeHeaderFailed,
     VerifyHeaderFailed,
-    NoParentBlock,
+    BlockNotFound,
     UnpackExtraDataFailed,
     UnpackInstructionFailed,
     InvalidAccountOwner,
     DeserializeStorageFailed,
     AlreadyInitialized,
+    InvalidProof,
+    WritableHistoryDuringProofCheck,
+
+    //DecodeError(DecodeError),
 }
 
 impl CustomError {

@@ -18,13 +18,17 @@ use solana_sdk::{
 
 use crate::eth::*;
 use crate::parameters::MIN_BUF_SIZE;
+use crate::prove::*;
 use solana_sdk::clock::Epoch;
 use std::str::FromStr;
-use rlp::{Decodable, Encodable, Rlp};
+use std::ops::Deref;
+use rlp::{Decodable, Encodable, Rlp, DecoderError, RlpStream};
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 
 mod blocks;
 use blocks::*;
+
+mod inclusion;
 
 // Required to support info! in tests
 #[cfg(not(target_arch = "bpf"))]
@@ -42,7 +46,7 @@ fn headers_offset_correct() -> Result<(), TestError> {
 
 #[test]
 fn block_construction() -> Result<(), TestError> {
-    let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+    let header_400000 = decode_rlp(HEADER_400000)?;
     let block_400000 = Block { header: header_400000, transactions: Vec::new() };
     assert_eq!(block_400000.transactions.len(), 0);
     Ok(())
@@ -78,7 +82,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
 
     {
-        let header_400000 = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+        let header_400000 = decode_rlp(HEADER_400000)?;
         let instruction_init: Vec<u8> = Instruction::Initialize(header_400000).pack();
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
     }
@@ -87,9 +91,10 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         {
             let r = accounts[0].data.try_borrow_mut().unwrap();
             let data = interp(&*r);
-            println!("ring size: {}, current block short no: {}", data.headers.len(), n);
+            println!("ring size: {}, full: {}, current block short no: {}",
+                     data.headers.len(), data.full, n);
         }
-        let header_4000xx = decode_rlp(&hex_to_bytes(HEADER_4000XX[n])?)?;
+        let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
         let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
         process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
     }
@@ -105,11 +110,11 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 #[ignore]
 #[test]
 fn test_pow() -> Result<(), TestError> {
-    fn test_header_pow(header: &str) -> Result<bool, TestError> {
-        Ok(verify_pow(&decode_rlp(&hex_to_bytes(header)?)?))
+    fn test_header_pow(header: &[u8]) -> Result<bool, TestError> {
+        Ok(verify_pow(&decode_rlp(header)?))
     }
 
-    let mut header_400000: BlockHeader = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+    let mut header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
     assert!(verify_pow(&header_400000));
     header_400000.nonce = H64::zero();
     assert!(!verify_pow(&header_400000));
@@ -152,10 +157,10 @@ fn test_roundtrip_rlp() -> Result<(), TestError> {
 #[test]
 fn test_decoding() -> Result<(), TestError> {
     let expected = decoded_header_0()?;
-    let header: BlockHeader = decode_rlp(&hex_to_bytes(TEST_HEADER_0)?)?;
+    let header: BlockHeader = decode_rlp(TEST_HEADER_0)?;
     assert_eq!(header, expected);
 
-    let header_400k: BlockHeader = decode_rlp(&hex_to_bytes(HEADER_400000)?)?;
+    let header_400k: BlockHeader = decode_rlp(HEADER_400000)?;
     assert_eq!(header_400k.number, 400000);
     assert_eq!(header_400k.difficulty, U256::from(6022643743806 as u64));
     assert_eq!(hash_header(&header_400k, false), H256::from_str("5d15649e25d8f3e2c0374946078539d200710afc977cdfc6a977bd23f20fa8e8").map_err(|_| TestError::HexError)?);
@@ -177,15 +182,118 @@ enum TestError {
     ProgError(ProgramError),
 }
 
-fn hex_to_bytes(h: &str) -> Result<Vec<u8>, TestError> {
-    return hex::decode(h).map_err(|_| TestError::HexError);
-}
 fn decode_rlp <T:Decodable> (bytes: &[u8]) -> Result<T, TestError> {
     let rlp = Rlp::new(bytes);
     return T::decode(&rlp).map_err(|_| TestError::RlpError);
 }
 fn encode_header(header: &BlockHeader) -> Vec<u8> {
     return header.rlp_bytes();
+}
+
+pub fn test_inclusion(receipt_index: u64,
+                      receipt_data: &[u8],
+                      header_data: &[u8],
+                      proof_data: &[&[&[u8]]],
+) -> Result<(), DecoderError> {
+    let header: BlockHeader = rlp::decode(header_data).unwrap();
+
+    let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
+        let mut stream = RlpStream::new();
+        stream.append_list::<&[u8], _>(node);
+        stream.out()
+    }).collect();
+
+    assert!(verify_trie_proof(
+        header.receipts_root,
+        &*rlp::encode(&receipt_index),
+        proof_vecs.iter().map(Deref::deref).map(Ok),
+        receipt_data,
+    )?);
+    Ok(())
+}
+
+pub fn test_inclusion_instruction(
+    receipt_index: u64,
+    receipt_data: &[u8],
+    header_data: &[u8],
+    proof_data: &[&[&[u8]]],
+) -> Result<(), DecoderError> {
+    let program_id = Pubkey::default();
+    let key = Pubkey::default();
+    let mut lamports = 0;
+    let mut raw_data = vec![0; 1 << 16];
+
+    let owner = Pubkey::default();
+    let account = AccountInfo {
+        key: &key,
+        is_signer: true,
+        is_writable: true,
+        lamports: Rc::new(RefCell::new(&mut lamports)),
+        data: Rc::new(RefCell::new(&mut raw_data)),
+        owner: &owner,
+        executable: false,
+        rent_epoch: Epoch::default(),
+    };
+
+    let mut accounts = vec![account];
+
+    let header: BlockHeader = rlp::decode(header_data).unwrap();
+
+    {
+        let instruction_init: Vec<u8> = Instruction::Initialize(header.clone()).pack();
+        process_instruction(&program_id, &accounts, &instruction_init).unwrap();
+    }
+
+    {
+        let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
+            let mut stream = RlpStream::new();
+            stream.append_list::<&[u8], _>(node);
+            stream.out()
+        }).collect();
+
+        let proof = {
+            let mut stream = RlpStream::new();
+            stream.append_list::<Vec<u8>, _>(&*proof_vecs);
+            stream.out()
+        };
+
+        accounts[0].is_writable = false;
+
+        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(ProveInclusion {
+            height: header.number,
+            block_hash: hash_header(&header, false),
+            expected_value: receipt_data.to_vec(),
+            key: rlp::encode(&receipt_index),
+            proof,
+        }).pack();
+        process_instruction(&program_id, &accounts, &instruction_proove_incl).unwrap();
+    }
+
+    Ok(())
+}
+
+#[test]
+pub fn test_inclusion_0() -> Result<(), DecoderError> {
+    use inclusion::test_0::*;
+    test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+}
+
+#[test]
+pub fn test_inclusion_1() -> Result<(), DecoderError> {
+    use inclusion::test_1::*;
+    test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+}
+
+#[test]
+pub fn test_inclusion_instruction_0() -> Result<(), DecoderError> {
+    use inclusion::test_0::*;
+    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+}
+
+#[test]
+pub fn test_inclusion_instruction_1() -> Result<(), DecoderError> {
+    use inclusion::test_1::*;
+    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
