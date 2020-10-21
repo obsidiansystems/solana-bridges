@@ -24,12 +24,33 @@ import Network.Socket(withSocketsDo)
 import Network.HTTP.Client.TLS (newTlsManager)
 import qualified Data.IntMap.Strict as IntMap
 import Data.IntMap (IntMap)
-import           Control.Concurrent (forkIO, killThread)
-import           Control.Monad.Catch (finally)
+import Control.Concurrent (forkIO, killThread)
+import Control.Monad.Catch (finally)
 import Data.Void
+import Data.Word
 
 
+getEpochSchedule :: SolanaRpcM IO SolanaEpochSchedule
+getEpochSchedule = rpcWebRequest @SolanaEpochSchedule "getEpochSchedule"
 
+getEpochInfo :: SolanaRpcM IO SolanaEpochInfo
+getEpochInfo = rpcWebRequest "getEpochInfo"
+
+getConfirmedBlock :: Word64 -> SolanaRpcM IO (Either Value (Maybe SolanaCommittedBlock))
+getConfirmedBlock slot = rpcWebRequest'' @_ @(Maybe SolanaCommittedBlock) "getConfirmedBlock" $ Just [slot]
+
+getConfirmedBlocks :: Word64 -> Word64 -> SolanaRpcM IO [Word64]
+getConfirmedBlocks startSlot endSlot = rpcWebRequest' "getConfirmedBlocks" $ Just (startSlot, endSlot)
+
+getLeaderSchedule :: Word64 -> SolanaRpcM IO SolanaLeaderSchedule
+getLeaderSchedule slot = rpcWebRequest' @[Word64] @SolanaLeaderSchedule "getLeaderSchedule" $ Just [slot]
+
+
+rootSubscribe :: (Either String Word64 -> IO ()) -> SolanaRpcM IO ()
+rootSubscribe = sendRPCSubscription @Void @Word64 "rootSubscribe" (Nothing :: Maybe Void)
+
+slotSubscribe :: (Either String SolanaSlotNotification -> IO ()) -> SolanaRpcM IO ()
+slotSubscribe = sendRPCSubscription @Void @SolanaSlotNotification "slotSubscribe" Nothing
 
 
 withSolanaWebSocket :: SolanaRpcConfig -> SolanaRpcM IO a -> IO a
