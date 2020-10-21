@@ -19,10 +19,12 @@ contract SolanaClient {
     uint64 public seenBlocks;
     bytes32 public lastHash;
     uint64 public lastSlot;
-    Slot[] public slots;
+    Slot[HISTORY_SIZE] public slots;
 
     uint64 public epoch;
     LeaderSchedule schedule;
+
+    event Success();
 
     constructor () public {
         creator = msg.sender;
@@ -38,6 +40,7 @@ contract SolanaClient {
         epoch = newEpoch;
         schedule.publicKeys = schedulePublicKeys;
         schedule.slotKeys = scheduleSlotKeys;
+        emit Success();
     }
 
     function getSlotLeader(uint64 slot) external view returns (uint256) {
@@ -59,6 +62,7 @@ contract SolanaClient {
     function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash) external {
         authorize();
         addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash);
+        emit Success();
     }
 
     function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash) private {
@@ -70,16 +74,17 @@ contract SolanaClient {
             if(parentBlockHash != lastHash)
                 revert("Unexpected parent hash");
         }
-        initialized = true;
 
-        for(uint64 s = lastSlot + 1; s < slot; s++) {
+        for(uint64 s = initialized ? lastSlot + 1 : 0; s < slot; s++) {
             emptySlot(s);
         }
+
         fillSlot(slot, blockHash);
+
         lastSlot = slot;
         lastHash = blockHash;
-
         seenBlocks++;
+        initialized = true;
     }
 
     function slotOffset(uint64 s) private pure returns (uint64) {
