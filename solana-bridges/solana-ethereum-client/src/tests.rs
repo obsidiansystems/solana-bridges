@@ -240,7 +240,10 @@ pub fn test_inclusion_instruction(
     let header: BlockHeader = rlp::decode(header_data).unwrap();
 
     {
-        let instruction_init: Vec<u8> = Instruction::Initialize(header.clone()).pack();
+        let instruction_init: Vec<u8> = Instruction::Initialize(RingItem {
+            total_difficulty: U256::zero(),
+            header: header.clone(),
+        }).pack();
         process_instruction(&program_id, &accounts, &instruction_init).unwrap();
     }
 

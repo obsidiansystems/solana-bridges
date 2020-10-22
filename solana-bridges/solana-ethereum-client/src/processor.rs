@@ -34,42 +34,49 @@ pub fn process_instruction<'a>(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    match Instruction::unpack(instruction_data)? {
-        Instruction::Noop => return Ok(()),
-        Instruction::Initialize(block_header) => {
+    Ok(match Instruction::unpack(instruction_data)? {
+        Instruction::Noop => {},
+        Instruction::Initialize(item) => {
             if !account.is_signer {
                 info!("Account does not have the correct program id");
                 return Err(ProgramError::MissingRequiredSignature);
             }
-            {
-                let raw_data = account.try_borrow_data()?;
-                let data = interp(&*raw_data);
-                match data {
-                    Storage { height: 0, offset: 0, full: false, .. } => (),
-                    _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
-                };
-            }
-            if !verify_block(&block_header, None) {
+
+            guard_sufficient_storage(&account)?;
+            let mut raw_data = account.try_borrow_mut_data()?;
+            let data = interp_mut(&mut *raw_data);
+
+            match data {
+                Storage { height: 0, offset: 0, full: false, .. } => (),
+                _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
+            };
+            if !verify_block(&item.header, None) {
                 return Err(CustomError::VerifyHeaderFailed.to_program_error());
             };
 
-            write_new_block(account, block_header)?;
+            write_new_block(data, &item.header, Some(&item.total_difficulty))?;
         },
-        Instruction::NewBlock(block_header) => match read_prev_block(account) {
-            Err(e) => return Err(e),
-            Ok(parent) => {
-                if !verify_block(&block_header, Some(&parent)) {
-                    return Err(CustomError::VerifyHeaderFailed.to_program_error());
-                };
-                write_new_block(account, block_header)?;
-            }
+        Instruction::NewBlock(header) => {
+            guard_sufficient_storage(&account)?;
+            let mut raw_data = account.try_borrow_mut_data()?;
+            let data = interp_mut(&mut *raw_data);
+
+            let parent = read_prev_block(data)?
+                .ok_or(CustomError::BlockNotFound.to_program_error())?;
+            if !verify_block(&header, Some(&parent.header)) {
+                return Err(CustomError::VerifyHeaderFailed.to_program_error());
+            };
+
+            write_new_block(data, &header, None)?;
         },
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
                 return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
             }
+            guard_sufficient_storage(&account)?;
             let mut raw_data = account.try_borrow_mut_data()?;
             let data = interp(&mut *raw_data);
+
             let min_h = min_height(data);
             if min_h > pi.height {
                 panic!("too old {} {}", min_h, pi.height)
@@ -79,25 +86,24 @@ pub fn process_instruction<'a>(
                 panic!("too new {} {}", max_h, pi.height)
             }
             let offset = lowest_offset(data) + (pi.height - min_h) as usize % data.headers.len();
-            let block = read_block(data, offset)?;
+            let block = read_block(data, offset)?
+                .ok_or(CustomError::BlockNotFound.to_program_error())?;
             //if block.hash != pi.block_hash {
             //    panic!("wrong block at height")
             //}
-            let expected_root = block.receipts_root; // pi.block_hash
+            let expected_root = block.header.receipts_root; // pi.block_hash
             let rlp = Rlp::new(&*pi.proof);
             let proof = rlp.iter().map(|rlp| rlp.data());
             verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
                 .map_err(|_| CustomError::InvalidProof.to_program_error())?;
         },
-    };
-
-    Ok(())
+    })
 }
 
 #[inline]
 pub fn interp(raw_data: &[u8]) -> &Storage {
     let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / RingItem::LEN;
     let hacked_data = &raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
     let res: &Storage = unsafe { std::mem::transmute(hacked_data) };
@@ -110,7 +116,7 @@ pub fn interp(raw_data: &[u8]) -> &Storage {
 #[inline]
 pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
     let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / BlockHeader::LEN;
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / RingItem::LEN;
     let hacked_data = &mut raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
     let res: &mut Storage = unsafe { std::mem::transmute(hacked_data) };
@@ -135,37 +141,43 @@ pub fn lowest_offset(data: &Storage) -> usize {
     }
 }
 
-pub fn read_block(data: &Storage, idx: usize) -> Result<BlockHeader, ProgramError> {
+pub fn read_block(data: &Storage, idx: usize) -> Result<Option<RingItem>, ProgramError> {
     let len = data.headers.len();
     match *data {
         Storage { full: false, offset, .. } if idx < offset
             => (),
         Storage { full: true, .. } if idx < len
             => (),
-        _ => return Err(CustomError::BlockNotFound.to_program_error()),
+        _ => return Ok(None),
     };
     assert!(data.height != 0);
     let ref header_src = data.headers[idx];
-    let header = BlockHeader::unpack_from_slice(header_src)?;
-    Ok(header)
+    let header = RingItem::unpack_from_slice(header_src)?;
+    Ok(Some(header))
 }
 
-pub fn read_prev_block(account: &AccountInfo) -> Result<BlockHeader, ProgramError> {
-    guard_sufficient_storage(&account)?;
-    let raw_data = account.try_borrow_data()?;
-    let data = interp(&*raw_data);
+pub fn read_prev_block(data: &Storage) -> Result<Option<RingItem>, ProgramError> {
     let len = data.headers.len();
     read_block(data, (data.offset + (len - 1)) % len)
 }
 
-pub fn write_new_block(account: &AccountInfo, header: BlockHeader) -> Result<(), ProgramError> {
-    guard_sufficient_storage(&account)?;
-    let mut raw_data = account.try_borrow_mut_data()?;
-    let data = interp_mut(&mut *raw_data);
-
+pub fn write_new_block(data: &mut Storage, header: &BlockHeader, old_total_difficulty_opt: Option<&U256>) -> Result<(), ProgramError> {
     let old_offset = data.offset;
 
-    header.pack_into_slice(&mut data.headers[old_offset]);
+    let old_total_difficulty = match old_total_difficulty_opt {
+        Some(d) => *d,
+        None => match read_prev_block(data)? {
+            None => U256::zero(),
+            Some(prev_item) => prev_item.total_difficulty,
+        },
+    };
+
+    let item = RingItem {
+        header: header.clone(),
+        total_difficulty: old_total_difficulty + header.difficulty,
+    };
+
+    item.pack_into_slice(&mut data.headers[old_offset]);
 
     data.height = header.number;
     data.offset = (old_offset + 1) % data.headers.len();

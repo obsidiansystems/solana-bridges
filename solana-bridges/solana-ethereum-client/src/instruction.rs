@@ -1,5 +1,6 @@
 use crate::eth::*;
 use crate::types::*;
+use crate::parameters::*;
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
@@ -19,7 +20,7 @@ pub struct ProveInclusion {
 
 pub enum Instruction {
     Noop,
-    Initialize(BlockHeader),
+    Initialize(RingItem),
     NewBlock(BlockHeader),
     ProveInclusion(ProveInclusion),
 }
@@ -53,7 +54,8 @@ impl Instruction {
         return match tag {
             0 => Ok(Self::Noop),
             1 => {
-                let block = decode_header(&Rlp::new(rest))?;
+                let block = rlp::decode(rest)
+                    .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())?;
                 Ok(Self::Initialize(block))
             }
             2 => {
