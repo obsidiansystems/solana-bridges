@@ -40,11 +40,10 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import System.Environment
 import System.Exit
-import System.IO (IOMode(..), openFile)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -433,12 +432,7 @@ runGeth runDir = do
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
   putStrLn "Launching ethereum node"
-  h <- openFile (logsSubdir runDir) WriteMode
-  let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
-  (_,_,_,ph) <- createProcess $ p
-    { std_out = UseHandle h
-    , std_err = UseHandle h
-    }
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
