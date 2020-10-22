@@ -5,7 +5,7 @@ use solana_sdk::{
 };
 
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomError {
     DecodeBlockFailed,
     DecodeHeaderFailed,
@@ -16,10 +16,14 @@ pub enum CustomError {
     InvalidAccountOwner,
     DeserializeStorageFailed,
     AlreadyInitialized,
-    InvalidProof,
     WritableHistoryDuringProofCheck,
 
-    //DecodeError(DecodeError),
+    #[allow(non_camel_case_types)]
+    InvalidProof_BadBlockHash,
+    #[allow(non_camel_case_types)]
+    InvalidProof_TooEasy,
+    #[allow(non_camel_case_types)]
+    InvalidProof_BadMerkle,
 }
 
 impl CustomError {

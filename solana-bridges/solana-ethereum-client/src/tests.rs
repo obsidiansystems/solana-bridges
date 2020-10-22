@@ -1,6 +1,7 @@
 use quickcheck_macros::quickcheck;
 
 use crate::{
+    types::*,
     instruction::*,
     processor::*,
     parameters::*,
@@ -153,16 +154,16 @@ fn test_decoding() -> Result<(), TestError> {
     return Ok(());
 }
 
-#[derive(Debug)]
-enum TestError {
+#[derive(Debug, PartialEq, Eq)]
+pub enum TestError {
     HexError,
-    RlpError,
+    RlpError(DecoderError),
     ProgError(ProgramError),
 }
 
 fn decode_rlp <T:Decodable> (bytes: &[u8]) -> Result<T, TestError> {
     let rlp = Rlp::new(bytes);
-    return T::decode(&rlp).map_err(|_| TestError::RlpError);
+    return T::decode(&rlp).map_err(TestError::RlpError);
 }
 fn encode_header(header: &BlockHeader) -> Vec<u8> {
     return header.rlp_bytes();
@@ -190,12 +191,24 @@ pub fn test_inclusion(receipt_index: u64,
     Ok(())
 }
 
-pub fn test_inclusion_instruction(
-    receipt_index: u64,
-    receipt_data: &[u8],
+pub fn pack_proof(proof_data: &[&[&[u8]]]) -> Vec<u8> {
+    let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
+        let mut stream = RlpStream::new();
+        stream.append_list::<&[u8], _>(node);
+        stream.out()
+    }).collect();
+
+    let mut stream = RlpStream::new();
+    stream.append_list::<Vec<u8>, _>(&*proof_vecs);
+    stream.out()
+}
+
+pub fn test_inclusion_instruction<F>(
     header_data: &[u8],
-    proof_data: &[&[&[u8]]],
-) -> Result<(), DecoderError> {
+    instruction_fun: F,
+) -> Result<(), TestError>
+where F: FnOnce(BlockHeader) -> ProveInclusion
+{
     let program_id = Pubkey::default();
     let key = Pubkey::default();
     let mut lamports = 0;
@@ -226,28 +239,13 @@ pub fn test_inclusion_instruction(
     }
 
     {
-        let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
-            let mut stream = RlpStream::new();
-            stream.append_list::<&[u8], _>(node);
-            stream.out()
-        }).collect();
-
-        let proof = {
-            let mut stream = RlpStream::new();
-            stream.append_list::<Vec<u8>, _>(&*proof_vecs);
-            stream.out()
-        };
 
         accounts[0].is_writable = false;
 
-        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(ProveInclusion {
-            height: header.number,
-            block_hash: hash_header(&header, false),
-            expected_value: receipt_data.to_vec(),
-            key: rlp::encode(&receipt_index),
-            proof,
-        }).pack();
-        process_instruction(&program_id, &accounts, &instruction_proove_incl).unwrap();
+        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(instruction_fun(header)).pack();
+
+        process_instruction(&program_id, &accounts, &instruction_proove_incl)
+            .map_err(TestError::ProgError)?;
     }
 
     Ok(())
@@ -266,15 +264,106 @@ pub fn test_inclusion_1() -> Result<(), DecoderError> {
 }
 
 #[test]
-pub fn test_inclusion_instruction_0() -> Result<(), DecoderError> {
+pub fn test_inclusion_instruction_bad_block() -> () {
     use inclusion::test_0::*;
-    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+    // note the err() to require an error;
+    let res = test_inclusion_instruction(
+        HEADER_DATA,
+        |header| {
+            let mut block_hash = hash_header(&header, false);
+            block_hash.0[5] +=1;
+            ProveInclusion {
+                height: header.number,
+                block_hash,
+                expected_value: RECEIPT_DATA.to_vec(),
+                key: rlp::encode(&RECEIPT_INDEX),
+                proof: pack_proof(PROOF_DATA),
+                min_difficulty: U256::zero(),
+            }
+        },
+    );
+    assert_eq!(
+        res.err().unwrap(),
+        TestError::ProgError(CustomError::InvalidProof_BadBlockHash.to_program_error()),
+    );
 }
 
 #[test]
-pub fn test_inclusion_instruction_1() -> Result<(), DecoderError> {
+pub fn test_inclusion_instruction_too_easy() {
+    use inclusion::test_0::*;
+    // note the err() to require an error;
+    let res = test_inclusion_instruction(
+        HEADER_DATA,
+        |header: BlockHeader| ProveInclusion {
+            height: header.number,
+            block_hash: hash_header(&header, false),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: U256([9,9,9,9]),
+        },
+    );
+    assert_eq!(
+        res.err().unwrap(),
+        TestError::ProgError(CustomError::InvalidProof_TooEasy.to_program_error()),
+    );
+}
+
+#[test]
+pub fn test_inclusion_instruction_bad_proof() {
+    use inclusion::test_0::*;
+    // note the err() to require an error;
+    let res = test_inclusion_instruction(
+        HEADER_DATA,
+        |header: BlockHeader| {
+            let mut proof = pack_proof(PROOF_DATA);
+            proof[5] +=1;
+            ProveInclusion {
+                height: header.number,
+                block_hash: hash_header(&header, false),
+                expected_value: RECEIPT_DATA.to_vec(),
+                key: rlp::encode(&RECEIPT_INDEX),
+                proof,
+                min_difficulty: U256::zero(),
+            }
+        },
+    );
+    assert_eq!(
+        res.err().unwrap(),
+        TestError::ProgError(CustomError::InvalidProof_BadMerkle.to_program_error()),
+    );
+}
+
+#[test]
+pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
+    use inclusion::test_0::*;
+    test_inclusion_instruction(
+        HEADER_DATA,
+        |header: BlockHeader| ProveInclusion {
+            height: header.number,
+            block_hash: hash_header(&header, false),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: U256::zero(),
+        },
+    )
+}
+
+#[test]
+pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
     use inclusion::test_1::*;
-    test_inclusion_instruction(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
+    test_inclusion_instruction(
+        HEADER_DATA,
+        |header: BlockHeader| ProveInclusion {
+            height: header.number,
+            block_hash: hash_header(&header, false),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: U256::zero(),
+        },
+    )
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {

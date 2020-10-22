@@ -46,7 +46,8 @@ pub fn _verify_trie_proof<'a, I>(
 ) -> Result<bool, DecoderError>
 where I: Iterator<Item=Result<&'a [u8], DecoderError>>
 {
-    let node = proof.next().expect("TODO")?;
+    let node = proof.next()
+        .ok_or(DecoderError::RlpIsTooShort)??;
 
     let dec = Rlp::new(node);
 

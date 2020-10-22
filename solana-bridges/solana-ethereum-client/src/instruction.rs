@@ -4,6 +4,8 @@ use crate::parameters::*;
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
+pub use ethereum_types::U256;
+
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
 use solana_sdk::program_error::ProgramError;
@@ -16,6 +18,7 @@ pub struct ProveInclusion {
     pub key: Vec<u8>,
     pub expected_value: Vec<u8>,
     pub proof: Vec<u8>,
+    pub min_difficulty: U256,
 }
 
 pub enum Instruction {
