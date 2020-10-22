@@ -49,7 +49,6 @@ library
                      , http-client
                      , http-types
                      , http-client-tls
-  ghc-options: -threaded
 
 executable solana-bridges
   main-is:             Main.hs
