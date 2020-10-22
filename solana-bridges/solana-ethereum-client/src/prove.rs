@@ -53,12 +53,12 @@ where I: Iterator<Item=Result<&'a [u8], DecoderError>>
 
     if key_index == 0 {
         // trie root is always a hash
-        assert_eq!(keccak256(node), expected_root);
+        if keccak256(node) != expected_root { return Ok(false); }
     } else if node.len() < 32 {
         // if rlp < 32 bytes, then it is not hashed
-        assert_eq!(dec.as_raw(), &expected_root.0);
+        if dec.as_raw() != &expected_root.0 { return Ok(false); }
     } else {
-        assert_eq!(keccak256(node), expected_root);
+        if keccak256(node) != expected_root { return Ok(false); }
     }
 
     match dec.iter().count() {
@@ -158,10 +158,10 @@ where I: Iterator<Item=Result<&'a [u8], DecoderError>>
                 );
             }
         },
-        _ => panic!("This should not be reached if the proof has the correct format"),
+        _ => return Err(DecoderError::Custom("This should not be reached if the proof has the correct format")),
         }
     },
-    _ => panic!("This should not be reached if the proof has the correct format"),
+    _ => return Err(DecoderError::Custom("This should not be reached if the proof has the correct format")),
     }
 
     Ok(expected_value.len() == 0)
