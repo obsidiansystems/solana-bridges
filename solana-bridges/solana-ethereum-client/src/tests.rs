@@ -13,7 +13,6 @@ use solana_sdk::{
     account_info::{AccountInfo},
     pubkey::Pubkey,
     program_error::ProgramError,
-    program_pack::{Pack},
 };
 
 use crate::eth::*;
@@ -54,7 +53,7 @@ fn block_construction() -> Result<(), TestError> {
 
 #[quickcheck]
 fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
-    buf_len *= BlockHeader::LEN / 7;
+    buf_len *= std::mem::size_of::<RingItem>() / 7;
     buf_len += MIN_BUF_SIZE;
 
     block_count += 1;
@@ -82,8 +81,11 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
 
     {
-        let header_400000 = decode_rlp(HEADER_400000)?;
-        let instruction_init: Vec<u8> = Instruction::Initialize(header_400000).pack();
+        let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
+        let instruction_init: Vec<u8> = Instruction::Initialize(RingItem {
+            header: header_400000,
+            total_difficulty: U256([0,1,1,1]) // arbitrarily chosen number for now
+        }).pack();
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
     }
 
@@ -121,30 +123,6 @@ fn test_pow() -> Result<(), TestError> {
     assert!(test_header_pow(HEADER_400001)?);
     assert!(test_header_pow(HEADER_8996776)?);
     return Ok (());
-}
-
-fn test_extradata_pack(extra: ExtraData) -> Result<(), TestError> {
-    let mut extra_slice = [0; ExtraData::LEN];
-    extra.pack_into_slice(&mut extra_slice);
-    assert_eq!(extra.bytes.len() as u8, extra_slice[0]);
-    assert_eq!(extra, ExtraData::unpack_from_slice(&extra_slice).map_err(TestError::ProgError)?);
-    return Ok(());
-}
-
-#[test]
-fn test_roundtrip_pack() -> Result<(), TestError> {
-    test_extradata_pack(ExtraData { bytes: vec![] })?;
-    test_extradata_pack(ExtraData { bytes: vec![4] })?;
-    test_extradata_pack(ExtraData { bytes: vec![5,5] })?;
-    test_extradata_pack(ExtraData { bytes: vec![6,6,6] })?;
-
-    let expected = decoded_header_0()?;
-    let mut buffer = [0; BlockHeader::LEN];
-    expected.pack_into_slice(&mut buffer);
-    let unpacked = BlockHeader::unpack_from_slice(&buffer).map_err(TestError::ProgError)?;
-    assert_eq!(expected, unpacked);
-
-    return Ok(());
 }
 
 #[test]

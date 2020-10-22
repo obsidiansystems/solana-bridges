@@ -8,6 +8,8 @@ use crate::{
     prove::*,
 };
 
+use std::mem;
+
 use rlp::Rlp;
 
 use solana_sdk::{
@@ -15,7 +17,6 @@ use solana_sdk::{
     entrypoint_deprecated::ProgramResult,
     info,
     program_error::ProgramError,
-    program_pack::{Pack},
     pubkey::Pubkey,
 };
 
@@ -103,7 +104,7 @@ pub fn process_instruction<'a>(
 #[inline]
 pub fn interp(raw_data: &[u8]) -> &Storage {
     let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / RingItem::LEN;
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / mem::size_of::<RingItem>();
     let hacked_data = &raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
     let res: &Storage = unsafe { std::mem::transmute(hacked_data) };
@@ -116,7 +117,7 @@ pub fn interp(raw_data: &[u8]) -> &Storage {
 #[inline]
 pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
     let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / RingItem::LEN;
+    let block_len = raw_data[BLOCKS_OFFSET..].len() / mem::size_of::<RingItem>();
     let hacked_data = &mut raw_data[..block_len];
     // FIXME use proper DST stuff once it exists
     let res: &mut Storage = unsafe { std::mem::transmute(hacked_data) };
@@ -141,7 +142,7 @@ pub fn lowest_offset(data: &Storage) -> usize {
     }
 }
 
-pub fn read_block(data: &Storage, idx: usize) -> Result<Option<RingItem>, ProgramError> {
+pub fn read_block<'a>(data: &'a Storage, idx: usize) -> Result<Option<&'a RingItem>, ProgramError> {
     let len = data.headers.len();
     match *data {
         Storage { full: false, offset, .. } if idx < offset
@@ -151,12 +152,11 @@ pub fn read_block(data: &Storage, idx: usize) -> Result<Option<RingItem>, Progra
         _ => return Ok(None),
     };
     assert!(data.height != 0);
-    let ref header_src = data.headers[idx];
-    let header = RingItem::unpack_from_slice(header_src)?;
+    let ref header = data.headers[idx];
     Ok(Some(header))
 }
 
-pub fn read_prev_block(data: &Storage) -> Result<Option<RingItem>, ProgramError> {
+pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, ProgramError> {
     let len = data.headers.len();
     read_block(data, (data.offset + (len - 1)) % len)
 }
@@ -164,20 +164,20 @@ pub fn read_prev_block(data: &Storage) -> Result<Option<RingItem>, ProgramError>
 pub fn write_new_block(data: &mut Storage, header: &BlockHeader, old_total_difficulty_opt: Option<&U256>) -> Result<(), ProgramError> {
     let old_offset = data.offset;
 
-    let old_total_difficulty = match old_total_difficulty_opt {
-        Some(d) => *d,
+    const ZERO: U256 = U256([0; 4]);
+
+    let old_total_difficulty: &_ = match old_total_difficulty_opt {
+        Some(d) => d,
         None => match read_prev_block(data)? {
-            None => U256::zero(),
-            Some(prev_item) => prev_item.total_difficulty,
+            None => &ZERO,
+            Some(prev_item) => &prev_item.total_difficulty,
         },
     };
 
-    let item = RingItem {
+    data.headers[old_offset] = RingItem {
         header: header.clone(),
         total_difficulty: old_total_difficulty + header.difficulty,
     };
-
-    item.pack_into_slice(&mut data.headers[old_offset]);
 
     data.height = header.number;
     data.offset = (old_offset + 1) % data.headers.len();

@@ -16,7 +16,6 @@ use rlp::{
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
 use std::mem;
-use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use tiny_keccak::{Hasher, Keccak};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -284,120 +283,6 @@ pub const HEADER_FIELD_SIZES: [usize; 15] = [
     H256_LEN, // mix_hash: H256
     H64_LEN, //  nonce: H64
 ];
-
-impl Sealed for BlockHeader {}
-impl Pack for BlockHeader {
-    const LEN: usize = SIZE_OF_HEADER;
-    fn pack_into_slice(&self, dst: &mut [u8]) {
-        let dst = array_mut_ref![dst, 0, BlockHeader::LEN];
-        let (
-            parent_hash_dst,
-            uncles_hash_dst,
-            author_dst,
-            state_root_dst,
-            transactions_root_dst,
-            receipts_root_dst,
-            log_bloom_dst,
-            difficulty_dst,
-            number_dst,
-            gas_limit_dst,
-            gas_used_dst,
-            timestamp_dst,
-            extra_data_dst,
-            mix_hash_dst,
-            nonce_dst,
-        ) = mut_array_refs![dst,
-                            H256_LEN, // parent_hash: H256
-                            H256_LEN, // uncles_hash: H256
-                            H160_LEN, // author: H160
-                            H256_LEN, // state_root: H256
-                            H256_LEN, // transactions_root: H256
-                            H256_LEN, // receipts_root: H256
-                            BLOOM_LEN, // log_bloom: Bloom
-                            U256_LEN, // difficulty: U256
-                            mem::size_of::<u64>(), // number: u64
-                            U256_LEN, // gas_limit: U256
-                            U256_LEN, // gas_used: U256
-                            mem::size_of::<u64>(), // timestamp: u64
-                            ExtraData::LEN, // extra_data: ExtraData
-                            H256_LEN, // mix_hash: H256
-                            H64_LEN //  nonce: H64
-        ];
-
-        *parent_hash_dst = *self.parent_hash.as_fixed_bytes();
-        *uncles_hash_dst = *self.uncles_hash.as_fixed_bytes();
-        *author_dst = *self.author.as_fixed_bytes();
-        *state_root_dst = *self.state_root.as_fixed_bytes();
-        *transactions_root_dst = *self.transactions_root.as_fixed_bytes();
-        *receipts_root_dst = *self.receipts_root.as_fixed_bytes();
-        *log_bloom_dst = *self.log_bloom.as_fixed_bytes();
-        self.difficulty.to_little_endian(difficulty_dst);
-        *number_dst = self.number.to_le_bytes();
-        self.gas_limit.to_little_endian(gas_limit_dst);
-        self.gas_used.to_little_endian(gas_used_dst);
-        *timestamp_dst = self.timestamp.to_le_bytes();
-        self.extra_data.pack_into_slice(extra_data_dst);
-        *mix_hash_dst = *self.mix_hash.as_fixed_bytes();
-        *nonce_dst = *self.nonce.as_fixed_bytes();
-    }
-
-    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let src = array_ref![src, 0, BlockHeader::LEN];
-        let (
-            parent_hash_src,
-            uncles_hash_src,
-            author_src,
-            state_root_src,
-            transactions_root_src,
-            receipts_root_src,
-            log_bloom_src,
-            difficulty_src,
-            number_src,
-            gas_limit_src,
-            gas_used_src,
-            timestamp_src,
-            extra_data_src,
-            mix_hash_src,
-            nonce_src,
-        ) = array_refs![src,
-                        H256_LEN, // parent_hash: H256
-                        H256_LEN, // uncles_hash: H256
-                        H160_LEN, // author: H160
-                        H256_LEN, // state_root: H256
-                        H256_LEN, // transactions_root: H256
-                        H256_LEN, // receipts_root: H256
-                        BLOOM_LEN, // log_bloom: Bloom
-                        U256_LEN, // difficulty: U256
-                        mem::size_of::<u64>(), // number: u64
-                        U256_LEN, // gas_limit: U256
-                        U256_LEN, // gas_used: U256
-                        mem::size_of::<u64>(), // timestamp: u64
-                        ExtraData::LEN, // extra_data: ExtraData
-                        H256_LEN, // mix_hash: H256
-                        H64_LEN //  nonce: H64
-        ];
-
-        let header = BlockHeader {
-            parent_hash: H256::from(parent_hash_src),
-            uncles_hash: H256::from(uncles_hash_src),
-            author: H160::from(author_src),
-            state_root: H256::from(state_root_src),
-            transactions_root: H256::from(transactions_root_src),
-            receipts_root: H256::from(receipts_root_src),
-            log_bloom: Bloom::from(log_bloom_src),
-            difficulty: U256::from_little_endian(difficulty_src),
-            number: u64::from_le_bytes(*number_src),
-            gas_limit: U256::from_little_endian(gas_limit_src),
-            gas_used: U256::from_little_endian(gas_used_src),
-            timestamp: u64::from_le_bytes(*timestamp_src),
-            extra_data: ExtraData::unpack_from_slice(extra_data_src)?,
-            mix_hash: H256::from(mix_hash_src),
-            nonce: H64::from(nonce_src),
-        };
-
-        return Ok(header);
-    }
-}
 
 impl BlockHeader {
     fn stream_rlp(&self, stream: &mut RlpStream, truncated: bool) {
