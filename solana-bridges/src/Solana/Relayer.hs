@@ -8,6 +8,8 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
@@ -26,8 +28,9 @@ import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.ByteArray.HexString
 import Data.Default (def)
-import Data.Functor.Compose
+import Data.FileEmbed (embedFile)
 import Data.Foldable
+import Data.Functor.Compose
 import Data.List (intercalate)
 import Data.Maybe(fromMaybe)
 import Data.Solidity.Prim.Address (Address)
@@ -36,11 +39,12 @@ import Data.Text (Text)
 import Data.Word
 import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
+import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import System.Environment
 import System.Exit
-import System.IO (IOMode(..), openFile)
+import System.IO (IOMode(..), openFile, stderr, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
@@ -84,7 +88,63 @@ mainRelayer = do
       runRelayer configFile config
 
     _ -> do
-      putStrLn "USAGE: solana-bridges CONFIGFILE.json"
+      progName <- getProgName
+      hPutStrLn stderr $ "USAGE: " <> progName <> " CONFIGFILE.json"
+
+type SolanaToEthereumConfig = (Eth.Provider, Address)
+
+mainRelayerEth :: IO ()
+mainRelayerEth = do
+  getArgs >>= \case
+    configFile:[] -> do
+      configData <- BS.readFile configFile
+      (node, address) :: SolanaToEthereumConfig <- case eitherDecodeStrict' configData of
+          Right c -> pure c
+          Left e -> fail $ show e
+
+      runRelayerEth node address
+
+    _ -> do
+      progName <- getProgName
+      hPutStrLn stderr $ "USAGE: " <> progName <> " CONFIGFILE.json"
+
+
+uriToProvider :: URI -> Either Text Eth.Provider
+uriToProvider uri = case uriScheme uri of
+  "http:" -> httpProvider
+  "https:" -> httpProvider
+
+  invalidSchema -> Left $ "invalid schema: " <> T.pack invalidSchema
+  where
+    httpProvider = Right $ Eth.HttpProvider $ uriToString id uri ""
+
+mainDeploySolanaToEthereumContract :: IO ()
+mainDeploySolanaToEthereumContract = do
+  mProvider <- getArgs <&> \case
+    [] -> Right def
+    url:[] -> case parseURI url of
+      Just url' -> uriToProvider url'
+      Nothing -> Left "invalid uri"
+    _ -> Left ""
+
+    -- url:[] -> do
+
+  case mProvider of
+    Left err -> do
+      progName <- getProgName
+      T.hPutStrLn stderr $ T.unlines
+        ["USAGE: " <> T.pack progName <> " [PROVIDER]"
+        , "\tPROVIDER\tethereum provider url"
+        , "\t\thttp://host[:port]"
+        -- , "\t\tws://host:port"
+        , err
+        ]
+    Right provider -> do
+      ca <- deploySolanaRelayContract provider
+      let config :: SolanaToEthereumConfig = (provider, ca)
+
+      LBS.putStr $ encode config
+      putStrLn ""
 
 mainEthTestnet :: IO ()
 mainEthTestnet = do
@@ -274,13 +334,12 @@ deploySolanaRelayContract node = do
   let
     runWeb3'' = runWeb3' node
 
-    deployContract path = do
-      bin <- liftIO $ BS.readFile path
-      liftIO $ putStrLn "Deploying contract"
-      runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ bin) >>= \case
+    deployContract = do
+      liftIO $ hPutStrLn stderr "Deploying contract"
+      runWeb3'' (Eth.sendTransaction $ createContract unlockedAddress $ either error id . hexString $ solanaClientContractBin) >>= \case
         Left err -> throwError $ "Transaction failed: " <> show err
         Right tx -> do
-          liftIO $ putStrLn $ "Submitted contract in transaction " <> T.unpack (toText tx)
+          liftIO $ hPutStrLn stderr $ "Submitted contract in transaction " <> T.unpack (toText tx)
           pure tx
 
     getContractAddress receipt = case Eth.receiptContractAddress receipt of
@@ -288,7 +347,7 @@ deploySolanaRelayContract node = do
       Just ca -> pure ca
 
     waitForTx tx = do
-      liftIO $ putStrLn "Waiting for transaction to be committed"
+      liftIO $ hPutStrLn stderr "Waiting for transaction to be committed"
       fix $ \go -> do
         runWeb3'' (Eth.getTransactionReceipt tx) >>= \case
           Left err -> throwError $ "getTransactionReceipt error: " <> show err
@@ -298,15 +357,18 @@ deploySolanaRelayContract node = do
             go
 
   res <- runExceptT $ do
-    tx <- deployContract "solidity/dist/SolanaClient.bin"
+    tx <- deployContract
 
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
-    liftIO $ putStrLn $ "Contract deployed at address: " <> show ca
+    liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
     pure ca
   case res of
     Left err -> error err
     Right ca -> pure ca
+
+solanaClientContractBin :: BS.ByteString
+solanaClientContractBin = $(embedFile "solidity/dist/SolanaClient.bin")
 
 runRelayerEth :: Eth.Provider -> Address -> IO ()
 runRelayerEth node ca = do
@@ -476,4 +538,5 @@ do
   let x = (defaultOptions { fieldLabelModifier = dropWhile ('_' ==) . dropWhile ('_' /=) . dropWhile ('_' ==) })
   concat <$> traverse (deriveJSON x)
     [ ''ContractConfig
+    , ''Eth.Provider
     ]
