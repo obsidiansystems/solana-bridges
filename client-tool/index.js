@@ -42,7 +42,7 @@ async function readOrGenerateAccount(filename, hint) {
 }
 
 async function openConnection(url) {
-    const connection = new web3.Connection(argv.url);
+    const connection = new web3.Connection(url);
     logger.log(await connection.getVersion());
     return connection;
 }
@@ -154,16 +154,16 @@ function doCall(fn) {
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var v = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(connection,
             txn,
             signers0
             );
-        return {"sig": v};
+        return {"sig": txId};
     };
 }
 
 
-async function noop(argv) {
+async function noop(/* argv */) {
     return {
         instructionData :Buffer.from("00", "hex"),
         isSigner: false,
@@ -237,11 +237,11 @@ async function doInclusionProof(argv) {
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var v = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(connection,
             txn,
             signers0
             );
-        return v;
+        return {"sig": txId};
     }
 
     //doTx(Buffer.from("04", "hex"));
