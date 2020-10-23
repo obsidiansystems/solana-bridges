@@ -278,7 +278,7 @@ function commandArgs(yargv) {
 }
 
 yargs
-    .demandCommand().recommendCommands().strict()
+    .demandCommand().recommendCommands()
 
     .options(
         { 'url': { default: "http://localhost:8899" }
