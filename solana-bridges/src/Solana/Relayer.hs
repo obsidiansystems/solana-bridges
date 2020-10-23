@@ -425,10 +425,12 @@ runRelayerEth node ca = do
               , "Contract is behind by " <> show (rpcSlot - contractSlot)
               ]
           when (not $ null confirmedBlocks) $ do
+            liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
             Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
-            liftIO $ do
-              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-              putStrLn "Submitted new slots to contract"
+            liftIO $ putStrLn "Submitted new slots to contract"
+            runExceptT (getSeenBlocks node ca) >>= \case
+              Left _ -> pure ()
+              Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
 
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
@@ -494,7 +496,6 @@ runGeth runDir = do
 
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching ethereum node"
   h <- openFile (logsSubdir runDir) WriteMode
   let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   (_,_,_,ph) <- createProcess $ p
@@ -509,9 +510,7 @@ withGeth dir action = do
 
   where
     action' = printErrors $ do
-      threadDelay 1e6
-      putStrLn "Waiting for ethereum node to launch"
-      threadDelay 3e6
+      threadDelay 4e6 -- TODO: poll node instead
       action
 
     printErrors = handle $ \(e :: SomeException) -> do
