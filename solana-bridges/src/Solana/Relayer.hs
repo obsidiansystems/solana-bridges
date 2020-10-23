@@ -47,11 +47,11 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import System.Environment
 import System.Exit
-import System.IO (IOMode(..), openFile, stderr, hPutStrLn)
+import System.IO (stderr, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -96,7 +96,7 @@ mainRelayer = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      runRelayer configFile config
+      relayEthereumToSolana configFile config
 
     _ -> do
       progName <- getProgName
@@ -113,7 +113,7 @@ mainRelayerEth = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      runRelayerEth node address
+      relaySolanaToEthereum node address
 
     _ -> do
       progName <- getProgName
@@ -129,8 +129,8 @@ uriToProvider uri = case uriScheme uri of
   where
     httpProvider = Right $ Eth.HttpProvider $ uriToString id uri ""
 
-mainDeploySolanaToEthereumContract :: IO ()
-mainDeploySolanaToEthereumContract = do
+mainDeploySolanaClientContract :: IO ()
+mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
     [] -> Right def
     url:[] -> case parseURI url of
@@ -151,7 +151,7 @@ mainDeploySolanaToEthereumContract = do
         , err
         ]
     Right provider -> do
-      ca <- deploySolanaRelayContract provider
+      ca <- deploySolanaClientContract provider
       let config :: SolanaToEthereumConfig = (provider, ca)
 
       LBS.putStr $ encode config
@@ -167,8 +167,8 @@ mainEthTestnet = do
 
 deployAndRunSolanaRelayer :: IO ()
 deployAndRunSolanaRelayer = do
-  ca <- deploySolanaRelayContract def
-  runRelayerEth def ca
+  ca <- deploySolanaClientContract def
+  relaySolanaToEthereum def ca
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -279,8 +279,8 @@ createContract fromAddr hex = Eth.Call
     , callNonce = Nothing
     }
 
-runRelayer :: FilePath -> ContractConfig -> IO ()
-runRelayer configFile config = do
+relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
+relayEthereumToSolana configFile config = do
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -360,8 +360,8 @@ blockToHeader rlp = blockHeader
 
 
 
-deploySolanaRelayContract :: Eth.Provider -> IO Address
-deploySolanaRelayContract node = do
+deploySolanaClientContract :: Eth.Provider -> IO Address
+deploySolanaClientContract node = do
   let
     runWeb3'' = runWeb3' node
 
@@ -401,8 +401,8 @@ deploySolanaRelayContract node = do
 solanaClientContractBin :: BS.ByteString
 solanaClientContractBin = $(embedFile "solidity/dist/SolanaClient.bin")
 
-runRelayerEth :: Eth.Provider -> Address -> IO ()
-runRelayerEth node ca = do
+relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
+relaySolanaToEthereum node ca = do
   res <- runExceptT $ do
 
     void $ getSeenBlocks node ca
@@ -442,7 +442,7 @@ runRelayerEth node ca = do
                 addBlocks node ca [(slot0, block0)]
               pure slot0
 
-          confirmedBlockSlots <- getConfirmedBlocksWithLimit (succ contractSlot) 64 -- (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          confirmedBlockSlots <- take 64 <$> getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
           confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
@@ -456,10 +456,12 @@ runRelayerEth node ca = do
               , "Contract is behind by " <> show (rpcSlot - contractSlot)
               ]
           when (not $ null confirmedBlocks) $ do
+            liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
             Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
-            liftIO $ do
-              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-              putStrLn "Submitted new slots to contract"
+            liftIO $ putStrLn "Submitted new slots to contract"
+            runExceptT (getSeenBlocks node ca) >>= \case
+              Left _ -> pure ()
+              Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
 
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
@@ -525,13 +527,7 @@ runGeth runDir = do
 
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching ethereum node"
-  h <- openFile (logsSubdir runDir) WriteMode
-  let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
-  (_,_,_,ph) <- createProcess $ p
-    { std_out = UseHandle h
-    , std_err = UseHandle h
-    }
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
@@ -540,9 +536,7 @@ withGeth dir action = do
 
   where
     action' = printErrors $ do
-      threadDelay 1e6
-      putStrLn "Waiting for ethereum node to launch"
-      threadDelay 3e6
+      threadDelay 4e6 -- TODO: poll node instead
       action
 
     printErrors = handle $ \(e :: SomeException) -> do
