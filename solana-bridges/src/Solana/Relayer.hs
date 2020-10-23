@@ -85,7 +85,7 @@ mainRelayer = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      runRelayer configFile config
+      relayEthereumToSolana configFile config
 
     _ -> do
       progName <- getProgName
@@ -102,7 +102,7 @@ mainRelayerEth = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      runRelayerEth node address
+      relaySolanaToEthereum node address
 
     _ -> do
       progName <- getProgName
@@ -118,8 +118,8 @@ uriToProvider uri = case uriScheme uri of
   where
     httpProvider = Right $ Eth.HttpProvider $ uriToString id uri ""
 
-mainDeploySolanaToEthereumContract :: IO ()
-mainDeploySolanaToEthereumContract = do
+mainDeploySolanaClientContract :: IO ()
+mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
     [] -> Right def
     url:[] -> case parseURI url of
@@ -140,7 +140,7 @@ mainDeploySolanaToEthereumContract = do
         , err
         ]
     Right provider -> do
-      ca <- deploySolanaRelayContract provider
+      ca <- deploySolanaClientContract provider
       let config :: SolanaToEthereumConfig = (provider, ca)
 
       LBS.putStr $ encode config
@@ -156,8 +156,8 @@ mainEthTestnet = do
 
 deployAndRunSolanaRelayer :: IO ()
 deployAndRunSolanaRelayer = do
-  ca <- deploySolanaRelayContract def
-  runRelayerEth def ca
+  ca <- deploySolanaClientContract def
+  relaySolanaToEthereum def ca
 
 mainSolanaTestnet :: IO ()
 mainSolanaTestnet = do
@@ -268,8 +268,8 @@ createContract fromAddr hex = Eth.Call
     , callNonce = Nothing
     }
 
-runRelayer :: FilePath -> ContractConfig -> IO ()
-runRelayer configFile config = do
+relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
+relayEthereumToSolana configFile config = do
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -329,8 +329,8 @@ blockToHeader rlp = blockHeaderHex
 
 
 
-deploySolanaRelayContract :: Eth.Provider -> IO Address
-deploySolanaRelayContract node = do
+deploySolanaClientContract :: Eth.Provider -> IO Address
+deploySolanaClientContract node = do
   let
     runWeb3'' = runWeb3' node
 
@@ -370,8 +370,8 @@ deploySolanaRelayContract node = do
 solanaClientContractBin :: BS.ByteString
 solanaClientContractBin = $(embedFile "solidity/dist/SolanaClient.bin")
 
-runRelayerEth :: Eth.Provider -> Address -> IO ()
-runRelayerEth node ca = do
+relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
+relaySolanaToEthereum node ca = do
   res <- runExceptT $ do
 
     void $ getSeenBlocks node ca
