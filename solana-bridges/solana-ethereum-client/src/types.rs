@@ -99,8 +99,7 @@ impl CustomError {
 
             DecodeBlockFailed(_) => 2,
             DecodeHeaderFailed(_) => 3,
-            //DecodeDifficultyAndHeaderFailed(_) => 4,
-            DecodeDifficultyAndHeaderFailed(e) => panic!("{}", e),
+            DecodeDifficultyAndHeaderFailed(_) => 4,
             DecodeInclusionInstructionFailed(_) => 5,
 
             VerifyHeaderFailed_NonConsecutiveHeight => 6,
