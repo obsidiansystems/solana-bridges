@@ -44,7 +44,7 @@ import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
-import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
+import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeFile)
 import System.Environment
 import System.Exit
 import System.IO (stderr, hPutStrLn)
@@ -513,7 +513,8 @@ accountFile = "UTC--2020-09-17T02-34-16.613Z--0xabc6bbd0ad6aca2d25380fc7835fe088
 runGeth ::  FilePath -> IO ()
 runGeth runDir = do
   let
-    dataDirArgs = [ "--datadir", runDir <> "/.ethereum"]
+    cacheArgs = ["--ethash.dagdir", ".ethash"]
+    dataDirArgs = [ "--datadir", runDir <> "/.ethereum" ]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--etherbase=0x0000000000000000000000000000000000000001" ]
     initArgs = [ "init", genesisPath]
@@ -527,7 +528,7 @@ runGeth runDir = do
 
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
