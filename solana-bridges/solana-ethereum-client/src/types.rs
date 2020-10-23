@@ -10,7 +10,16 @@ pub enum CustomError {
     DecodeBlockFailed,
     DecodeHeaderFailed,
     DecodeDifficultyAndHeaderFailed,
-    VerifyHeaderFailed,
+
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_NonConsecutiveHeight,
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_NonMonotonicTimestamp,
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_InvalidParentHash,
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_TooMuchExtraData,
+
     BlockNotFound,
     UnpackExtraDataFailed,
     UnpackInstructionFailed,
@@ -28,7 +37,7 @@ pub enum CustomError {
 }
 
 impl CustomError {
-    pub fn to_program_error(&self) -> ProgramError {
-        ProgramError::Custom(*self as u32)
+    pub fn to_program_error(self) -> ProgramError {
+        ProgramError::Custom(self as u32)
     }
 }

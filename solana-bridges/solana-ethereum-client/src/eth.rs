@@ -11,6 +11,8 @@ use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodabl
 
 use tiny_keccak::{Hasher, Keccak};
 
+use crate::types::*;
+
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ExtraData {
     pub bytes: Vec<u8>,
@@ -182,19 +184,26 @@ pub fn keccak256(bytes: &[u8]) -> H256 {
     H256::from(out)
 }
 
-pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool {
-    let parent_check = match parent {
-        None => true,
-        Some(p) =>
-            header.number == p.number + 1
-            && header.timestamp > p.timestamp
-            && header.parent_hash == hash_header(p, false)
+pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Result<(), CustomError>
+{
+    use CustomError::*;
+    if let Some(p) = parent {
+        if header.number != p.number + 1 {
+            return Err(VerifyHeaderFailed_NonConsecutiveHeight);
+        }
+        if header.timestamp <= p.timestamp {
+            return Err(VerifyHeaderFailed_NonMonotonicTimestamp);
+        }
+        if header.parent_hash != hash_header(p, false) {
+            return Err(VerifyHeaderFailed_InvalidParentHash);
+        }
     };
 
-    let self_check =
-        header.extra_data.bytes.len() <= 32;
+    if header.extra_data.bytes.len() > 32 {
+        return Err(VerifyHeaderFailed_TooMuchExtraData);
+    }
 
-    return self_check && parent_check;
+    Ok(())
 }
 
 pub fn verify_pow(header: &BlockHeader) -> bool {

@@ -51,9 +51,8 @@ pub fn process_instruction<'a>(
                 Storage { height: 0, offset: 0, full: false, .. } => (),
                 _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
             };
-            if !verify_block(&item.header, None) {
-                return Err(CustomError::VerifyHeaderFailed.to_program_error());
-            };
+            verify_block(&item.header, None)
+                .map_err(CustomError::to_program_error)?;
 
             write_new_block(data, &item.header, Some(&item.total_difficulty))?;
         },
@@ -64,9 +63,8 @@ pub fn process_instruction<'a>(
 
             let parent = read_prev_block(data)?
                 .ok_or(CustomError::BlockNotFound.to_program_error())?;
-            if !verify_block(&header, Some(&parent.header)) {
-                return Err(CustomError::VerifyHeaderFailed.to_program_error());
-            };
+            verify_block(&header, Some(&parent.header))
+                .map_err(CustomError::to_program_error)?;
 
             write_new_block(data, &header, None)?;
         },
