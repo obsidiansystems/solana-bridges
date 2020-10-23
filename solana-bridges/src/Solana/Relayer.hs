@@ -316,10 +316,10 @@ relayEthereumToSolana configFile config = do
               case res of
                 Left e -> fail $ show e
                 Right res' -> pure res'
-        mTotalDifficulty <- if n /= loopStart
-          then pure Nothing
-          else fmap (Just . Eth.blockTotalDifficulty) $
-                 doEth $ Eth.getBlockByNumber $ Eth.Quantity $ toInteger n
+        mTotalDifficulty <- case n == loopStart of
+          False -> pure Nothing
+          True -> fmap (Just . Eth.blockTotalDifficulty) $
+            doEth $ Eth.getBlockByNumber $ Eth.Quantity $ toInteger n
         rlp <- doEth $ Eth.getBlockRlp n
         let blockHeader = blockToHeader rlp
         let instructionData = case mTotalDifficulty of
