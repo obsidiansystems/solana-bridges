@@ -83,9 +83,9 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
     {
         let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
-        let instruction_init: Vec<u8> = Instruction::Initialize(RingItem {
-            header: header_400000,
-            total_difficulty: U256([0,1,1,1]) // arbitrarily chosen number for now
+        let instruction_init: Vec<u8> = Instruction::Initialize(Initialize {
+            header: Box::new(header_400000),
+            total_difficulty: Box::new(U256([0,1,1,1])) // arbitrarily chosen number for now
         }).pack();
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
     }
@@ -231,9 +231,9 @@ where F: FnOnce(BlockHeader) -> ProveInclusion
     let header: BlockHeader = rlp::decode(header_data).unwrap();
 
     {
-        let instruction_init: Vec<u8> = Instruction::Initialize(RingItem {
-            total_difficulty: U256::zero(),
-            header: header.clone(),
+        let instruction_init: Vec<u8> = Instruction::Initialize(Initialize {
+            total_difficulty: Box::new(U256::zero()),
+            header: Box::new(header.clone()),
         }).pack();
         process_instruction(&program_id, &accounts, &instruction_init).unwrap();
     }
@@ -270,7 +270,7 @@ pub fn test_inclusion_instruction_bad_block() -> () {
     let res = test_inclusion_instruction(
         HEADER_DATA,
         |header| {
-            let mut block_hash = hash_header(&header, false);
+            let mut block_hash = Box::new(hash_header(&header, false));
             block_hash.0[5] +=1;
             ProveInclusion {
                 height: header.number,
@@ -278,7 +278,7 @@ pub fn test_inclusion_instruction_bad_block() -> () {
                 expected_value: RECEIPT_DATA.to_vec(),
                 key: rlp::encode(&RECEIPT_INDEX),
                 proof: pack_proof(PROOF_DATA),
-                min_difficulty: U256::zero(),
+                min_difficulty: Box::new(U256::zero()),
             }
         },
     );
@@ -296,11 +296,11 @@ pub fn test_inclusion_instruction_too_easy() {
         HEADER_DATA,
         |header: BlockHeader| ProveInclusion {
             height: header.number,
-            block_hash: hash_header(&header, false),
+            block_hash: Box::new(hash_header(&header, false)),
             expected_value: RECEIPT_DATA.to_vec(),
             key: rlp::encode(&RECEIPT_INDEX),
             proof: pack_proof(PROOF_DATA),
-            min_difficulty: U256([9,9,9,9]),
+            min_difficulty: Box::new(U256([9,9,9,9])),
         },
     );
     assert_eq!(
@@ -320,11 +320,11 @@ pub fn test_inclusion_instruction_bad_proof() {
             proof[5] +=1;
             ProveInclusion {
                 height: header.number,
-                block_hash: hash_header(&header, false),
+                block_hash: Box::new(hash_header(&header, false)),
                 expected_value: RECEIPT_DATA.to_vec(),
                 key: rlp::encode(&RECEIPT_INDEX),
                 proof,
-                min_difficulty: U256::zero(),
+                min_difficulty: Box::new(U256::zero()),
             }
         },
     );
@@ -341,11 +341,11 @@ pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
         HEADER_DATA,
         |header: BlockHeader| ProveInclusion {
             height: header.number,
-            block_hash: hash_header(&header, false),
+            block_hash: Box::new(hash_header(&header, false)),
             expected_value: RECEIPT_DATA.to_vec(),
             key: rlp::encode(&RECEIPT_INDEX),
             proof: pack_proof(PROOF_DATA),
-            min_difficulty: U256::zero(),
+            min_difficulty: Box::new(U256::zero()),
         },
     )
 }
@@ -357,11 +357,11 @@ pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
         HEADER_DATA,
         |header: BlockHeader| ProveInclusion {
             height: header.number,
-            block_hash: hash_header(&header, false),
+            block_hash: Box::new(hash_header(&header, false)),
             expected_value: RECEIPT_DATA.to_vec(),
             key: rlp::encode(&RECEIPT_INDEX),
             proof: pack_proof(PROOF_DATA),
-            min_difficulty: U256::zero(),
+            min_difficulty: Box::new(U256::zero()),
         },
     )
 }

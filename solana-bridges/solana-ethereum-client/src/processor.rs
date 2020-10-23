@@ -89,10 +89,10 @@ pub fn process_instruction<'a>(
             let offset = lowest_offset(data) + (pi.height - min_h) as usize % data.headers.len();
             let block = read_block(data, offset)?
                 .ok_or(CustomError::BlockNotFound.to_program_error())?;
-            if hash_header(&block.header, false) != pi.block_hash {
+            if &hash_header(&block.header, false) != &*pi.block_hash {
                 return Err(CustomError::InvalidProof_BadBlockHash.to_program_error());
             }
-            if block.total_difficulty < pi.min_difficulty {
+            if &block.total_difficulty < &*pi.min_difficulty {
                 return Err(CustomError::InvalidProof_TooEasy.to_program_error());
             }
             let expected_root = block.header.receipts_root; // pi.block_hash
