@@ -234,7 +234,7 @@ where K: FnOnce(AccountInfo) -> R
 }
 
 #[test]
-fn relayer_run() -> Result<(), TestError>
+fn relayer_run_0() -> Result<(), TestError>
 {
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
@@ -242,6 +242,23 @@ fn relayer_run() -> Result<(), TestError>
         let accounts = vec![account];
 
         for instr in &relayer_runs::RUN_0 {
+            process_instruction(&program_id, &accounts, instr)
+                .unwrap();
+        }
+
+        Ok(())
+    })
+}
+
+#[test]
+fn relayer_run_1() -> Result<(), TestError>
+{
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let accounts = vec![account];
+
+        for instr in &relayer_runs::RUN_1 {
             process_instruction(&program_id, &accounts, instr)
                 .unwrap();
         }
