@@ -44,11 +44,11 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import System.Environment
 import System.Exit
-import System.IO (IOMode(..), openFile, stderr, hPutStrLn)
+import System.IO (stderr, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -411,7 +411,7 @@ runRelayerEth node ca = do
                 addBlocks node ca [(slot0, block0)]
               pure slot0
 
-          confirmedBlockSlots <- getConfirmedBlocksWithLimit (succ contractSlot) 64 -- (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          confirmedBlockSlots <- take 64 <$> getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
           confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
@@ -425,10 +425,12 @@ runRelayerEth node ca = do
               , "Contract is behind by " <> show (rpcSlot - contractSlot)
               ]
           when (not $ null confirmedBlocks) $ do
+            liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
             Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
-            liftIO $ do
-              putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-              putStrLn "Submitted new slots to contract"
+            liftIO $ putStrLn "Submitted new slots to contract"
+            runExceptT (getSeenBlocks node ca) >>= \case
+              Left _ -> pure ()
+              Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
 
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
@@ -494,13 +496,7 @@ runGeth runDir = do
 
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
-  putStrLn "Launching ethereum node"
-  h <- openFile (logsSubdir runDir) WriteMode
-  let p = proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
-  (_,_,_,ph) <- createProcess $ p
-    { std_out = UseHandle h
-    , std_err = UseHandle h
-    }
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
@@ -509,9 +505,7 @@ withGeth dir action = do
 
   where
     action' = printErrors $ do
-      threadDelay 1e6
-      putStrLn "Waiting for ethereum node to launch"
-      threadDelay 3e6
+      threadDelay 4e6 -- TODO: poll node instead
       action
 
     printErrors = handle $ \(e :: SomeException) -> do
