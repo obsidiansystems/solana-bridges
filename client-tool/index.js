@@ -56,7 +56,7 @@ async function doAlloc(argv) {
 
     const programId = new web3.PublicKey(argv.programId);
 
-    const connection = openConnection(argv.url);
+    const connection = await openConnection(argv.url);
 
     const { space } = argv;
 
@@ -130,7 +130,7 @@ function doCall(fn) {
         const payerAccount = argv.payer;
         logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
-        const connection = openConnection(argv.url);
+        const connection = await openConnection(argv.url);
 
         const {instructionData, isSigner, isWritable} = await fn(argv);
 
@@ -195,7 +195,7 @@ async function doInclusionProof(argv) {
     const payerAccount = argv.payer;
     logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
-    const connection = openConnection(argv.url);
+    const connection = await openConnection(argv.url);
 
     const proofAccount = new web3.Account();
     logger.log ("proof storage id:" + proofAccount.publicKey.toBase58());
