@@ -411,7 +411,7 @@ runRelayerEth node ca = do
                 addBlocks node ca [(slot0, block0)]
               pure slot0
 
-          confirmedBlockSlots <- getConfirmedBlocksWithLimit (succ contractSlot) 64 -- (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          confirmedBlockSlots <- take 64 <$> getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
           confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
