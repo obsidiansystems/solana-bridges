@@ -30,10 +30,12 @@ library
                      , data-default
                      , exceptions
                      , directory
+                     , file-embed
                      , lens
                      , lens-aeson
                      , mtl
                      , ethereum-rlp
+                     , network-uri
                      , process
                      , process-extras
                      , time
@@ -50,6 +52,22 @@ library
 
 executable solana-bridges
   main-is:             Main.hs
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+  build-depends:       base >=4.13 && <4.14
+                    , solana-bridges
+  ghc-options: -threaded
+
+executable solana-bridges-eth
+  main-is:             MainEth.hs
+  default-language:    Haskell2010
+  ghc-options:         -Wall
+  build-depends:       base >=4.13 && <4.14
+                    , solana-bridges
+  ghc-options: -threaded
+
+executable solana-bridges-eth-deploy
+  main-is:             MainEthDeploy.hs
   default-language:    Haskell2010
   ghc-options:         -Wall
   build-depends:       base >=4.13 && <4.14
