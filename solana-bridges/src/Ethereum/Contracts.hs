@@ -80,8 +80,8 @@ invokeContract :: Address
                -> Eth.Web3 a
 invokeContract a = Eth.withAccount ()
                    . Eth.withParam (Eth.to .~ a)
-                   . Eth.withParam (Eth.gasLimit .~ 1e8)
-                       . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
+                   . Eth.withParam (Eth.gasLimit .~ 25e6) -- TODO: estimate gas before call instead of using default value of --rpc.gascap
+                   . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
 
 simulate :: (MonadIO m, MonadError String m, Show a) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 a -> m a
 simulate node ca name x = do
