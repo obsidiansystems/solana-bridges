@@ -326,7 +326,7 @@ runRelayer configFile config = do
               Nothing -> blockHeader
               Just (Eth.Quantity totalDifficulty) -> RLP.RLPArray
                 [ -- Reversed for big endian
-                  RLP.RLPString $ BS.pack $ reverse $ take 256 $ unroll totalDifficulty
+                  RLP.RLPString $ BS.pack $ reverse $ unroll totalDifficulty
                 , blockHeader
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
@@ -347,10 +347,10 @@ runRelayer configFile config = do
     Left bad -> error $ show bad
 
 unroll :: (Integral a, Bits a) => a -> [Word8]
-unroll = unfoldr $ Just . step
+unroll = unfoldr step
   where
-    step 0 = (0, 0)
-    step i = (fromIntegral i, i `shiftR` 8)
+    step 0 = Nothing
+    step i = Just (fromIntegral i, i `shiftR` 8)
 
 blockToHeader :: Text -> RLP.RLPObject
 blockToHeader rlp = blockHeader

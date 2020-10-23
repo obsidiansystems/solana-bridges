@@ -65,12 +65,14 @@ impl Instruction {
             1 => {
                 Rlp::new(rest)
                     .as_val()
-                    .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())
+                    .map_err(|_| CustomError::DecodeDifficultyAndHeaderFailed.to_program_error())
                     .map(Self::Initialize)
             },
             2 => {
-                let block = decode_header(&Rlp::new(rest))?;
-                Ok(Self::NewBlock(block))
+                Rlp::new(rest)
+                    .as_val()
+                    .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())
+                    .map(Self::NewBlock)
             },
             3 => {
                 Rlp::new(rest)

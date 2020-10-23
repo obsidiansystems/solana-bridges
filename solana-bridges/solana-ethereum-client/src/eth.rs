@@ -1,13 +1,7 @@
-use crate::types::*;
-
 pub use ethereum_types::{U256, H64, H160, H256, Bloom};
 use std::{
     result::{Result},
     vec::{Vec},
-};
-use solana_sdk::{
-    program_error::ProgramError,
-    program_pack::{Pack, Sealed},
 };
 use rlp::{
     Decodable, DecoderError, Encodable,
@@ -15,7 +9,6 @@ use rlp::{
 };
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
-use std::mem;
 use tiny_keccak::{Hasher, Keccak};
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -189,14 +182,6 @@ pub fn keccak256(bytes: &[u8]) -> H256 {
     H256::from(out)
 }
 
-pub fn decode_block(block_rlp: &Rlp) -> Result<Block, ProgramError> {
-    return Block::decode(block_rlp).map_err(|_| CustomError::DecodeBlockFailed.to_program_error());
-}
-
-pub fn decode_header(header_rlp: &Rlp) -> Result<BlockHeader, ProgramError> {
-    return BlockHeader::decode(header_rlp).map_err(|_| CustomError::DecodeHeaderFailed.to_program_error());
-}
-
 pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> bool {
     let parent_check = match parent {
         None => true,
@@ -229,64 +214,9 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
 }
 
-impl Sealed for ExtraData {}
-impl Pack for ExtraData {
-    const LEN: usize = 1 + 32;
-    fn pack_into_slice(&self, dst: &mut [u8]) {
-        let len = self.bytes.len();
-        dst[0] = len as u8;
-        dst[1..len+1].copy_from_slice(&self.bytes);
-    }
-    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let (&size, rest) = src.split_first().ok_or(CustomError::DecodeHeaderFailed.to_program_error())?;
-        return Ok(ExtraData { bytes: rest[0..size as usize].to_vec() });
-    }
-}
-
-const H64_LEN: usize = 8;
-const H160_LEN: usize = 20;
-const H256_LEN: usize = 32;
-const U256_LEN: usize = 32;
-const BLOOM_LEN: usize = 256;
-pub const SIZE_OF_HEADER: usize =
-      H256_LEN // parent_hash: H256
-    + H256_LEN // uncles_hash: H256
-    + H160_LEN // author: H160
-    + H256_LEN // state_root: H256
-    + H256_LEN // transactions_root: H256
-    + H256_LEN // receipts_root: H256
-    + BLOOM_LEN // log_bloom: Bloom
-    + U256_LEN // difficulty: U256
-    + mem::size_of::<u64>() // number: u64
-    + U256_LEN // gas_limit: U256
-    + U256_LEN // gas_used: U256
-    + mem::size_of::<u64>() // timestamp: u64
-    + ExtraData::LEN // extra_data: ExtraData
-    + H256_LEN // mix_hash: H256
-    + H64_LEN //  nonce: H64
-    ;
-
-pub const HEADER_FIELD_SIZES: [usize; 15] = [
-    H256_LEN, // parent_hash: H256
-    H256_LEN, // uncles_hash: H256
-    H160_LEN, // author: H160
-    H256_LEN, // state_root: H256
-    H256_LEN, // transactions_root: H256
-    H256_LEN, // receipts_root: H256
-    BLOOM_LEN, // log_bloom: Bloom
-    U256_LEN, // difficulty: U256
-    mem::size_of::<u64>(), // number: u64
-    U256_LEN, // gas_limit: U256
-    U256_LEN, // gas_used: U256
-    mem::size_of::<u64>(), // timestamp: u64
-    ExtraData::LEN, // extra_data: ExtraData
-    H256_LEN, // mix_hash: H256
-    H64_LEN, //  nonce: H64
-];
-
 impl BlockHeader {
     fn stream_rlp(&self, stream: &mut RlpStream, truncated: bool) {
-        stream.begin_list(HEADER_FIELD_SIZES.len() - if truncated { 2 } else { 0 });
+        stream.begin_list(15 - if truncated { 2 } else { 0 });
 
         stream.append(&self.parent_hash);
         stream.append(&self.uncles_hash);

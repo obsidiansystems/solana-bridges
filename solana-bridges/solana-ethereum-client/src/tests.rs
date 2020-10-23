@@ -127,9 +127,27 @@ fn test_pow() -> Result<(), TestError> {
 }
 
 #[test]
-fn test_roundtrip_rlp() -> Result<(), TestError> {
+fn test_roundtrip_rlp_header() -> Result<(), TestError> {
     let expected = decoded_header_0()?;
-    assert_eq!(expected, decode_rlp(&encode_header(&expected))?);
+    assert_eq!(expected, decode_rlp(&rlp::encode(&expected))?);
+    return Ok(());
+}
+
+#[quickcheck]
+fn test_rlp_initialize(w0: u64, w1: u64, w2: u64, w3: u64) -> Result<(), TestError> {
+    let expected = Initialize {
+        total_difficulty: Box::new(U256([w0, w1, w2, w3])),
+        header: Box::new(decoded_header_0()?),
+    };
+    let rlp = {
+        let mut s = RlpStream::new();
+        s.begin_list(2);
+        s.append(&*expected.total_difficulty);
+        s.append(&*expected.header);
+        s.out()
+    };
+    assert_eq!(expected, decode_rlp(&rlp)?);
+    assert_eq!(&rlp, &rlp::encode(&expected));
     return Ok(());
 }
 
@@ -164,9 +182,6 @@ pub enum TestError {
 fn decode_rlp <T:Decodable> (bytes: &[u8]) -> Result<T, TestError> {
     let rlp = Rlp::new(bytes);
     return T::decode(&rlp).map_err(TestError::RlpError);
-}
-fn encode_header(header: &BlockHeader) -> Vec<u8> {
-    return header.rlp_bytes();
 }
 
 pub fn test_inclusion(receipt_index: u64,

@@ -9,6 +9,7 @@ use solana_sdk::{
 pub enum CustomError {
     DecodeBlockFailed,
     DecodeHeaderFailed,
+    DecodeDifficultyAndHeaderFailed,
     VerifyHeaderFailed,
     BlockNotFound,
     UnpackExtraDataFailed,
