@@ -167,19 +167,17 @@ pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, Pr
 pub fn write_new_block(data: &mut Storage, header: &BlockHeader, old_total_difficulty_opt: Option<&U256>) -> Result<(), ProgramError> {
     let old_offset = data.offset;
 
-    const ZERO: U256 = U256([0; 4]);
-
-    let old_total_difficulty: &_ = match old_total_difficulty_opt {
-        Some(d) => d,
+    let total_difficulty = match old_total_difficulty_opt {
+        Some(&d) => d,
         None => match read_prev_block(data)? {
-            None => &ZERO,
-            Some(prev_item) => &prev_item.total_difficulty,
+            None => U256::zero(),
+            Some(prev_item) => prev_item.total_difficulty + header.difficulty,
         },
     };
 
     data.headers[old_offset] = RingItem {
         header: header.clone(),
-        total_difficulty: old_total_difficulty + header.difficulty,
+        total_difficulty,
     };
 
     data.height = header.number;

@@ -22,7 +22,7 @@ use crate::prove::*;
 use solana_sdk::clock::Epoch;
 use std::str::FromStr;
 use std::ops::Deref;
-use rlp::{Decodable, Encodable, Rlp, DecoderError, RlpStream};
+use rlp::{Decodable, Rlp, DecoderError, RlpStream};
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 
 mod blocks;
@@ -83,10 +83,10 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
     {
         let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
-        let instruction_init: Vec<u8> = Instruction::Initialize(Initialize {
+        let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
             header: Box::new(header_400000),
             total_difficulty: Box::new(U256([0,1,1,1])) // arbitrarily chosen number for now
-        }).pack();
+        })).pack();
         process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
     }
 
@@ -246,10 +246,10 @@ where F: FnOnce(BlockHeader) -> ProveInclusion
     let header: BlockHeader = rlp::decode(header_data).unwrap();
 
     {
-        let instruction_init: Vec<u8> = Instruction::Initialize(Initialize {
+        let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
             total_difficulty: Box::new(U256::zero()),
             header: Box::new(header.clone()),
-        }).pack();
+        })).pack();
         process_instruction(&program_id, &accounts, &instruction_init).unwrap();
     }
 
@@ -257,7 +257,7 @@ where F: FnOnce(BlockHeader) -> ProveInclusion
 
         accounts[0].is_writable = false;
 
-        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(instruction_fun(header)).pack();
+        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
 
         process_instruction(&program_id, &accounts, &instruction_proove_incl)
             .map_err(TestError::ProgError)?;

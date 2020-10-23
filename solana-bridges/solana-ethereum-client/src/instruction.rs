@@ -29,9 +29,9 @@ pub struct Initialize {
 // That will get the instruction count down while continuing to keep the stack from growing too much
 pub enum Instruction {
     Noop,
-    Initialize(Initialize),
-    NewBlock(BlockHeader),
-    ProveInclusion(ProveInclusion),
+    Initialize(Box<Initialize>),
+    NewBlock(Box<BlockHeader>),
+    ProveInclusion(Box<ProveInclusion>),
 }
 
 impl Instruction {
@@ -60,27 +60,22 @@ impl Instruction {
 
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
         let (&tag, rest) = input.split_first().ok_or(CustomError::UnpackInstructionFailed.to_program_error())?;
+        let rlp = Rlp::new(rest);
         return match tag {
             0 => Ok(Self::Noop),
-            1 => {
-                Rlp::new(rest)
-                    .as_val()
-                    .map_err(|_| CustomError::DecodeDifficultyAndHeaderFailed.to_program_error())
-                    .map(Self::Initialize)
-            },
-            2 => {
-                Rlp::new(rest)
-                    .as_val()
-                    .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())
-                    .map(Self::NewBlock)
-            },
-            3 => {
-                Rlp::new(rest)
-                    .as_val()
-                    .map_err(|_| CustomError::UnpackInstructionFailed.to_program_error())
-                    .map(Self::ProveInclusion)
-            },
-            _ => return Err(CustomError::UnpackInstructionFailed.to_program_error()),
+            1 => rlp
+                .as_val()
+                .map_err(|_| CustomError::DecodeDifficultyAndHeaderFailed.to_program_error())
+                .map(Self::Initialize),
+            2 => rlp
+                .as_val()
+                .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())
+                .map(Self::NewBlock),
+            3 => rlp
+                .as_val()
+                .map_err(|_| CustomError::UnpackInstructionFailed.to_program_error())
+                .map(Self::ProveInclusion),
+            _ => Err(CustomError::UnpackInstructionFailed.to_program_error()),
         };
     }
 
