@@ -42,7 +42,7 @@ async function readOrGenerateAccount(filename, hint) {
 }
 
 async function openConnection(url) {
-    const connection = new web3.Connection(argv.url);
+    const connection = new web3.Connection(url);
     logger.log(await connection.getVersion());
     return connection;
 }
@@ -56,7 +56,7 @@ async function doAlloc(argv) {
 
     const programId = new web3.PublicKey(argv.programId);
 
-    const connection = openConnection(argv.url);
+    const connection = await openConnection(argv.url);
 
     const { space } = argv;
 
@@ -130,7 +130,7 @@ function doCall(fn) {
         const payerAccount = argv.payer;
         logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
-        const connection = openConnection(argv.url);
+        const connection = await openConnection(argv.url);
 
         const {instructionData, isSigner, isWritable} = await fn(argv);
 
@@ -154,16 +154,16 @@ function doCall(fn) {
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var v = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(connection,
             txn,
             signers0
             );
-        return {"sig": v};
+        return {"sig": txId};
     };
 }
 
 
-async function noop(argv) {
+async function noop(/* argv */) {
     return {
         instructionData :Buffer.from("00", "hex"),
         isSigner: false,
@@ -195,7 +195,7 @@ async function doInclusionProof(argv) {
     const payerAccount = argv.payer;
     logger.log ("payer id:" + payerAccount.publicKey.toBase58())
 
-    const connection = openConnection(argv.url);
+    const connection = await openConnection(argv.url);
 
     const proofAccount = new web3.Account();
     logger.log ("proof storage id:" + proofAccount.publicKey.toBase58());
@@ -237,11 +237,11 @@ async function doInclusionProof(argv) {
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var v = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(connection,
             txn,
             signers0
             );
-        return v;
+        return {"sig": txId};
     }
 
     //doTx(Buffer.from("04", "hex"));
@@ -278,7 +278,7 @@ function commandArgs(yargv) {
 }
 
 yargs
-    .demandCommand().recommendCommands().strict()
+    .demandCommand().recommendCommands()
 
     .options(
         { 'url': { default: "http://localhost:8899" }
