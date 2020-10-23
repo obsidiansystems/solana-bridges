@@ -40,10 +40,11 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, createDirectory, getCurrentDirectory, removeFile, createDirectoryIfMissing)
 import System.Environment
 import System.Exit
+import System.IO (IOMode(..), Handle, openFile)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), StdStream(..), callCommand, createProcess, spawnProcess, proc, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -414,8 +415,8 @@ genesisPath = "ethereum/Genesis.json"
 accountFile :: String
 accountFile = "UTC--2020-09-17T02-34-16.613Z--0xabc6bbd0ad6aca2d25380fc7835fe088e7690c2c"
 
-runGeth ::  FilePath -> IO ()
-runGeth runDir = do
+runGeth ::  FilePath -> Maybe Handle -> IO ()
+runGeth runDir logsHandle = do
   let
     dataDirArgs = [ "--datadir", runDir <> "/.ethereum"]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
@@ -425,19 +426,32 @@ runGeth runDir = do
     nodeArgs = [ "--identity", "Testnet ethereum node 0"]
     unlockArgs = [ "--allow-insecure-unlock", "--unlock", unlockedAddress, "--password", "ethereum/pass.txt" ]
 
+    redirectLogs p = case logsHandle of
+      Nothing -> p
+      Just h -> p { std_out = UseHandle h
+                  , std_err = UseHandle h
+                  }
+
   putStr "Initializing node with genesis file: "
   putStrLn =<< canonicalizePath genesisPath
-  void $ readProcess gethPath (dataDirArgs <> initArgs) ""
+--  void $ readProcess gethPath (dataDirArgs <> initArgs) ""
+--  void $ proc gethPath (dataDirArgs <> initArgs)
+  (_,_,_,pInit) <- createProcess $ redirectLogs $ proc gethPath $ fold
+    [ dataDirArgs, initArgs ]
+  void $ waitForProcess pInit
 
   callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
 
   putStrLn "Launching ethereum node"
-  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
-  void $ waitForProcess ph
+  (_,_,_,pRun) <- createProcess $ redirectLogs $ proc gethPath $ fold
+    [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
+  void $ waitForProcess pRun
 
 withGeth :: FilePath -> IO () -> IO ()
 withGeth dir action = do
-  withAsync action' $ \_ -> runGeth dir
+  withAsync action' $ \_ -> do
+    h <- openFile (logsSubdir dir) WriteMode
+    runGeth dir (Just h)
 
   where
     action' = printErrors $ do
