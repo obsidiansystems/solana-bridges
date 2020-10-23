@@ -59,24 +59,24 @@ impl Instruction {
     }
 
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        let (&tag, rest) = input.split_first().ok_or(CustomError::UnpackInstructionFailed.to_program_error())?;
+        let (&tag, rest) = input.split_first().ok_or(CustomError::EmptyInstruction.to_program_error())?;
         let rlp = Rlp::new(rest);
         return match tag {
             0 => Ok(Self::Noop),
             1 => rlp
                 .as_val()
-                .map_err(|_| CustomError::DecodeDifficultyAndHeaderFailed.to_program_error())
+                .map_err(|e| CustomError::from_rlp(DecodeFrom::DifficultyAndHeader, e))
                 .map(Self::Initialize),
             2 => rlp
                 .as_val()
-                .map_err(|_| CustomError::DecodeHeaderFailed.to_program_error())
+                .map_err(|e| CustomError::from_rlp(DecodeFrom::Header, e))
                 .map(Self::NewBlock),
             3 => rlp
                 .as_val()
-                .map_err(|_| CustomError::UnpackInstructionFailed.to_program_error())
+                .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))
                 .map(Self::ProveInclusion),
-            _ => Err(CustomError::UnpackInstructionFailed.to_program_error()),
-        };
+            _ => Err(CustomError::InvalidInstructionTag),
+        }.map_err(CustomError::to_program_error);
     }
 
 }

@@ -187,6 +187,7 @@ pub fn keccak256(bytes: &[u8]) -> H256 {
 pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Result<(), CustomError>
 {
     use CustomError::*;
+
     if let Some(p) = parent {
         if header.number != p.number + 1 {
             return Err(VerifyHeaderFailed_NonConsecutiveHeight);

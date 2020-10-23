@@ -26,6 +26,7 @@ use rlp::{Decodable, Rlp, DecoderError, RlpStream};
 use ethereum_types::{U256, H64, H160, H256, Bloom};
 
 mod blocks;
+mod relayer_runs;
 use blocks::*;
 
 mod inclusion;
@@ -60,53 +61,47 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     block_count += 1;
 
     let program_id = Pubkey::default();
-    let key = Pubkey::default();
-    let mut lamports = 0;
+
     let mut raw_data = vec![0; buf_len];
 
-    let owner = Pubkey::default();
-    let account = AccountInfo {
-        key: &key,
-        is_signer: true,
-        is_writable: true,
-        lamports: Rc::new(RefCell::new(&mut lamports)),
-        data: Rc::new(RefCell::new(&mut raw_data)),
-        owner: &owner,
-        executable: false,
-        rent_epoch: Epoch::default(),
-    };
+    with_account(&mut *raw_data, |account| {
 
-    let accounts = vec![account];
+        let accounts = vec![account];
 
-    let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-    process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
+        let instruction_noop: Vec<u8> = Instruction::Noop.pack();
+        process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
 
-    {
-        let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
-        let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
-            header: Box::new(header_400000),
-            total_difficulty: Box::new(U256([0,1,1,1])) // arbitrarily chosen number for now
-        })).pack();
-        process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
-    }
-
-    for n in 1..block_count {
         {
-            let r = accounts[0].data.try_borrow_mut().unwrap();
-            let data = interp(&*r);
-            println!("ring size: {}, full: {}, current block short no: {}",
-                     data.headers.len(), data.full, n);
+            let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                header: Box::new(header_400000),
+                total_difficulty: Box::new(U256([0,1,1,1])) // arbitrarily chosen number for now
+            })).pack();
+            process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
         }
-        let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
-        let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
-        process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
-    }
 
-    let data = interp(&*raw_data);
-    assert_eq!(block_count % data.headers.len(), data.offset);
-    assert_eq!(400000 - 1 + block_count as u64, data.height);
-    assert_eq!(block_count >= data.headers.len(), data.full);
-    return Ok(());
+        for n in 1..block_count {
+            {
+                let r = accounts[0].data.try_borrow_mut().unwrap();
+                let data = interp(&*r);
+                println!("ring size: {}, full: {}, current block short no: {}",
+                         data.headers.len(), data.full, n);
+            }
+            let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
+            let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
+            process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
+        }
+
+        let raw_data = accounts[0].try_borrow_data()
+            .map_err(TestError::ProgError)?;
+        let data = interp(&*raw_data);
+
+        assert_eq!(block_count % data.headers.len(), data.offset);
+        assert_eq!(400000 - 1 + block_count as u64, data.height);
+        assert_eq!(block_count >= data.headers.len(), data.full);
+
+        Ok(())
+    })
 }
 
 // Slow tests ~ 1min each without cache sharing
@@ -218,52 +213,76 @@ pub fn pack_proof(proof_data: &[&[&[u8]]]) -> Vec<u8> {
     stream.out()
 }
 
+pub fn with_account<K, R>(raw_data: &mut [u8], k: K) -> R
+where K: FnOnce(AccountInfo) -> R
+{
+    let key = Pubkey::default();
+    let mut lamports = 0;
+
+    let owner = Pubkey::default();
+
+    k(AccountInfo {
+        key: &key,
+        is_signer: true,
+        is_writable: true,
+        lamports: Rc::new(RefCell::new(&mut lamports)),
+        data: Rc::new(RefCell::new(raw_data)),
+        owner: &owner,
+        executable: false,
+        rent_epoch: Epoch::default(),
+    })
+}
+
+#[test]
+fn relayer_run() -> Result<(), TestError>
+{
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let accounts = vec![account];
+
+        for instr in &relayer_runs::RUN_0 {
+            process_instruction(&program_id, &accounts, instr)
+                .unwrap();
+        }
+
+        Ok(())
+    })
+}
+
 pub fn test_inclusion_instruction<F>(
     header_data: &[u8],
     instruction_fun: F,
 ) -> Result<(), TestError>
 where F: FnOnce(BlockHeader) -> ProveInclusion
 {
-    let program_id = Pubkey::default();
-    let key = Pubkey::default();
-    let mut lamports = 0;
     let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let mut accounts = vec![account];
 
-    let owner = Pubkey::default();
-    let account = AccountInfo {
-        key: &key,
-        is_signer: true,
-        is_writable: true,
-        lamports: Rc::new(RefCell::new(&mut lamports)),
-        data: Rc::new(RefCell::new(&mut raw_data)),
-        owner: &owner,
-        executable: false,
-        rent_epoch: Epoch::default(),
-    };
+        let header: BlockHeader = rlp::decode(header_data).unwrap();
 
-    let mut accounts = vec![account];
+        {
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                total_difficulty: Box::new(U256::zero()),
+                header: Box::new(header.clone()),
+            })).pack();
+            process_instruction(&program_id, &accounts, &instruction_init).unwrap();
+        }
 
-    let header: BlockHeader = rlp::decode(header_data).unwrap();
+        {
 
-    {
-        let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
-            total_difficulty: Box::new(U256::zero()),
-            header: Box::new(header.clone()),
-        })).pack();
-        process_instruction(&program_id, &accounts, &instruction_init).unwrap();
-    }
+            accounts[0].is_writable = false;
 
-    {
+            let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
 
-        accounts[0].is_writable = false;
+            process_instruction(&program_id, &accounts, &instruction_proove_incl)
+                .map_err(TestError::ProgError)?;
+        }
 
-        let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
-
-        process_instruction(&program_id, &accounts, &instruction_proove_incl)
-            .map_err(TestError::ProgError)?;
-    }
-
-    Ok(())
+        Ok(())
+    })
 }
 
 #[test]
