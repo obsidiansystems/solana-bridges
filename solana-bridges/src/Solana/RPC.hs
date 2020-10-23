@@ -42,6 +42,9 @@ getConfirmedBlock slot = rpcWebRequest'' @_ @(Maybe SolanaCommittedBlock) "getCo
 getConfirmedBlocks :: Word64 -> Word64 -> SolanaRpcM IO [Word64]
 getConfirmedBlocks startSlot endSlot = rpcWebRequest' "getConfirmedBlocks" $ Just (startSlot, endSlot)
 
+getConfirmedBlocksWithLimit :: Word64 -> Word64 -> SolanaRpcM IO [Word64]
+getConfirmedBlocksWithLimit startSlot endSlot = rpcWebRequest' "getConfirmedBlocksWithLimit" $ Just (startSlot, endSlot)
+
 getLeaderSchedule :: Word64 -> SolanaRpcM IO SolanaLeaderSchedule
 getLeaderSchedule slot = rpcWebRequest' @[Word64] @SolanaLeaderSchedule "getLeaderSchedule" $ Just [slot]
 
