@@ -35,7 +35,10 @@ pub fn process_instruction<'a>(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    Ok(match Instruction::unpack(instruction_data)? {
+    let instr = Instruction::unpack(instruction_data)?;
+    //println!("{:#?}", instr);
+
+    Ok(match instr {
         Instruction::Noop => {},
         Instruction::Initialize(item) => {
             if !account.is_signer {

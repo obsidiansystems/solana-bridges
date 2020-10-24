@@ -82,7 +82,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
         for n in 1..block_count {
             {
-                let r = accounts[0].data.try_borrow_mut().unwrap();
+                let r = accounts[0].data.try_borrow().unwrap();
                 let data = interp(&*r);
                 println!("ring size: {}, full: {}, current block short no: {}",
                          data.headers.len(), data.full, n);
@@ -144,6 +144,14 @@ fn test_rlp_initialize(w0: u64, w1: u64, w2: u64, w3: u64) -> Result<(), TestErr
     assert_eq!(expected, decode_rlp(&rlp)?);
     assert_eq!(&rlp, &rlp::encode(&expected));
     return Ok(());
+}
+
+#[quickcheck]
+fn test_rlp_extra_data(mut data: Vec<u8>) -> Result<(), TestError> {
+    data.truncate(32);
+    let data2: Vec<u8> = decode_rlp(&rlp::encode(&data))?;
+    assert_eq!(data, data2);
+    Ok(())
 }
 
 #[test]
@@ -253,7 +261,7 @@ fn relayer_run_0() -> Result<(), TestError>
 #[test]
 fn relayer_run_1() -> Result<(), TestError>
 {
-    let mut raw_data = vec![0; 1 << 16];
+    let mut raw_data = vec![0; 1 << 12];
     with_account(&mut *raw_data, |account| {
         let program_id = Pubkey::default();
         let accounts = vec![account];
@@ -261,6 +269,9 @@ fn relayer_run_1() -> Result<(), TestError>
         for instr in &relayer_runs::RUN_1 {
             process_instruction(&program_id, &accounts, instr)
                 .unwrap();
+            //let r = accounts[0].data.try_borrow().unwrap();
+            //let data = interp(&*r);
+            //println!("{:#?}", data);
         }
 
         Ok(())
@@ -495,7 +506,7 @@ fn decoded_header_0() -> Result<BlockHeader, TestError> {
         gas_limit: U256::from(9812622),
         gas_used: U256::from(53465),
         timestamp: 1574455815,
-        extra_data: ExtraData { bytes: Vec::from([80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103]) },
+        extra_data: ExtraData::from_slice(&[80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103]),
         mix_hash: H256::from([
             0xa3, 0x54, 0x25, 0xf4, 0x43, 0x45, 0x2c, 0xf9,
             0x4b, 0xa4, 0xb6, 0x98, 0xb0, 0x0f, 0xd7, 0xb3,

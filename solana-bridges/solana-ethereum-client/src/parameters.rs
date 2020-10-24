@@ -10,12 +10,14 @@ pub const MIN_BUF_SIZE: usize = BLOCKS_OFFSET + mem::size_of::<RingItem>();
 
 pub const STORAGE_ALIGN: usize = std::mem::align_of::<StorageScrach>();
 
+#[derive(Debug)]
 #[derive(RlpDecodableDerive, RlpEncodableDerive)]
 pub struct RingItem {
     pub total_difficulty: U256,
     pub header: BlockHeader,
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct StorageT<X: ?Sized> {
     pub height: u64,

@@ -13,9 +13,10 @@ use tiny_keccak::{Hasher, Keccak};
 
 use crate::types::*;
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ExtraData {
-    pub bytes: Vec<u8>,
+    len: u8,
+    bytes: [u8; 32],
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -240,7 +241,7 @@ impl BlockHeader {
         stream.append(&self.gas_limit);
         stream.append(&self.gas_used);
         stream.append(&self.timestamp);
-        stream.append(&self.extra_data.bytes);
+        stream.append(&self.extra_data);
 
         if !truncated {
             stream.append(&self.mix_hash);
@@ -270,7 +271,7 @@ impl Decodable for BlockHeader {
             gas_limit: serialized.val_at(9)?,
             gas_used: serialized.val_at(10)?,
             timestamp: serialized.val_at(11)?,
-            extra_data: ExtraData { bytes: serialized.val_at(12)? },
+            extra_data: serialized.val_at(12)?,
             mix_hash: serialized.val_at(13)?,
             nonce: serialized.val_at(14)?,
         };
@@ -278,3 +279,42 @@ impl Decodable for BlockHeader {
         return Ok(block_header);
     }
 }
+
+impl ExtraData {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes[0..self.len as _]
+    }
+    pub fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.bytes[0..self.len as _]
+    }
+    pub fn from_slice(data: &[u8]) -> Self {
+        assert!(data.len() <= u8::MAX.into());
+        let mut ret = Self {
+            len: data.len() as _,
+            bytes: unsafe { ::std::mem::uninitialized() },
+        };
+        ret.as_mut().copy_from_slice(data);
+        ret
+    }
+}
+
+impl Encodable for ExtraData {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        self.as_slice().rlp_append(stream);
+    }
+}
+
+impl Decodable for ExtraData {
+    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
+        let v = Vec::<u8>::decode(serialized)?;
+        Ok(Self::from_slice(&*v))
+    }
+}
+
+impl PartialEq for ExtraData {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for ExtraData {}

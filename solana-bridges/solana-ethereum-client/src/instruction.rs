@@ -27,6 +27,7 @@ pub struct Initialize {
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.
 // That will get the instruction count down while continuing to keep the stack from growing too much
+#[derive(Debug)]
 pub enum Instruction {
     Noop,
     Initialize(Box<Initialize>),
