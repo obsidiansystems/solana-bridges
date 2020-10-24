@@ -13,10 +13,12 @@ use tiny_keccak::{Hasher, Keccak};
 
 use crate::types::*;
 
+pub const EXTRA_DATA_MAX_LEN: usize = 32;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ExtraData {
     len: u8,
-    bytes: [u8; 32],
+    bytes: [u8; EXTRA_DATA_MAX_LEN],
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -288,7 +290,7 @@ impl ExtraData {
         &mut self.bytes[0..self.len as _]
     }
     pub fn from_slice(data: &[u8]) -> Self {
-        assert!(data.len() <= u8::MAX.into());
+        assert!(data.len() <= EXTRA_DATA_MAX_LEN);
         let mut ret = Self {
             len: data.len() as _,
             bytes: unsafe { ::std::mem::uninitialized() },
