@@ -211,6 +211,8 @@ let
     solidity = with nixpkgs; mkShell {
       buildInputs = [ inotify-tools go-ethereum solc ];
     };
+
+    bpf = shell;
   };
 
   solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
