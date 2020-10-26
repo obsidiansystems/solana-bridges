@@ -10,4 +10,4 @@ module Ethereum.Contracts.Abi where
 
 import Network.Ethereum.Contract.TH
 
-[abiFrom|solidity/dist/SolanaClient.abi|]
+[abiFrom|solana-client/dist/SolanaClient.abi|]

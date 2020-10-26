@@ -17,7 +17,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = doJailbreak (dontCheck (self.callCabal2nix "solana-bridges" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
@@ -175,7 +175,7 @@ let
         xargo cargo-deps cargo-watch rustfmt clippy
         shellcheck ninja cmake
         jq
-        client-tool
+        solana-client-tool
       ]);
 
     RUST_BACKTRACE="1";
@@ -204,54 +204,53 @@ let
   };
 
   shells = {
-    target-x86 = with nixpkgs; mkShell {
+    ethereum-client-bpf = shell;
+
+    ethereum-client-x86 = with nixpkgs; mkShell {
       buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
     };
 
-    solidity = with nixpkgs; mkShell {
+    solana-client-evm = with nixpkgs; mkShell {
       buildInputs = [ inotify-tools go-ethereum solc ];
     };
-
-    bpf = shell;
   };
 
-  solana-ethereum-client-src = gitignoreSource ./solana-bridges/solana-ethereum-client;
+  ethereum-client-src = gitignoreSource ./solana-bridges/ethereum-client;
 
   # Cargo hash must be updated when Cargo.lock file changes.
-  solana-ethereum-client-dep-sha256 = "1z7x6vpwgwgyyvxyx62yqvvpy6frklxrsc00669mihgqqjrhcpk7";
-  solana-ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
-    name = "solana-ethereum-client";
-    src = solana-ethereum-client-src;
+  ethereum-client-dep-sha256 = "014mnggjv4wqcqx05058d7ldsg9l2zzs8z2qrwgmkj3al45da766";
+  ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
+    name = "ethereum-client";
+    src = ethereum-client-src;
     sourceRoot = null;
-    sha256 = solana-ethereum-client-dep-sha256;
+    sha256 = ethereum-client-dep-sha256;
   };
 
-  mk-solana-ethereum-client = cargoBuildFlags: nixpkgs.rustPlatform.buildRustPackage {
-    name = "solana-ethereum-client";
-    src = solana-ethereum-client-src;
-    #cargoVendorDir = solana-ethereum-client-dep-srcs;
+  mk-ethereum-client = cargoBuildFlags: nixpkgs.rustPlatform.buildRustPackage {
+    name = "ethereum-client";
+    src = ethereum-client-src;
+    #cargoVendorDir = ethereum-client-dep-srcs;
     #nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
     #buildInputs = [ rustPackages.rust-std ];
     verifyCargoDeps = true;
 
     inherit cargoBuildFlags;
 
-    cargoSha256 = solana-ethereum-client-dep-sha256;
+    cargoSha256 = ethereum-client-dep-sha256;
   };
 
-  client-tool = (import ./client-tool {pkgs = nixpkgs;}).package;
+  solana-client-tool = (import ./solana-client-tool {pkgs = nixpkgs;}).package;
 
-  solana-ethereum-client-no-prog = mk-solana-ethereum-client [ ];
+  ethereum-client-no-prog = mk-ethereum-client [ ];
 
-  solana-ethereum-client-prog = mk-solana-ethereum-client [ "--features" "program" ];
+  ethereum-client-prog = mk-ethereum-client [ "--features" "program" ];
 
 in {
   inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
-    solana-ethereum-client-prog
-    solana-ethereum-client-no-prog
-    solana-ethereum-client-dep-srcs;
+    ethereum-client-prog
+    ethereum-client-no-prog
+    ethereum-client-dep-srcs
+    solana-client-tool
+  ;
   inherit (nixpkgs.haskellPackages) solana-bridges;
-
-
-  solana-ethereum-client-tool = client-tool;
 }

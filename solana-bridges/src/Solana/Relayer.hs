@@ -399,7 +399,7 @@ deploySolanaClientContract node = do
     Right ca -> pure ca
 
 solanaClientContractBin :: BS.ByteString
-solanaClientContractBin = $(embedFile "solidity/dist/SolanaClient.bin")
+solanaClientContractBin = $(embedFile "solana-client/dist/SolanaClient.bin")
 
 relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
 relaySolanaToEthereum node ca = do

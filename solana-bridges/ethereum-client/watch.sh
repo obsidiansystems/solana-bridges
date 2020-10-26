@@ -1,5 +1,5 @@
 #! /usr/bin/env nix-shell
-#! nix-shell ../../default.nix -A shells.target-x86 -i bash
+#! nix-shell ../../default.nix -A shells.ethereum-client-x86 -i bash
 
 RUST_BACKTRACE=1 \
 	RUST_LOG=quickcheck \

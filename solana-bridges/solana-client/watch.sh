@@ -1,11 +1,11 @@
 #! /usr/bin/env nix-shell
-#! nix-shell ../../default.nix -A shells.solidity -i bash
+#! nix-shell ../../default.nix -A shells.solana-client-evm -i bash
 
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel)"
 
-watchdirs=("$root/solana-bridges/solidity")
+watchdirs=("$(dirname $0)")
 
 while true; do
     clear

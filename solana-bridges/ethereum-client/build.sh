@@ -1,5 +1,5 @@
 #! /usr/bin/env nix-shell
-#! nix-shell ../../default.nix -A shells.bpf -i bash
+#! nix-shell ../../default.nix -A shells.ethereum-client-bpf -i bash
 
 export CC=$SOLANA_LLVM_CC
 export AR=$SOLANA_LLVM_AR
