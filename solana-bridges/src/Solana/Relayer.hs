@@ -1,3 +1,4 @@
+{-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PackageImports #-}
@@ -26,16 +27,18 @@ import Control.Monad.Trans (lift)
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
+import Data.Bits
 import Data.ByteArray.HexString
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
 import Data.Functor.Compose
-import Data.List (intercalate)
+import Data.List (intercalate, unfoldr)
 import Data.Maybe(fromMaybe)
 import Data.Solidity.Prim.Address (Address)
 import Data.String (IsString)
 import Data.Text (Text)
+import Data.Void (Void)
 import Data.Word
 import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
@@ -61,8 +64,16 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Eth as Eth (getTransactionReceipt, sendTransaction)
-import qualified Network.Ethereum.Api.Types as Eth (Call(..), TxReceipt(..))
+import qualified Network.Ethereum.Api.Eth as Eth
+  ( getTransactionReceipt
+  , getBlockByNumber
+  , sendTransaction)
+import qualified Network.Ethereum.Api.Types as Eth
+  ( Block(..)
+  , Call(..)
+  , TxReceipt(..)
+  , Quantity (..)
+  )
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
 
@@ -291,41 +302,61 @@ relayEthereumToSolana configFile config = do
         _ -> Just $ succ highestBlock
 
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
-  let loop n = do
-        res <- catch
-          (runWeb3 $ Eth.getBlockRlp n)
-          (\case
-              ParsingException msg -> fail msg
-              CallException _ -> do
-                T.putStrLn $ "No new block, waiting (" <> T.pack (show n) <> ")"
-                threadDelay 5e6
-                loop n)
-        case res of
-          Left e -> fail $ show e
-          Right rlp -> do
-            let blockHeaderHex = blockToHeader rlp
-            T.putStrLn $ T.pack (show n) <> ": " <> blockHeaderHex
-            let p = (proc solanaBridgeToolPath $ T.unpack <$>
-                      [ (if n == loopStart then "initialize" else "new-block")
-                      , "--config", T.pack configFile
-                      -- , "--payer", "/dev/null"
-                      , "--instruction", blockHeaderHex
-                      ])
-            readCreateProcessWithExitCode p "" >>= \case
-              (ExitSuccess, txn, _) -> putStrLn txn
-              bad -> error $ show bad
-            loop $ n + 1
+  let loop :: Word64 -> IO (Either Eth.Web3Error Void)
+      loop n = do
+        let doEth :: forall resp. Eth.Web3 resp -> IO resp
+            doEth m = do
+              res :: Either Eth.Web3Error a <- catch (runWeb3 m)
+                (\case
+                    ParsingException msg -> fail msg
+                    CallException _ -> do
+                      T.putStrLn $ "No new block, waiting (" <> T.pack (show n) <> ")"
+                      threadDelay 5e6
+                      (fmap . fmap) (\case) $ loop n)
+              case res of
+                Left e -> fail $ show e
+                Right res' -> pure res'
+        mTotalDifficulty <- case n == loopStart of
+          False -> pure Nothing
+          True -> fmap (Just . Eth.blockTotalDifficulty) $
+            doEth $ Eth.getBlockByNumber $ Eth.Quantity $ toInteger n
+        rlp <- doEth $ Eth.getBlockRlp n
+        let blockHeader = blockToHeader rlp
+        let instructionData = case mTotalDifficulty of
+              Nothing -> blockHeader
+              Just (Eth.Quantity totalDifficulty) -> RLP.RLPArray
+                [ -- Reversed for big endian
+                  RLP.RLPString $ BS.pack $ reverse $ unroll totalDifficulty
+                , blockHeader
+                ]
+        let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
+        T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
+        let p = (proc solanaBridgeToolPath $ T.unpack <$>
+                  [ (if n == loopStart then "initialize" else "new-block")
+                  , "--config", T.pack configFile
+                  -- , "--payer", "/dev/null"
+                  , "--instruction", instructionDataHex
+                  ])
+        readCreateProcessWithExitCode p "" >>= \case
+          (ExitSuccess, txn, _) -> putStrLn txn
+          bad -> error $ show bad
+        loop $ n + 1
 
   loop (fromMaybe loopStart contractState) >>= \case
-    Right good -> T.putStrLn good
+    Right x -> pure $ case x of {}
     Left bad -> error $ show bad
 
-blockToHeader :: Text -> Text
-blockToHeader rlp = blockHeaderHex
+unroll :: (Integral a, Bits a) => a -> [Word8]
+unroll = unfoldr step
+  where
+    step 0 = Nothing
+    step i = Just (fromIntegral i, i `shiftR` 8)
+
+blockToHeader :: Text -> RLP.RLPObject
+blockToHeader rlp = blockHeader
   where
     (blockData, "") = B16.decode $ T.encodeUtf8 rlp
     RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
-    blockHeaderHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize blockHeader
 
 
 
