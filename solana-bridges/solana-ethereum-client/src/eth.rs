@@ -228,8 +228,10 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
 }
 
 impl BlockHeader {
+    const NUM_FIELDS: usize = 15;
+
     fn stream_rlp(&self, stream: &mut RlpStream, truncated: bool) {
-        stream.begin_list(15 - if truncated { 2 } else { 0 });
+        stream.begin_list(Self::NUM_FIELDS - if truncated { 2 } else { 0 });
 
         stream.append(&self.parent_hash);
         stream.append(&self.uncles_hash);
