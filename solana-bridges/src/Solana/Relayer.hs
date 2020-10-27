@@ -51,7 +51,7 @@ import System.IO (stderr, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), callCommand, createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -504,29 +504,42 @@ solanaFaucetPath = $(staticWhich "solana-faucet")
 solanaBridgeToolPath :: FilePath
 solanaBridgeToolPath = $(staticWhich "solana-bridge-tool")
 
-genesisPath :: FilePath
-genesisPath = "ethereum/Genesis.json"
+genesisBlock :: BS.ByteString
+genesisBlock = $(embedFile "ethereum/Genesis.json")
 
-accountFile :: String
-accountFile = "UTC--2020-09-17T02-34-16.613Z--0xabc6bbd0ad6aca2d25380fc7835fe088e7690c2c"
+ethereumAccountFile :: String
+ethereumAccountFile = "UTC--2020-09-17T02-34-16.613Z--0xabc6bbd0ad6aca2d25380fc7835fe088e7690c2c"
+
+ethereumAccount :: BS.ByteString
+ethereumAccount = $(embedFile "ethereum/UTC--2020-09-17T02-34-16.613Z--0xabc6bbd0ad6aca2d25380fc7835fe088e7690c2c")
+
+ethereumAccountPass :: BS.ByteString
+ethereumAccountPass = $(embedFile "ethereum/pass.txt")
 
 runGeth ::  FilePath -> IO ()
 runGeth runDir = do
   let
+    dataDir = runDir <> "/.ethereum"
+    genesisFile = runDir <> "/Genesis.json"
+    passFile = dataDir <> "/pass.txt"
+
     cacheArgs = ["--ethash.dagdir", ".ethash"]
-    dataDirArgs = [ "--datadir", runDir <> "/.ethereum" ]
+    dataDirArgs = [ "--datadir", dataDir ]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--miner.etherbase=" <> unlockedAddress ]
-    initArgs = [ "init", genesisPath]
+    initArgs = [ "init", genesisFile]
     privateArgs = [ "--nodiscover" ]
     nodeArgs = [ "--identity", "Testnet ethereum node 0"]
-    unlockArgs = [ "--allow-insecure-unlock", "--unlock", unlockedAddress, "--password", "ethereum/pass.txt" ]
+    unlockArgs = [ "--allow-insecure-unlock", "--unlock", unlockedAddress, "--password", passFile ]
 
-  putStr "Initializing node with genesis file: "
-  putStrLn =<< canonicalizePath genesisPath
+  putStrLn $ "Creating genesis file: " <> genesisFile
+  BS.writeFile (runDir <> "/Genesis.json") genesisBlock
+
+  putStrLn "Initializing node"
   void $ readProcess gethPath (dataDirArgs <> initArgs) ""
 
-  callCommand $ "cp " <> "ethereum/" <> accountFile <> " " <> runDir <> "/.ethereum/keystore"
+  BS.writeFile (dataDir <> "/keystore/" <> ethereumAccountFile) ethereumAccount
+  BS.writeFile passFile ethereumAccountPass
 
   (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
   void $ waitForProcess ph
