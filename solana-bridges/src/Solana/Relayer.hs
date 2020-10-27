@@ -157,8 +157,8 @@ mainDeploySolanaClientContract = do
       LBS.putStr $ encode config
       putStrLn ""
 
-mainEthTestnet :: IO ()
-mainEthTestnet = do
+runEthereumTestnet :: IO ()
+runEthereumTestnet = do
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
@@ -170,8 +170,8 @@ deployAndRunSolanaRelayer = do
   ca <- deploySolanaClientContract def
   relaySolanaToEthereum def ca
 
-mainSolanaTestnet :: IO ()
-mainSolanaTestnet = do
+runSolanaTestnet :: IO ()
+runSolanaTestnet = do
   currentDir <- getCurrentDirectory
   runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
 
