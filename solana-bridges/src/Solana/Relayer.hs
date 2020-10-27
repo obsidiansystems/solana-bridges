@@ -516,7 +516,7 @@ runGeth runDir = do
     cacheArgs = ["--ethash.dagdir", ".ethash"]
     dataDirArgs = [ "--datadir", runDir <> "/.ethereum" ]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
-    mineArgs = [ "--mine", "--miner.threads=1", "--etherbase=0x0000000000000000000000000000000000000001" ]
+    mineArgs = [ "--mine", "--miner.threads=1", "--miner.etherbase=" <> unlockedAddress ]
     initArgs = [ "init", genesisPath]
     privateArgs = [ "--nodiscover" ]
     nodeArgs = [ "--identity", "Testnet ethereum node 0"]
