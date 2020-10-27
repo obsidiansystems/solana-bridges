@@ -51,7 +51,7 @@ library
                      , http-client-tls
 
 executable relay-ethereum-to-solana
-  main-is:             Main.hs
+  main-is:             RelayEthereumToSolana.hs
   hs-source-dirs:      src-bin
   default-language:    Haskell2010
   ghc-options:         -Wall
