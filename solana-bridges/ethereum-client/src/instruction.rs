@@ -25,6 +25,12 @@ pub struct ProveInclusion {
     pub min_difficulty: Box<U256>,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct Challenge {
+    pub height: u64,
+    pub block_hash: Box<ethereum_types::H256>,
+}
+
 // TODO don't reallocate for these, and instead lazily parse the instruction.
 // That will get the instruction count down while continuing to keep the stack from growing too much
 #[derive(Debug)]
@@ -33,6 +39,7 @@ pub enum Instruction {
     Initialize(Box<Initialize>),
     NewBlock(Box<BlockHeader>),
     ProveInclusion(Box<ProveInclusion>),
+    Challenge(Box<Challenge>),
 }
 
 impl Instruction {
@@ -54,6 +61,10 @@ impl Instruction {
             Self::ProveInclusion(ref pi) => {
                 buf.push(3);
                 buf.extend_from_slice(&rlp::encode(pi));
+            }
+            Self::Challenge(ref c) => {
+                buf.push(4);
+                buf.extend_from_slice(&rlp::encode(c));
             }
         }
         return buf;
@@ -78,6 +89,10 @@ impl Instruction {
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))
                 .map(Self::ProveInclusion),
+            4 => rlp
+                .as_val()
+                .map_err(|e| CustomError::from_rlp(DecodeFrom::Challenge, e))
+                .map(Self::Challenge),
             _ => Err(CustomError::InvalidInstructionTag),
         }
         .map_err(CustomError::to_program_error);

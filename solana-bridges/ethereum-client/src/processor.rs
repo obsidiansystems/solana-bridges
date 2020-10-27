@@ -99,6 +99,8 @@ pub fn process_instruction<'a>(
             verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
                 .map_err(|_| CustomError::InvalidProof_BadMerkle.to_program_error())?;
         }
+        Instruction::Challenge(_c) => {
+        }
     })
 }
 
