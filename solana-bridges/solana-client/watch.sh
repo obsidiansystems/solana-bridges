@@ -2,10 +2,11 @@
 #! nix-shell ../../default.nix -A shells.solana-client-evm -i bash
 
 set -uo pipefail
+cd "$(dirname $0)"
 
 root="$(git rev-parse --show-toplevel)"
 
-watchdirs=("$(dirname $0)")
+watchdirs=("$(pwd)")
 
 while true; do
     clear
