@@ -11,3 +11,6 @@ dist-newstyle
 
 # emacs
 .#*
+
+# ethereum
+.ethash
