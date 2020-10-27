@@ -245,12 +245,22 @@ let
 
   ethereum-client-prog = mk-ethereum-client [ "--features" "program" ];
 
+  solana-testnet = nixpkgs.runCommand "solana-testnet" {
+    nativeBuildInputs = [ nixpkgs.makeWrapper ];
+  } ''
+    mkdir -p $out/bin
+    makeWrapper "${nixpkgs.haskellPackages.solana-bridges}/bin/run-solana-testnet" "$out/bin/run-solana-testnet" \
+      --set-default SPL_TOKEN "${spl.token}" \
+      --set-default SPL_MEMO "${spl.memo}"
+  '';
+
 in {
   inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
     ethereum-client-prog
     ethereum-client-no-prog
     ethereum-client-dep-srcs
     solana-client-tool
+    solana-testnet
   ;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
