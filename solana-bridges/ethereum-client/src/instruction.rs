@@ -10,6 +10,12 @@ use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodabl
 use solana_sdk::program_error::ProgramError;
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct Initialize {
+    pub total_difficulty: Box<U256>,
+    pub header: Box<BlockHeader>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct ProveInclusion {
     pub height: u64,
     pub block_hash: Box<ethereum_types::H256>,
@@ -17,12 +23,6 @@ pub struct ProveInclusion {
     pub expected_value: Vec<u8>,
     pub proof: Vec<u8>,
     pub min_difficulty: Box<U256>,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
-pub struct Initialize {
-    pub total_difficulty: Box<U256>,
-    pub header: Box<BlockHeader>,
 }
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.
