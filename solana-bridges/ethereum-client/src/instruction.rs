@@ -10,6 +10,12 @@ use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodabl
 use solana_sdk::program_error::ProgramError;
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct Initialize {
+    pub total_difficulty: Box<U256>,
+    pub header: Box<BlockHeader>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct ProveInclusion {
     pub height: u64,
     pub block_hash: Box<ethereum_types::H256>,
@@ -17,12 +23,6 @@ pub struct ProveInclusion {
     pub expected_value: Vec<u8>,
     pub proof: Vec<u8>,
     pub min_difficulty: Box<U256>,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
-pub struct Initialize {
-    pub total_difficulty: Box<U256>,
-    pub header: Box<BlockHeader>,
 }
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.
@@ -36,7 +36,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    pub fn pack (&self) -> Vec<u8> {
+    pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
 
         match *self {
@@ -60,7 +60,9 @@ impl Instruction {
     }
 
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        let (&tag, rest) = input.split_first().ok_or(CustomError::EmptyInstruction.to_program_error())?;
+        let (&tag, rest) = input
+            .split_first()
+            .ok_or(CustomError::EmptyInstruction.to_program_error())?;
         let rlp = Rlp::new(rest);
         return match tag {
             0 => Ok(Self::Noop),
@@ -77,7 +79,7 @@ impl Instruction {
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))
                 .map(Self::ProveInclusion),
             _ => Err(CustomError::InvalidInstructionTag),
-        }.map_err(CustomError::to_program_error);
+        }
+        .map_err(CustomError::to_program_error);
     }
-
 }

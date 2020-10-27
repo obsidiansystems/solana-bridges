@@ -1,8 +1,6 @@
 //use rlp::DecodeError;
 
-use solana_sdk::{
-    program_error::ProgramError,
-};
+use solana_sdk::program_error::ProgramError;
 
 use rlp;
 

@@ -2,16 +2,14 @@ use std::mem;
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
-use crate::eth::{U256, BlockHeader};
-
+use crate::eth::{BlockHeader, U256};
 
 pub const BLOCKS_OFFSET: usize = mem::size_of::<usize>() + mem::size_of::<u64>() + 8; // TODO better
 pub const MIN_BUF_SIZE: usize = BLOCKS_OFFSET + mem::size_of::<RingItem>();
 
 pub const STORAGE_ALIGN: usize = std::mem::align_of::<StorageScrach>();
 
-#[derive(Debug)]
-#[derive(RlpDecodableDerive, RlpEncodableDerive)]
+#[derive(Debug, RlpDecodableDerive, RlpEncodableDerive)]
 pub struct RingItem {
     pub total_difficulty: U256,
     pub header: BlockHeader,
