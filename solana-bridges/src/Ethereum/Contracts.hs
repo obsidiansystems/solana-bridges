@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Ethereum.Contracts where
@@ -15,10 +16,13 @@ import Control.Monad
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
+import Data.Functor.Compose
+import Data.Map (Map)
 import Data.Solidity.Prim.Address (Address)
 import Data.Word
 import Network.Web3.Provider (runWeb3')
 import qualified Data.ByteArray as ByteArray
+import qualified Data.Map.Strict as Map
 import qualified Data.Solidity.Prim.Bytes
 import qualified Data.Solidity.Prim.Int
 import qualified Network.Ethereum.Account as Eth
@@ -34,29 +38,46 @@ import qualified Ethereum.Contracts.Bindings as Contracts
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
 getInitialized node ca = simulate node ca "initialized" Contracts.initialized
 
-getEpoch :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
-getEpoch node ca = word64FromSol <$> simulate node ca "epoch" Contracts.epoch
-
 getLastSlot :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getLastSlot node ca = word64FromSol <$> simulate node ca "lastSlot" Contracts.lastSlot
-
 
 getLastHash :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Base58ByteString
 getLastHash node ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate node ca "lastHash" Contracts.lastHash
 
-getSlotLeader :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> m (Data.Solidity.Prim.Int.UIntN 256)
-getSlotLeader node ca s = simulate node ca "getSlotLeader" $ Contracts.getSlotLeader $ word64ToSol s
+-- getSlotLeader :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> m Base58ByteString
+-- getSlotLeader node ca s = bytes32FromSol <$> simulate node ca "getSlotLeader" (Contracts.getSlotLeader $ word64ToSol s)
 
-setEpoch :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> Word64 -> SolanaLeaderSchedule -> m ()
-setEpoch node ca e _ldrSched = void $ submit node ca "setEpoch" $ Contracts.setEpoch (word64ToSol e) [] []
-  -- todo: leader schedule handling
 
-addBlocks :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m ()
-addBlocks node ca blocks = void $ submit node ca "addBlocks" $ Contracts.addBlocks
+initialize :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> Word64
+  -> SolanaCommittedBlock
+  -> Base58ByteString
+  -> SolanaEpochSchedule
+  -> m ()
+initialize node ca slot root leader schedule = void $ submit node ca "initialize" $ Contracts.initialize
+  (word64ToSol slot)-- uint64 slot,
+  (unsafeBytes32ToSol $ _solanaCommittedBlock_blockhash root)-- bytes32 blockHash,
+  (unsafeBytes32ToSol $ leader)-- bytes32 leader,
+  (_solanaEpochSchedule_warmup schedule)-- bool scheduleWarmup,
+  (word64ToSol $ _solanaEpochSchedule_firstNormalEpoch schedule)-- uint64 scheduleFirstNormalEpoch,
+  (word64ToSol $ _solanaEpochSchedule_leaderScheduleSlotOffset schedule)-- uint64 scheduleLeaderScheduleSlotOffset,
+  (word64ToSol $ _solanaEpochSchedule_firstNormalSlot schedule)-- uint64 scheduleFirstNormalSlot,
+  (word64ToSol $ _solanaEpochSchedule_slotsPerEpoch schedule)-- uint64 scheduleSlotsPerEpoch
+
+addBlocks :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> Map Word64 SolanaLeaderSchedule -> SolanaEpochSchedule -> m ()
+addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "addBlocks" $ Contracts.addBlocks
   (word64ToSol . fst <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
   (word64ToSol . _solanaCommittedBlock_parentSlot . snd <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd <$> blocks)
+  (unsafeBytes32ToSol . (mergedSchedules Map.!) . fst <$> blocks)
+  where
+    mergedSchedules = ifoldMap (\(epoch, leaderPk) slotIndices ->
+      foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
+      $ Compose leaderSchedule
+
 
 
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64

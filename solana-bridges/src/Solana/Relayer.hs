@@ -15,6 +15,7 @@ module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
 import Control.Monad
@@ -34,6 +35,7 @@ import Data.FileEmbed (embedFile)
 import Data.Foldable
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
+import Data.Map (Map)
 import Data.Maybe(fromMaybe)
 import Data.Solidity.Prim.Address (Address)
 import Data.String (IsString)
@@ -58,8 +60,10 @@ import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.List as List
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
@@ -82,11 +86,6 @@ import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
 
-
-satsub :: Word64 -> Word64 -> Word64
-satsub x y
-  | x <= y = 0
-  | otherwise = x - y
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -114,7 +113,8 @@ mainRelayerEth = do
           Right c -> pure c
           Left e -> fail $ show e
 
-      relaySolanaToEthereum node address
+      let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900)
+      relaySolanaToEthereum node solanaConfig address
 
     _ -> do
       progName <- getProgName
@@ -152,7 +152,8 @@ mainDeploySolanaClientContract = do
         , err
         ]
     Right provider -> do
-      ca <- deploySolanaClientContract provider
+      let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900) -- TODO configurable
+      ca <- deploySolanaClientContract provider solanaConfig
       let config :: SolanaToEthereumConfig = (provider, ca)
 
       LBS.putStr $ encode config
@@ -168,8 +169,9 @@ runEthereumTestnet = do
 
 deployAndRunSolanaRelayer :: IO ()
 deployAndRunSolanaRelayer = do
-  ca <- deploySolanaClientContract def
-  relaySolanaToEthereum def ca
+  let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900)
+  ca <- deploySolanaClientContract def solanaConfig
+  relaySolanaToEthereum def solanaConfig ca
 
 runSolanaTestnet :: IO ()
 runSolanaTestnet = do
@@ -406,8 +408,8 @@ blockToHeader rlp = blockHeader
 
 
 
-deploySolanaClientContract :: Eth.Provider -> IO Address
-deploySolanaClientContract node = do
+deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
+deploySolanaClientContract node solanaConfig = do
   let
     runWeb3'' = runWeb3' node
 
@@ -437,54 +439,102 @@ deploySolanaClientContract node = do
     tx <- deployContract
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
+    liftIO $ hPutStrLn stderr $ "Initializing contract: " <> show ca
+
+    ExceptT $ withSolanaWebSocket solanaConfig $ do
+      liftIO $ putStrLn "Initializing contract"
+      -- get the latest confirmed block in
+      epochSchedule <- getEpochSchedule
+      bootEpochInfo <- getEpochInfo
+      let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+      bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+
+      let
+        slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
+        epochInfo0 = epochFromSlot epochSchedule slot0
+
+      leaderSchedule <- getLeaderSchedule slot0
+      Right (Just block0) <- getConfirmedBlock slot0
+
+      let
+        slotLeader0 :: Base58ByteString
+        slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
+      runExceptT $ initialize node ca slot0 block0 slotLeader0 epochSchedule
+
     liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
     pure ca
   case res of
     Left err -> error err
-    Right ca -> pure ca
+    Right ca -> do
+      let
+        loopUntilInitialized :: Int -> IO ()
+        loopUntilInitialized n = do
+          runExceptT (getInitialized node ca) >>= \case
+            Right True -> pure ()
+            bad -> if n <= 0
+              then error $ "contract not initialized" <> show bad
+              else do
+                threadDelay 1e6
+                loopUntilInitialized (pred n)
+      loopUntilInitialized 10
+      pure ca
 
-relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
-relaySolanaToEthereum node ca = do
+-- <<<<<<< HEAD
+-- relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
+-- relaySolanaToEthereum node ca = do
+-- =======
+-- solanaClientContractBin :: BS.ByteString
+-- solanaClientContractBin = $(embedFile "solana-client/dist/SolanaClient.bin")
+
+relaySolanaToEthereum :: Eth.Provider -> SolanaRpcConfig -> Address -> IO ()
+relaySolanaToEthereum node solanaConfig ca = do
+  -- map from epoch to schedule
+  leaderSchedulesRef :: MVar (Map Word64 SolanaLeaderSchedule) <- newMVar Map.empty
+
+--- >>>>>>> store slot leader with each block
   res <- runExceptT $ do
 
     void $ getSeenBlocks node ca
 
-    Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+    Right _ <- ExceptT $ withSolanaWebSocket solanaConfig $ do
       liftIO $ T.putStrLn "Connected to solana node"
+
+      runExceptT (getInitialized node ca) >>= \case
+        Right True -> pure ()
+        bad -> error $ "contract not initialized" <> show bad
 
       epochSchedule <- getEpochSchedule
       let
         epochFromSlot' = epochFromSlot epochSchedule
+        firstSlotInEpoch' = firstSlotInEpoch epochSchedule
 
         loop :: SolanaRpcM IO ()
         loop = do
-          -- epochSchedule <- getEpochSchedule
-
-          Right initializedAtStartup <- lift $ runExceptT $ getInitialized node ca
-
           bootEpochInfo <- getEpochInfo
+          contractSlot <- do
+            Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
+            pure contractSlot
 
-          contractSlot <- if initializedAtStartup
-            then do
-              Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
-              pure contractSlot
-            else do
-              liftIO $ putStrLn "Initializing contract"
-              -- get the latest confirmed block in
-              let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
-              bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+          let
+            splitGE k xs =
+              let (myBelow, x, above) = Map.splitLookup k xs
+              in (,) myBelow $ case x of
+                Nothing -> above
+                Just x' -> Map.insert k x' above
 
-              let
-                slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
-                epochInfo0 = epochFromSlot' slot0
-              Right (Just block0) <- getConfirmedBlock slot0
-              Right () <- lift $ runExceptT $ do
-                setEpoch node ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
-                liftIO $ threadDelay 4e6
-                addBlocks node ca [(slot0, block0)]
-              pure slot0
+            neededSchedules = Set.fromList [_solanaEpochInfo_epoch (epochFromSlot' contractSlot).._solanaEpochInfo_epoch bootEpochInfo]
 
-          confirmedBlockSlots <- take 64 <$> getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          restoreSolanaRpcM <- unliftSolanaRpcM
+
+          leaderSchedules <- liftIO $ modifyMVar leaderSchedulesRef $ \knownSchedules -> restoreSolanaRpcM $ do
+            let
+              haveSchedules = Map.keysSet knownSchedules
+            newSchedules <- itraverse (\epoch () -> getLeaderSchedule $ firstSlotInEpoch' epoch) $ Map.fromSet (const ()) $ neededSchedules `Set.difference` haveSchedules
+            let
+              allKnownSchedules = Map.union knownSchedules newSchedules
+              newKnownSchedules = snd $ splitGE (_solanaEpochInfo_epoch (epochFromSlot' contractSlot)) allKnownSchedules
+            pure (newKnownSchedules, Map.restrictKeys allKnownSchedules neededSchedules)
+          confirmedBlockSlots <- getConfirmedBlocksWithLimit (succ contractSlot) 64 -- (_solanaEpochInfo_absoluteSlot bootEpochInfo)
           confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
@@ -499,7 +549,9 @@ relaySolanaToEthereum node ca = do
               ]
           when (not $ null confirmedBlocks) $ do
             liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-            Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
+            lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
+              Right () -> pure ()
+              Left bad -> error $ show bad
             liftIO $ putStrLn "Submitted new slots to contract"
             runExceptT (getSeenBlocks node ca) >>= \case
               Left _ -> pure ()
