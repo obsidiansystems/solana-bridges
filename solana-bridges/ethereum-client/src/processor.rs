@@ -1,12 +1,6 @@
 #![cfg(feature = "program")]
 
-use crate::{
-    eth::*,
-    instruction::*,
-    parameters::*,
-    types::*,
-    prove::*,
-};
+use crate::{eth::*, instruction::*, parameters::*, prove::*, types::*};
 
 use std::mem;
 
@@ -39,7 +33,7 @@ pub fn process_instruction<'a>(
     //println!("{:#?}", instr);
 
     Ok(match instr {
-        Instruction::Noop => {},
+        Instruction::Noop => {}
         Instruction::Initialize(item) => {
             if !account.is_signer {
                 info!("Account does not have the correct program id");
@@ -51,26 +45,29 @@ pub fn process_instruction<'a>(
             let data = interp_mut(&mut *raw_data);
 
             match data {
-                Storage { height: 0, offset: 0, full: false, .. } => (),
+                Storage {
+                    height: 0,
+                    offset: 0,
+                    full: false,
+                    ..
+                } => (),
                 _ => return Err(CustomError::AlreadyInitialized.to_program_error()),
             };
-            verify_block(&item.header, None)
-                .map_err(CustomError::to_program_error)?;
+            verify_block(&item.header, None).map_err(CustomError::to_program_error)?;
 
             write_new_block(data, &item.header, Some(&item.total_difficulty))?;
-        },
+        }
         Instruction::NewBlock(header) => {
             guard_sufficient_storage(&account)?;
             let mut raw_data = account.try_borrow_mut_data()?;
             let data = interp_mut(&mut *raw_data);
 
-            let parent = read_prev_block(data)?
-                .ok_or(CustomError::BlockNotFound.to_program_error())?;
-            verify_block(&header, Some(&parent.header))
-                .map_err(CustomError::to_program_error)?;
+            let parent =
+                read_prev_block(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
+            verify_block(&header, Some(&parent.header)).map_err(CustomError::to_program_error)?;
 
             write_new_block(data, &header, None)?;
-        },
+        }
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
                 return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
@@ -88,8 +85,8 @@ pub fn process_instruction<'a>(
                 panic!("too new {} {}", max_h, pi.height)
             }
             let offset = lowest_offset(data) + (pi.height - min_h) as usize % data.headers.len();
-            let block = read_block(data, offset)?
-                .ok_or(CustomError::BlockNotFound.to_program_error())?;
+            let block =
+                read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             if &hash_header(&block.header, false) != &*pi.block_hash {
                 return Err(CustomError::InvalidProof_BadBlockHash.to_program_error());
             }
@@ -101,7 +98,7 @@ pub fn process_instruction<'a>(
             let proof = rlp.iter().map(|rlp| rlp.data());
             verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
                 .map_err(|_| CustomError::InvalidProof_BadMerkle.to_program_error())?;
-        },
+        }
     })
 }
 
@@ -113,7 +110,9 @@ pub fn interp(raw_data: &[u8]) -> &Storage {
     // FIXME use proper DST stuff once it exists
     let res: &Storage = unsafe { std::mem::transmute(hacked_data) };
     // because no stride != size
-    debug_assert!(std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN);
+    debug_assert!(
+        std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN
+    );
     debug_assert_eq!(res.headers.len(), block_len);
     res
 }
@@ -126,7 +125,9 @@ pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
     // FIXME use proper DST stuff once it exists
     let res: &mut Storage = unsafe { std::mem::transmute(hacked_data) };
     // because no stride != size
-    debug_assert!(std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN);
+    debug_assert!(
+        std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN
+    );
     debug_assert_eq!(res.headers.len(), block_len);
     res
 }
@@ -134,7 +135,11 @@ pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
 pub fn min_height(data: &Storage) -> u64 {
     let len = data.headers.len();
     match *data {
-        Storage { full: false, offset, .. } => data.height - offset as u64 + 1,
+        Storage {
+            full: false,
+            offset,
+            ..
+        } => data.height - offset as u64 + 1,
         Storage { full: true, .. } => data.height - len as u64 + 1,
     }
 }
@@ -142,17 +147,21 @@ pub fn min_height(data: &Storage) -> u64 {
 pub fn lowest_offset(data: &Storage) -> usize {
     match *data {
         Storage { full: false, .. } => 0,
-        Storage { full: true, offset, .. } => offset,
+        Storage {
+            full: true, offset, ..
+        } => offset,
     }
 }
 
 pub fn read_block<'a>(data: &'a Storage, idx: usize) -> Result<Option<&'a RingItem>, ProgramError> {
     let len = data.headers.len();
     match *data {
-        Storage { full: false, offset, .. } if idx < offset
-            => (),
-        Storage { full: true, .. } if idx < len
-            => (),
+        Storage {
+            full: false,
+            offset,
+            ..
+        } if idx < offset => (),
+        Storage { full: true, .. } if idx < len => (),
         _ => return Ok(None),
     };
     assert!(data.height != 0);
@@ -165,7 +174,11 @@ pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, Pr
     read_block(data, (data.offset + (len - 1)) % len)
 }
 
-pub fn write_new_block(data: &mut Storage, header: &BlockHeader, old_total_difficulty_opt: Option<&U256>) -> Result<(), ProgramError> {
+pub fn write_new_block(
+    data: &mut Storage,
+    header: &BlockHeader,
+    old_total_difficulty_opt: Option<&U256>,
+) -> Result<(), ProgramError> {
     let old_offset = data.offset;
 
     let total_difficulty = match old_total_difficulty_opt {
@@ -187,7 +200,6 @@ pub fn write_new_block(data: &mut Storage, header: &BlockHeader, old_total_diffi
 
     return Ok(());
 }
-
 
 fn guard_sufficient_storage(account: &AccountInfo) -> Result<(), ProgramError> {
     if MIN_BUF_SIZE > account.data_len() {

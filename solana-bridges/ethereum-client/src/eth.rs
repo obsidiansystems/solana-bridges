@@ -1,13 +1,7 @@
-pub use ethereum_types::{U256, H64, H160, H256, Bloom};
-use std::{
-    result::{Result},
-    vec::{Vec},
-};
-use rlp::{
-    Decodable, DecoderError, Encodable,
-    Rlp, RlpStream,
-};
+pub use ethereum_types::{Bloom, H160, H256, H64, U256};
+use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
+use std::{result::Result, vec::Vec};
 
 use tiny_keccak::{Hasher, Keccak};
 
@@ -98,7 +92,7 @@ impl Encodable for TransactionAction {
 
 impl Decodable for TransactionAction {
     fn decode(rlp: &Rlp) -> Result<Self, DecoderError> {
-    Ok(if rlp.is_empty() {
+        Ok(if rlp.is_empty() {
             TransactionAction::Create
         } else {
             TransactionAction::Call(rlp.as_val()?)
@@ -141,7 +135,9 @@ impl Decodable for Transaction {
             gas_limit: serialized.val_at(2)?,
             to: serialized.val_at(3)?,
             value: serialized.val_at(4)?,
-            data: TransactionData { bytes: serialized.val_at(5)? },
+            data: TransactionData {
+                bytes: serialized.val_at(5)?,
+            },
             v: serialized.val_at(6)?,
             r: serialized.val_at(7)?,
             s: serialized.val_at(8)?,
@@ -187,8 +183,7 @@ pub fn keccak256(bytes: &[u8]) -> H256 {
     H256::from(out)
 }
 
-pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Result<(), CustomError>
-{
+pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Result<(), CustomError> {
     use CustomError::*;
 
     if let Some(p) = parent {
@@ -221,7 +216,8 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let mut cache = vec![0; cache_size];
     make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
 
-    let (_mix_hash, result) = hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
+    let (_mix_hash, result) =
+        hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;

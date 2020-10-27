@@ -1,29 +1,20 @@
 use quickcheck_macros::quickcheck;
 
-use crate::{
-    types::*,
-    instruction::*,
-    processor::*,
-    parameters::*,
-};
+use crate::{instruction::*, parameters::*, processor::*, types::*};
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
-use solana_sdk::{
-    account_info::{AccountInfo},
-    pubkey::Pubkey,
-    program_error::ProgramError,
-};
+use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
 use crate::eth::*;
 use crate::parameters::MIN_BUF_SIZE;
 use crate::prove::*;
+use ethereum_types::{Bloom, H160, H256, H64, U256};
+use rlp::{Decodable, DecoderError, Rlp, RlpStream};
 use solana_sdk::clock::Epoch;
-use std::str::FromStr;
 use std::ops::Deref;
-use rlp::{Decodable, Rlp, DecoderError, RlpStream};
-use ethereum_types::{U256, H64, H160, H256, Bloom};
+use std::str::FromStr;
 
 mod blocks;
 mod relayer_runs;
@@ -48,7 +39,10 @@ fn headers_offset_correct() -> Result<(), TestError> {
 #[test]
 fn block_construction() -> Result<(), TestError> {
     let header_400000 = decode_rlp(HEADER_400000)?;
-    let block_400000 = Block { header: header_400000, transactions: Vec::new() };
+    let block_400000 = Block {
+        header: header_400000,
+        transactions: Vec::new(),
+    };
     assert_eq!(block_400000.transactions.len(), 0);
     Ok(())
 }
@@ -65,34 +59,42 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     let mut raw_data = vec![0; buf_len];
 
     with_account(&mut *raw_data, |account| {
-
         let accounts = vec![account];
 
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-        process_instruction(&program_id, &accounts, &instruction_noop).map_err(TestError::ProgError)?;
+        process_instruction(&program_id, &accounts, &instruction_noop)
+            .map_err(TestError::ProgError)?;
 
         {
             let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 header: Box::new(header_400000),
-                total_difficulty: Box::new(U256([0,1,1,1])) // arbitrarily chosen number for now
-            })).pack();
-            process_instruction(&program_id, &accounts, &instruction_init).map_err(TestError::ProgError)?;
+                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+            }))
+            .pack();
+            process_instruction(&program_id, &accounts, &instruction_init)
+                .map_err(TestError::ProgError)?;
         }
 
         for n in 1..block_count {
             {
                 let r = accounts[0].data.try_borrow().unwrap();
                 let data = interp(&*r);
-                println!("ring size: {}, full: {}, current block short no: {}",
-                         data.headers.len(), data.full, n);
+                println!(
+                    "ring size: {}, full: {}, current block short no: {}",
+                    data.headers.len(),
+                    data.full,
+                    n
+                );
             }
             let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
             let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
-            process_instruction(&program_id, &accounts, &instruction_new).map_err(TestError::ProgError)?;
+            process_instruction(&program_id, &accounts, &instruction_new)
+                .map_err(TestError::ProgError)?;
         }
 
-        let raw_data = accounts[0].try_borrow_data()
+        let raw_data = accounts[0]
+            .try_borrow_data()
             .map_err(TestError::ProgError)?;
         let data = interp(&*raw_data);
 
@@ -118,7 +120,7 @@ fn test_pow() -> Result<(), TestError> {
     assert!(!verify_pow(&header_400000));
     assert!(test_header_pow(HEADER_400001)?);
     assert!(test_header_pow(HEADER_8996776)?);
-    return Ok (());
+    return Ok(());
 }
 
 #[test]
@@ -163,7 +165,11 @@ fn test_decoding() -> Result<(), TestError> {
     let header_400k: BlockHeader = decode_rlp(HEADER_400000)?;
     assert_eq!(header_400k.number, 400000);
     assert_eq!(header_400k.difficulty, U256::from(6022643743806 as u64));
-    assert_eq!(hash_header(&header_400k, false), H256::from_str("5d15649e25d8f3e2c0374946078539d200710afc977cdfc6a977bd23f20fa8e8").map_err(|_| TestError::HexError)?);
+    assert_eq!(
+        hash_header(&header_400k, false),
+        H256::from_str("5d15649e25d8f3e2c0374946078539d200710afc977cdfc6a977bd23f20fa8e8")
+            .map_err(|_| TestError::HexError)?
+    );
 
     let test_block_0_tx: Block = decode_rlp(TEST_BLOCK_0_TX)?;
     assert_eq!(test_block_0_tx.header.number, 4);
@@ -182,23 +188,27 @@ pub enum TestError {
     ProgError(ProgramError),
 }
 
-fn decode_rlp <T:Decodable> (bytes: &[u8]) -> Result<T, TestError> {
+fn decode_rlp<T: Decodable>(bytes: &[u8]) -> Result<T, TestError> {
     let rlp = Rlp::new(bytes);
     return T::decode(&rlp).map_err(TestError::RlpError);
 }
 
-pub fn test_inclusion(receipt_index: u64,
-                      receipt_data: &[u8],
-                      header_data: &[u8],
-                      proof_data: &[&[&[u8]]],
+pub fn test_inclusion(
+    receipt_index: u64,
+    receipt_data: &[u8],
+    header_data: &[u8],
+    proof_data: &[&[&[u8]]],
 ) -> Result<(), DecoderError> {
     let header: BlockHeader = rlp::decode(header_data).unwrap();
 
-    let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
-        let mut stream = RlpStream::new();
-        stream.append_list::<&[u8], _>(node);
-        stream.out()
-    }).collect();
+    let proof_vecs: Vec<_> = proof_data
+        .iter()
+        .map(|&node| {
+            let mut stream = RlpStream::new();
+            stream.append_list::<&[u8], _>(node);
+            stream.out()
+        })
+        .collect();
 
     assert!(verify_trie_proof(
         header.receipts_root,
@@ -210,11 +220,14 @@ pub fn test_inclusion(receipt_index: u64,
 }
 
 pub fn pack_proof(proof_data: &[&[&[u8]]]) -> Vec<u8> {
-    let proof_vecs: Vec<_> = proof_data.iter().map(|&node| {
-        let mut stream = RlpStream::new();
-        stream.append_list::<&[u8], _>(node);
-        stream.out()
-    }).collect();
+    let proof_vecs: Vec<_> = proof_data
+        .iter()
+        .map(|&node| {
+            let mut stream = RlpStream::new();
+            stream.append_list::<&[u8], _>(node);
+            stream.out()
+        })
+        .collect();
 
     let mut stream = RlpStream::new();
     stream.append_list::<Vec<u8>, _>(&*proof_vecs);
@@ -222,7 +235,8 @@ pub fn pack_proof(proof_data: &[&[&[u8]]]) -> Vec<u8> {
 }
 
 pub fn with_account<K, R>(raw_data: &mut [u8], k: K) -> R
-where K: FnOnce(AccountInfo) -> R
+where
+    K: FnOnce(AccountInfo) -> R,
 {
     let key = Pubkey::default();
     let mut lamports = 0;
@@ -242,16 +256,14 @@ where K: FnOnce(AccountInfo) -> R
 }
 
 #[test]
-fn relayer_run_0() -> Result<(), TestError>
-{
+fn relayer_run_0() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
         let program_id = Pubkey::default();
         let accounts = vec![account];
 
         for instr in &relayer_runs::RUN_0 {
-            process_instruction(&program_id, &accounts, instr)
-                .unwrap();
+            process_instruction(&program_id, &accounts, instr).unwrap();
         }
 
         Ok(())
@@ -259,16 +271,14 @@ fn relayer_run_0() -> Result<(), TestError>
 }
 
 #[test]
-fn relayer_run_1() -> Result<(), TestError>
-{
+fn relayer_run_1() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 12];
     with_account(&mut *raw_data, |account| {
         let program_id = Pubkey::default();
         let accounts = vec![account];
 
         for instr in &relayer_runs::RUN_1 {
-            process_instruction(&program_id, &accounts, instr)
-                .unwrap();
+            process_instruction(&program_id, &accounts, instr).unwrap();
             //let r = accounts[0].data.try_borrow().unwrap();
             //let data = interp(&*r);
             //println!("{:#?}", data);
@@ -282,7 +292,8 @@ pub fn test_inclusion_instruction<F>(
     header_data: &[u8],
     instruction_fun: F,
 ) -> Result<(), TestError>
-where F: FnOnce(BlockHeader) -> ProveInclusion
+where
+    F: FnOnce(BlockHeader) -> ProveInclusion,
 {
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
@@ -295,15 +306,16 @@ where F: FnOnce(BlockHeader) -> ProveInclusion
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 total_difficulty: Box::new(U256::zero()),
                 header: Box::new(header.clone()),
-            })).pack();
+            }))
+            .pack();
             process_instruction(&program_id, &accounts, &instruction_init).unwrap();
         }
 
         {
-
             accounts[0].is_writable = false;
 
-            let instruction_proove_incl: Vec<u8> = Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
+            let instruction_proove_incl: Vec<u8> =
+                Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
 
             process_instruction(&program_id, &accounts, &instruction_proove_incl)
                 .map_err(TestError::ProgError)?;
@@ -329,21 +341,18 @@ pub fn test_inclusion_1() -> Result<(), DecoderError> {
 pub fn test_inclusion_instruction_bad_block() -> () {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(
-        HEADER_DATA,
-        |header| {
-            let mut block_hash = Box::new(hash_header(&header, false));
-            block_hash.0[5] +=1;
-            ProveInclusion {
-                height: header.number,
-                block_hash,
-                expected_value: RECEIPT_DATA.to_vec(),
-                key: rlp::encode(&RECEIPT_INDEX),
-                proof: pack_proof(PROOF_DATA),
-                min_difficulty: Box::new(U256::zero()),
-            }
-        },
-    );
+    let res = test_inclusion_instruction(HEADER_DATA, |header| {
+        let mut block_hash = Box::new(hash_header(&header, false));
+        block_hash.0[5] += 1;
+        ProveInclusion {
+            height: header.number,
+            block_hash,
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: Box::new(U256::zero()),
+        }
+    });
     assert_eq!(
         res.err().unwrap(),
         TestError::ProgError(CustomError::InvalidProof_BadBlockHash.to_program_error()),
@@ -354,17 +363,14 @@ pub fn test_inclusion_instruction_bad_block() -> () {
 pub fn test_inclusion_instruction_too_easy() {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(
-        HEADER_DATA,
-        |header: BlockHeader| ProveInclusion {
-            height: header.number,
-            block_hash: Box::new(hash_header(&header, false)),
-            expected_value: RECEIPT_DATA.to_vec(),
-            key: rlp::encode(&RECEIPT_INDEX),
-            proof: pack_proof(PROOF_DATA),
-            min_difficulty: Box::new(U256([9,9,9,9])),
-        },
-    );
+    let res = test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+        height: header.number,
+        block_hash: Box::new(hash_header(&header, false)),
+        expected_value: RECEIPT_DATA.to_vec(),
+        key: rlp::encode(&RECEIPT_INDEX),
+        proof: pack_proof(PROOF_DATA),
+        min_difficulty: Box::new(U256([9, 9, 9, 9])),
+    });
     assert_eq!(
         res.err().unwrap(),
         TestError::ProgError(CustomError::InvalidProof_TooEasy.to_program_error()),
@@ -375,21 +381,18 @@ pub fn test_inclusion_instruction_too_easy() {
 pub fn test_inclusion_instruction_bad_proof() {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(
-        HEADER_DATA,
-        |header: BlockHeader| {
-            let mut proof = pack_proof(PROOF_DATA);
-            proof[5] +=1;
-            ProveInclusion {
-                height: header.number,
-                block_hash: Box::new(hash_header(&header, false)),
-                expected_value: RECEIPT_DATA.to_vec(),
-                key: rlp::encode(&RECEIPT_INDEX),
-                proof,
-                min_difficulty: Box::new(U256::zero()),
-            }
-        },
-    );
+    let res = test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| {
+        let mut proof = pack_proof(PROOF_DATA);
+        proof[5] += 1;
+        ProveInclusion {
+            height: header.number,
+            block_hash: Box::new(hash_header(&header, false)),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof,
+            min_difficulty: Box::new(U256::zero()),
+        }
+    });
     assert_eq!(
         res.err().unwrap(),
         TestError::ProgError(CustomError::InvalidProof_BadMerkle.to_program_error()),
@@ -399,33 +402,27 @@ pub fn test_inclusion_instruction_bad_proof() {
 #[test]
 pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
     use inclusion::test_0::*;
-    test_inclusion_instruction(
-        HEADER_DATA,
-        |header: BlockHeader| ProveInclusion {
-            height: header.number,
-            block_hash: Box::new(hash_header(&header, false)),
-            expected_value: RECEIPT_DATA.to_vec(),
-            key: rlp::encode(&RECEIPT_INDEX),
-            proof: pack_proof(PROOF_DATA),
-            min_difficulty: Box::new(U256::zero()),
-        },
-    )
+    test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+        height: header.number,
+        block_hash: Box::new(hash_header(&header, false)),
+        expected_value: RECEIPT_DATA.to_vec(),
+        key: rlp::encode(&RECEIPT_INDEX),
+        proof: pack_proof(PROOF_DATA),
+        min_difficulty: Box::new(U256::zero()),
+    })
 }
 
 #[test]
 pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
     use inclusion::test_1::*;
-    test_inclusion_instruction(
-        HEADER_DATA,
-        |header: BlockHeader| ProveInclusion {
-            height: header.number,
-            block_hash: Box::new(hash_header(&header, false)),
-            expected_value: RECEIPT_DATA.to_vec(),
-            key: rlp::encode(&RECEIPT_INDEX),
-            proof: pack_proof(PROOF_DATA),
-            min_difficulty: Box::new(U256::zero()),
-        },
-    )
+    test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+        height: header.number,
+        block_hash: Box::new(hash_header(&header, false)),
+        expected_value: RECEIPT_DATA.to_vec(),
+        key: rlp::encode(&RECEIPT_INDEX),
+        proof: pack_proof(PROOF_DATA),
+        min_difficulty: Box::new(U256::zero()),
+    })
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
@@ -501,21 +498,22 @@ fn decoded_header_0() -> Result<BlockHeader, TestError> {
             0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]),
-        difficulty: U256::from_str("32343734393538373139303230343433").map_err(|_| TestError::HexError)?,
+        difficulty: U256::from_str("32343734393538373139303230343433")
+            .map_err(|_| TestError::HexError)?,
         number: 8982502,
         gas_limit: U256::from(9812622),
         gas_used: U256::from(53465),
         timestamp: 1574455815,
-        extra_data: ExtraData::from_slice(&[80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103]),
+        extra_data: ExtraData::from_slice(&[
+            80, 80, 89, 69, 32, 110, 97, 110, 111, 112, 111, 111, 108, 46, 111, 114, 103,
+        ]),
         mix_hash: H256::from([
             0xa3, 0x54, 0x25, 0xf4, 0x43, 0x45, 0x2c, 0xf9,
             0x4b, 0xa4, 0xb6, 0x98, 0xb0, 0x0f, 0xd7, 0xb3,
             0xff, 0x4f, 0xc6, 0x71, 0xde, 0xa3, 0xd5, 0xcc,
             0x2d, 0xcb, 0xed, 0xbc, 0x37, 0x66, 0xf4, 0x5e,
         ]),
-        nonce: H64::from([
-            0xaf, 0x7f, 0xec, 0x60, 0x31, 0x06, 0x3a, 0x17,
-        ]),
+        nonce: H64::from([0xaf, 0x7f, 0xec, 0x60, 0x31, 0x06, 0x3a, 0x17]),
     };
     return Ok(expected);
 }
