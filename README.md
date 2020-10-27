@@ -1,16 +1,23 @@
 ## Setup
 
+### Build
+This will take a while the first time it's run, but it should only take a couple minutes if binary caches are setup
+
+`nix-build`
+
 ### Setup solana account
 `$(nix-build -A solana)/bin/solana-keygen new --no-passphrase`
 `$(nix-build -A solana)/bin/solana config set --url http://localhost:8899`
 
 ### Run solana testnet
+On a separate terminal run
 `$(nix-build -A solana-testnet)/bin/run-solana-testnet`
 
 #### Get funds from faucet
 `$(nix-build -A solana)/bin/solana airdrop 1000 --ws http://localhost:9900`
 
 ### Run ethereum testnet
+On a separate terminal run
 `$(nix-build -A solana-bridges)/bin/run-ethereum-testnet`
 
 ## Solana to Ethereum bridge
