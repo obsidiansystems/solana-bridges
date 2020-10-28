@@ -67,7 +67,7 @@ PROGRAM_ID=$(`$(nix-build -A solana)/bin/solana deploy solana-bridges/ethereum-c
 `$(nix-build -A solana-client-tool)/bin/solana-bridge-tool alloc --program-id $PROGRAM_ID --space 99999 > ethereum-to-solana-config.json
 ```
 
-### Start relayer
+#### Start relayer
 ```shell
 $(nix-build -A solana-bridges)/bin/relay-ethereum-to-solana ethereum-to-solana-config.json
 ```
