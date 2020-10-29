@@ -222,10 +222,11 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
       go n = do
         readCreateProcessWithExitCode p "" >>= \case
           good@(ExitSuccess, _, _) -> print good
-          bad -> do
+          (ExitFailure 1,"",bad@"Error: IO(Custom { kind: Other, error: \"Error checking to unpack genesis archive: Archive error: extra entry found: \\\"genesis.bin\\\"\" })\n") -> do
             putStrLn $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
             removeDirectoryRecursive ledgerPath
             go (n+1)
+          bad -> error $ "Unexpected failure solana-genesis\n\t" <> show bad
 
   go (1 :: Int)
 
