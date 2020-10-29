@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "ethash"
 version = "0.4.0"
-source = "git+https://github.com/nearprotocol/rust-ethash?branch=upgrade-eth-types#d1dd3efad109498189c03957dc1cf80b4f410632"
+source = "git+https://github.com/obsidiansystems/ethash?branch=solana#4add0c468aba470aa5b2dc8278ec795a0925e0bc"
 dependencies = [
  "byteorder",
  "ethereum-types",
