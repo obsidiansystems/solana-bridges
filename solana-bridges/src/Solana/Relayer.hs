@@ -44,7 +44,7 @@ import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
-import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeFile)
+import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
 import System.IO (stderr, hPutStrLn)
@@ -224,6 +224,7 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
           good@(ExitSuccess, _, _) -> print good
           bad -> do
             putStrLn $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
+            removeDirectoryRecursive ledgerPath
             go (n+1)
 
   go (1 :: Int)
