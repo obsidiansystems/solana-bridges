@@ -219,9 +219,14 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
   putStrLn $ unwords $ solanaGenesisPath:genArgs
 
   let p = proc solanaGenesisPath genArgs
-  readCreateProcessWithExitCode p "" >>= \case
-    good@(ExitSuccess, _, _) -> print good
-    bad -> error $ show bad
+      go n = do
+        readCreateProcessWithExitCode p "" >>= \case
+          good@(ExitSuccess, _, _) -> print good
+          bad -> do
+            putStrLn $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
+            go (n+1)
+
+  go (1 :: Int)
 
   faucet <- spawnProcess solanaFaucetPath
     ["--keypair", solanaFaucetKeypairFile]
