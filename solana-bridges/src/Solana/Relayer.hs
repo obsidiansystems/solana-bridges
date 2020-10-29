@@ -82,7 +82,6 @@ import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
 
-
 satsub :: Word64 -> Word64 -> Word64
 satsub x y
   | x <= y = 0

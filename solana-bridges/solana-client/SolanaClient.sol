@@ -3,6 +3,7 @@ pragma solidity >=0.6.0 <0.8.0;
 struct Slot {
     bool hasBlock;
     bytes32 blockHash;
+    bytes32 blockMerkleRoot;
 }
 
 struct LeaderSchedule {
@@ -93,13 +94,43 @@ contract SolanaClient {
 
     function fillSlot(uint64 s, bytes32 hash) private {
         Slot storage slot = slots[slotOffset(s)];
-        slot.blockHash = hash;
         slot.hasBlock = true;
+        slot.blockHash = hash;
+        //TODO: store merkle roots
     }
 
     function emptySlot(uint64 s) private {
         Slot storage slot = slots[slotOffset(s)];
-        slot.blockHash = 0;
         slot.hasBlock = false;
+        slot.blockHash = 0;
+        slot.blockMerkleRoot = 0;
+    }
+
+    function verifyTransaction(bytes32[16][] calldata proof, uint64 slot, bytes calldata leaf, uint64 index) external view returns (bool) {
+        return this.verifyMerkleProof(proof, slots[slotOffset(slot)].blockMerkleRoot, leaf, index);
+    }
+
+    function verifyMerkleProof(bytes32[16][] calldata proof, bytes32 root, bytes calldata leaf, uint64 index) external pure returns (bool) {
+        bytes32 hash = sha256(leaf);
+
+        for (uint height = 0; height < proof.length; height++) {
+            uint64 offset = index % 16;
+
+            if(hash != proof[height][offset]) {
+                return false;
+            }
+
+            bytes memory hashable = new bytes(32 * 16);
+            for(uint i = 0; i < 16; i++) {
+                for(uint j = 0; j < 32; j++) {
+                    hashable[i*32+j] = proof[height][i][j];
+                }
+            }
+
+            index = index / 16;
+            hash = sha256(hashable);
+        }
+
+        return hash == root;
     }
 }

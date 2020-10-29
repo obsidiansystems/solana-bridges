@@ -10,11 +10,14 @@
 
 module Ethereum.Contracts where
 
-import Control.Lens
+import Control.Lens hiding (index)
 import Control.Monad
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class
+import Crypto.Hash (Digest, SHA256)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
+import Data.ByteString (ByteString)
+import GHC.Exts (fromList)
 import Data.Solidity.Prim.Address (Address)
 import Data.Word
 import Network.Web3.Provider (runWeb3')
@@ -28,8 +31,6 @@ import qualified Network.Web3.Provider as Eth
 
 import Solana.Types
 import qualified Ethereum.Contracts.Bindings as Contracts
-
-
 
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
 getInitialized node ca = simulate node ca "initialized" Contracts.initialized
@@ -62,7 +63,18 @@ addBlocks node ca blocks = void $ submit node ca "addBlocks" $ Contracts.addBloc
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
+verifyMerkleProof :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> [[ByteString]] -> Digest SHA256 -> ByteString -> Word64 -> m Bool
+verifyMerkleProof node ca proof root leaf index = simulate node ca "verifyMerkleProof" $
+  Contracts.verifyMerkleProof
+    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert)) proof)
+    (sha256ToBytes32 root)
+    (ByteArray.convert leaf)
+    (word64ToSol index)
+
 -- implementation details
+
+sha256ToBytes32 :: Digest SHA256 -> Data.Solidity.Prim.Bytes.BytesN 32
+sha256ToBytes32 = unsafeSizedByteArray . ByteArray.convert
 
 word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
 word64ToSol = fromInteger . toInteger

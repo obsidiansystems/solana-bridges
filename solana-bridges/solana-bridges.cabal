@@ -19,6 +19,7 @@ library
                  , Ethereum.Contracts.Dist
                  , Ethereum.Contracts.TH
 
+
   build-depends:       base >=4.13 && <4.14
                      , aeson
                      , async
@@ -27,6 +28,7 @@ library
                      , base64-bytestring
                      , bytestring
                      , binary
+                     , cryptonite
                      , containers
                      , memory
                      , data-default
@@ -93,3 +95,21 @@ executable run-solana-testnet
   ghc-options:         -Wall -threaded
   build-depends:       base >=4.13 && <4.14
                      , solana-bridges
+
+test-suite contracts
+  default-language: Haskell2010
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  build-depends: base
+               , solana-bridges
+               , async
+               , bytestring
+               , cryptonite
+               , data-default
+               , hspec
+               , hspec-expectations
+               , HUnit
+               , memory
+               , mtl
+               , web3
