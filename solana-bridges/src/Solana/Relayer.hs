@@ -78,6 +78,7 @@ import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
 
 import Ethereum.Contracts as Contracts
+import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
 
@@ -396,7 +397,6 @@ deploySolanaClientContract node = do
 
   res <- runExceptT $ do
     tx <- deployContract
-
     receipt <- waitForTx tx
     ca <- getContractAddress receipt
     liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
@@ -404,9 +404,6 @@ deploySolanaClientContract node = do
   case res of
     Left err -> error err
     Right ca -> pure ca
-
-solanaClientContractBin :: BS.ByteString
-solanaClientContractBin = $(embedFile "solana-client/dist/SolanaClient.bin")
 
 relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
 relaySolanaToEthereum node ca = do

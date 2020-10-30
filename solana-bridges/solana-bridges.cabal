@@ -15,7 +15,9 @@ library
                  , Solana.Types
                  , Solana.RPC
                  , Ethereum.Contracts
-                 , Ethereum.Contracts.Abi
+                 , Ethereum.Contracts.Bindings
+                 , Ethereum.Contracts.Dist
+                 , Ethereum.Contracts.TH
 
   build-depends:       base >=4.13 && <4.14
                      , aeson
@@ -39,6 +41,8 @@ library
                      , process
                      , process-extras
                      , time
+                     , template-haskell
+                     , th-lift-instances
                      , temporary
                      , text
                      , unix
