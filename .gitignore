@@ -2,7 +2,8 @@
 result
 result-*
 
-# haskell
+# builds
+dist
 dist-newstyle
 
 # data from runs
