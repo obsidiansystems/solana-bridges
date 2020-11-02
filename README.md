@@ -26,7 +26,7 @@ On a separate terminal
 
 ```shell
 $(nix-build -A solana)/bin/solana config set --url http://localhost:8899
-$(nix-build -A solana-testnet)/bin/run-solana-testnet
+$(nix-build -A run-solana-testnet)/bin/run-solana-testnet solana-bridges/solana/genesis.tar.bz2
 ```
 Leave the testnet running on this terminal
 

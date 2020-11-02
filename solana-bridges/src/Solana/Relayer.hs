@@ -44,14 +44,14 @@ import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
-import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (canonicalizePath, copyFile, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
 import System.IO (stderr, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
-import System.IO.Temp (createTempDirectory)
+import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
-import System.Process (CreateProcess(..), createProcess, spawnProcess , proc, readProcess, readCreateProcessWithExitCode, waitForProcess, terminateProcess)
+import System.Process (CreateProcess(..), createProcess, proc, readProcess, readCreateProcessWithExitCode, spawnProcess, terminateProcess, waitForProcess)
 import System.Which (staticWhich)
 import qualified Blockchain.Data.RLP as RLP
 import qualified Data.Binary.Get as Binary
@@ -172,73 +172,105 @@ deployAndRunSolanaRelayer = do
 
 runSolanaTestnet :: IO ()
 runSolanaTestnet = do
-  currentDir <- getCurrentDirectory
-  runDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
+  getArgs >>= \case
+    [genesisArchive] -> setupSolana genesisArchive
 
-  solanaSpecialPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
-  setupSolana runDir solanaSpecialPaths
-
+    _ -> do
+      progName <- getProgName
+      hPutStrLn stderr $ "USAGE: " <> progName <> " <GENESIS>.tar.bz2"
 
 data SolanaSpecialPaths = SolanaSpecialPaths
   { _solanaSpecialPaths_splToken :: !FilePath
   , _solanaSpecialPaths_splMemo :: !FilePath
   } deriving (Eq, Show)
 
-setupSolana :: FilePath -> SolanaSpecialPaths -> IO ()
-setupSolana solanaConfigDir solanaSpecialPaths = do
-  putStrLn solanaConfigDir
-  createDirectoryIfMissing True (solanaConfigDir <> "/bootstrap-validator")
+data SolanaKeypairFiles = SolanaKeypairFiles
+  { _solanaKeypairFiles_faucet :: !FilePath
+  , _solanaKeypairFiles_bootstrapValidator :: !FilePath
+  , _solanaKeypairFiles_voteAccount :: !FilePath
+  , _solanaKeypairFiles_stakeAccount :: !FilePath
+  }
+
+makeSolanaKeypairFiles :: IO SolanaKeypairFiles
+makeSolanaKeypairFiles = do
+  tmp <- getCanonicalTemporaryDirectory
+  keypairsDir <- createTempDirectory tmp "solana-keypairs"
+  let
+    bootstrapDir = keypairsDir <> "/bootstrap-validator"
+    files = SolanaKeypairFiles
+      { _solanaKeypairFiles_faucet = keypairsDir <> "/faucet.json"
+      , _solanaKeypairFiles_bootstrapValidator = bootstrapDir <> "/identity.json"
+      , _solanaKeypairFiles_voteAccount = bootstrapDir <> "/vote-account.json"
+      , _solanaKeypairFiles_stakeAccount = bootstrapDir <> "/stake-account.json"
+      }
+
+  createDirectoryIfMissing True bootstrapDir
+  T.writeFile (_solanaKeypairFiles_bootstrapValidator files) solanaBootstrapValidatorIdentityKeypair
+  T.writeFile (_solanaKeypairFiles_voteAccount files) voteAccountKeypair
+  T.writeFile (_solanaKeypairFiles_stakeAccount files) stakeAccountKeypair
+  T.writeFile (_solanaKeypairFiles_faucet files) solanaFaucetKeypair
+
+  pure files
+
+makeGenesisArchive :: IO FilePath
+makeGenesisArchive = do
+  splPaths <- SolanaSpecialPaths <$> getEnv "SPL_TOKEN" <*> getEnv "SPL_MEMO"
+  keypairs <- makeSolanaKeypairFiles
+  tmp <- getCanonicalTemporaryDirectory
+  ledgerPath <- createTempDirectory tmp "solana-genesis"
 
   let
-    solanaFaucetKeypairFile = solanaConfigDir <> "/faucet.json"
-    bootstrapValidatorIdentity = solanaConfigDir <> "/bootstrap-validator/identity.json"
-    voteAccountKeypairFile = solanaConfigDir <> "/bootstrap-validator/vote-account.json"
-    stakeAccountKeypairFile = solanaConfigDir <> "/bootstrap-validator/stake-account.json"
-    ledgerPath = solanaConfigDir <> "/ledger"
+    genesisArchivePath = ledgerPath <> "/genesis.tar.bz2"
 
-  T.writeFile solanaFaucetKeypairFile solanaFaucetKeypair
-  T.writeFile bootstrapValidatorIdentity solanaBootstrapValidatorIdentityKeypair
-  T.writeFile voteAccountKeypairFile voteAccountKeypair
-  T.writeFile stakeAccountKeypairFile stakeAccountKeypair
-
-  let
     genArgs :: [String]
     genArgs =
       [ "--max-genesis-archive-unpacked-size", "1073741824"
       , "--enable-warmup-epochs"
-      , "--bootstrap-validator", bootstrapValidatorIdentity, voteAccountKeypairFile, stakeAccountKeypairFile
-      , "--bpf-program", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splToken solanaSpecialPaths
-      , "--bpf-program", "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splMemo solanaSpecialPaths
+      , "--bootstrap-validator"
+      , _solanaKeypairFiles_bootstrapValidator keypairs
+      , _solanaKeypairFiles_voteAccount keypairs
+      , _solanaKeypairFiles_stakeAccount keypairs
+      , "--bpf-program", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splToken splPaths
+      , "--bpf-program", "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo", "BPFLoader1111111111111111111111111111111111", _solanaSpecialPaths_splMemo splPaths
       , "--ledger", ledgerPath
-      , "--faucet-pubkey", solanaFaucetKeypairFile
+      , "--faucet-pubkey"
+      , _solanaKeypairFiles_faucet keypairs
       , "--faucet-lamports", "500000000000000000"
       , "--hashes-per-tick", "sleep"
       , "--cluster-type", "development"
       ]
+    p = proc solanaGenesisPath genArgs
+    go n = do
+      readCreateProcessWithExitCode p "" >>= \case
+        good@(ExitSuccess, _, _) -> hPutStrLn stderr $ show good
+        (ExitFailure 1,"",bad@"Error: IO(Custom { kind: Other, error: \"Error checking to unpack genesis archive: Archive error: extra entry found: \\\"genesis.bin\\\"\" })\n") -> do
+          hPutStrLn stderr $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
+          removeDirectoryRecursive ledgerPath
+          go (n+1)
+        bad -> error $ "Unexpected failure solana-genesis\n\t" <> show bad
 
-  putStrLn $ unwords $ solanaGenesisPath:genArgs
-
-  let p = proc solanaGenesisPath genArgs
-      go n = do
-        readCreateProcessWithExitCode p "" >>= \case
-          good@(ExitSuccess, _, _) -> print good
-          (ExitFailure 1,"",bad@"Error: IO(Custom { kind: Other, error: \"Error checking to unpack genesis archive: Archive error: extra entry found: \\\"genesis.bin\\\"\" })\n") -> do
-            putStrLn $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
-            removeDirectoryRecursive ledgerPath
-            go (n+1)
-          bad -> error $ "Unexpected failure solana-genesis\n\t" <> show bad
-
+  hPutStrLn stderr $ unwords $ solanaGenesisPath:genArgs
   go (1 :: Int)
 
-  faucet <- spawnProcess solanaFaucetPath
-    ["--keypair", solanaFaucetKeypairFile]
+  pure genesisArchivePath
+
+setupSolana :: FilePath -> IO ()
+setupSolana genesisArchive = do
+  currentDir <- getCurrentDirectory
+  solanaConfigDir <- canonicalizePath =<< createTempDirectory currentDir ".run"
+
+  putStrLn solanaConfigDir
+
+  keypairs <- makeSolanaKeypairFiles
 
   let
+    ledgerPath = solanaConfigDir <> "/ledger"
+    genesisPath = ledgerPath <> "/genesis.tar.bz2"
     bootstrapValidator = (proc solanaValidatorPath
       [ "--ledger", ledgerPath
       , "--rpc-port", "8899"
-      , "--identity", bootstrapValidatorIdentity
-      , "--vote-account" , voteAccountKeypairFile
+      , "--identity", _solanaKeypairFiles_bootstrapValidator keypairs
+      , "--vote-account" , _solanaKeypairFiles_voteAccount keypairs
       , "--rpc-faucet-address", "127.0.0.1:9900"
       , "--bind-address", "127.0.0.1"
       , "--enable-rpc-exit"
@@ -256,6 +288,12 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
             ])
           ]
         }
+
+  createDirectoryIfMissing True ledgerPath
+  copyFile genesisArchive genesisPath
+
+  faucet <- spawnProcess solanaFaucetPath
+    ["--keypair", _solanaKeypairFiles_faucet keypairs]
 
   (_, _, _, validator) <- createProcess bootstrapValidator
   _ <- finally (waitForProcess validator) (terminateProcess faucet)
