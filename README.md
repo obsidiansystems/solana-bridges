@@ -26,7 +26,7 @@ On a separate terminal
 
 ```shell
 $(nix-build -A solana)/bin/solana config set --url http://localhost:8899
-$(nix-build -A solana-testnet)/bin/run-solana-testnet
+$(nix-build -A run-solana-testnet)/bin/run-solana-testnet solana-bridges/solana/genesis.tar.bz2
 ```
 Leave the testnet running on this terminal
 
@@ -36,8 +36,7 @@ Leave the testnet running on this terminal
 ```shell
 $(nix-build -A solana-bridges)/bin/deploy-solana-client > solana-to-ethereum-config.json
 ```
-Output should be something like
-`Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
+Output should end with something like `Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
 
 #### Start relayer
 ```shell
@@ -59,12 +58,12 @@ $(nix-build -A solana)/bin/solana airdrop 1000 --ws http://localhost:9900
 
 #### Deploy contract
 ```shell
-PROGRAM_ID=$(`$(nix-build -A solana)/bin/solana deploy solana-bridges/ethereum-client/target-bpf/bpfel-unknown-unknown/release/solana_ethereum_client.so --use-deprecated-loader | jq .programId -r)
+PROGRAM_ID=$($(nix-build -A solana)/bin/solana deploy solana-bridges/ethereum-client/target-bpf/bpfel-unknown-unknown/release/solana_ethereum_client.so --use-deprecated-loader | jq .programId -r)
 ```
 
 #### Allocate storage for contract
 ```shell
-`$(nix-build -A solana-client-tool)/bin/solana-bridge-tool alloc --program-id $PROGRAM_ID --space 99999 > ethereum-to-solana-config.json
+$(nix-build -A solana-client-tool)/bin/solana-bridge-tool alloc --program-id $PROGRAM_ID --space 99999 > ethereum-to-solana-config.json
 ```
 
 #### Start relayer

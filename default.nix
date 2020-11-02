@@ -19,7 +19,7 @@ let
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
             executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
-          web3 = doJailbreak (dontCheck (self.callCabal2nix "solana-bridges" sources.hs-web3 {}));
+          web3 = doJailbreak (dontCheck (self.callCabal2nix "web3" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
         };
       });
@@ -245,22 +245,27 @@ let
 
   ethereum-client-prog = mk-ethereum-client [ "--features" "program" ];
 
-  solana-testnet = nixpkgs.runCommand "solana-testnet" {
+  withSPLEnv = binName: nixpkgs.runCommand binName {
     nativeBuildInputs = [ nixpkgs.makeWrapper ];
   } ''
     mkdir -p $out/bin
-    makeWrapper "${nixpkgs.haskellPackages.solana-bridges}/bin/run-solana-testnet" "$out/bin/run-solana-testnet" \
+    makeWrapper "${nixpkgs.haskellPackages.solana-bridges}/bin/${binName}" "$out/bin/${binName}" \
       --set-default SPL_TOKEN "${spl.token}" \
       --set-default SPL_MEMO "${spl.memo}"
   '';
+
+  generate-solana-genesis = withSPLEnv "generate-solana-genesis";
+
+  run-solana-testnet = withSPLEnv "run-solana-testnet";
 
 in {
   inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
     ethereum-client-prog
     ethereum-client-no-prog
     ethereum-client-dep-srcs
+    generate-solana-genesis
     solana-client-tool
-    solana-testnet
+    run-solana-testnet
   ;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
