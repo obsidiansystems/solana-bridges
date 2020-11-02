@@ -524,3 +524,6 @@ fn decoded_header_0() -> Result<BlockHeader, TestError> {
     };
     return Ok(expected);
 }
+
+const DUMMY_ELEMS: AccessedElements =
+    AccessedElements([[(0, (H256::zero(), H256::zero())); 4]; 32]);

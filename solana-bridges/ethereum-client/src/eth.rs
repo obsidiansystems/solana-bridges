@@ -325,7 +325,7 @@ impl Eq for ExtraData {}
 
 // factored array to avoid fixed size array trait limits
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct AccessedElements([[(u32, (H256, H256)); 4]; 32]);
+pub struct AccessedElements(pub [[(u32, (H256, H256)); 4]; 32]);
 
 // These impls flatten it into a [..; 128]
 
@@ -368,6 +368,3 @@ impl Decodable for AccessedElements {
         Ok(s)
     }
 }
-
-pub const DUMMY_ELEMS: AccessedElements =
-    AccessedElements([[(0, (H256::zero(), H256::zero())); 4]; 32]);
