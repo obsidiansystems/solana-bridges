@@ -319,7 +319,7 @@ impl Eq for ExtraData {}
 
 // factored array to avoid fixed size array trait limits
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct AccessedElements(pub [[(u32, (H256, H256)); 4]; 32]);
+pub struct AccessedElements(pub [[(u32, H512); 4]; 32]);
 
 // These impls flatten it into a [..; 128]
 
@@ -327,11 +327,10 @@ impl Encodable for AccessedElements {
     fn rlp_append(&self, stream: &mut RlpStream) {
         stream.begin_list(128);
         for x in &self.0 {
-            for &(ref k, (ref v1, ref v2)) in x {
-                stream.begin_list(3);
+            for &(ref k, ref v) in x {
+                stream.begin_list(2);
                 stream.append(k);
-                stream.append(v1);
-                stream.append(v2);
+                stream.append(v);
             }
         }
     }
@@ -347,12 +346,11 @@ impl Decodable for AccessedElements {
                 *y = {
                     let mut j = s2.iter();
                     let idx = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
-                    let v1 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
-                    let v2 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
+                    let v = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
                     if j.next().is_some() {
                         Err(DecoderError::RlpIsTooBig)?;
                     }
-                    (idx, (v1, v2))
+                    (idx, v)
                 };
             }
         }

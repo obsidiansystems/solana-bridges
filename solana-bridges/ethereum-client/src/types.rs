@@ -1,5 +1,3 @@
-//use rlp::DecodeError;
-
 use solana_sdk::program_error::ProgramError;
 
 use rlp;
@@ -41,6 +39,8 @@ pub enum CustomError {
     VerifyHeaderFailed_InvalidParentHash,
     #[allow(non_camel_case_types)]
     VerifyHeaderFailed_TooMuchExtraData,
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_InvalidProofOfWork,
 
     BlockNotFound,
     UnpackExtraDataFailed,
@@ -112,17 +112,18 @@ impl CustomError {
             VerifyHeaderFailed_NonMonotonicTimestamp => 8,
             VerifyHeaderFailed_InvalidParentHash => 9,
             VerifyHeaderFailed_TooMuchExtraData => 10,
+            VerifyHeaderFailed_InvalidProofOfWork => 11,
 
-            BlockNotFound => 11,
-            UnpackExtraDataFailed => 12,
-            InvalidAccountOwner => 13,
-            DeserializeStorageFailed => 14,
-            AlreadyInitialized => 15,
-            WritableHistoryDuringProofCheck => 16,
+            BlockNotFound => 12,
+            UnpackExtraDataFailed => 13,
+            InvalidAccountOwner => 14,
+            DeserializeStorageFailed => 15,
+            AlreadyInitialized => 16,
+            WritableHistoryDuringProofCheck => 17,
 
-            InvalidProof_BadBlockHash => 17,
-            InvalidProof_TooEasy => 18,
-            InvalidProof_BadMerkle => 19,
+            InvalidProof_BadBlockHash => 18,
+            InvalidProof_TooEasy => 19,
+            InvalidProof_BadMerkle => 20,
         })
     }
 }

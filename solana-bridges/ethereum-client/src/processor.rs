@@ -111,6 +111,17 @@ pub fn write_new_block(
     old_total_difficulty_opt: Option<&U256>,
     elems: &AccessedElements,
 ) -> Result<(), ProgramError> {
-
+    let pow_valid = verify_pow(&header, |addr| {
+        // reshape; TODO use safe transmute for this
+        let elems_flat: &[(u32, H512); 128] = unsafe { std::mem::transmute(&elems.0) };
+        // if element is missing just use index 0. Will catch later when proof
+        // of work is invalid.
+        let idx = elems_flat.binary_search_by_key(&addr, |(k, _)| *k)
+            .ok().unwrap_or(0);
+        elems_flat[idx].1
+    });
+    if !pow_valid {
+        return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
+    }
     write_new_block_unvalidated(data, header, old_total_difficulty_opt, elems)
 }

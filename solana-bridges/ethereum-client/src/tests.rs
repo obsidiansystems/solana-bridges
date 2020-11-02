@@ -128,7 +128,7 @@ pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashSet<u32>) {
 }
 
 // Slow tests ~ 1min each without cache sharing
-//#[ignore]
+#[ignore]
 #[test]
 fn test_pow() -> Result<(), TestError> {
     fn test_header_pow(header: &[u8]) -> Result<bool, TestError> {
@@ -543,4 +543,4 @@ fn decoded_header_0() -> Result<BlockHeader, TestError> {
 }
 
 const DUMMY_ELEMS: AccessedElements =
-    AccessedElements([[(0, (H256::zero(), H256::zero())); 4]; 32]);
+    AccessedElements([[(0, (H512::zero())); 4]; 32]);
