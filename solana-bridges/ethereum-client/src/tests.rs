@@ -143,9 +143,10 @@ fn test_rlp_initialize(w0: u64, w1: u64, w2: u64, w3: u64) -> Result<(), TestErr
     };
     let rlp = {
         let mut s = RlpStream::new();
-        s.begin_list(2);
+        s.begin_list(3);
         s.append(&*expected.total_difficulty);
         s.append(&*expected.header);
+        s.append(&*expected.elements);
         s.out()
     };
     assert_eq!(expected, decode_rlp(&rlp)?);
