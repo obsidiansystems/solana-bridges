@@ -44,7 +44,7 @@ import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
-import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeFile)
+import System.Directory (canonicalizePath, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
 import System.IO (stderr, hPutStrLn)
@@ -219,9 +219,16 @@ setupSolana solanaConfigDir solanaSpecialPaths = do
   putStrLn $ unwords $ solanaGenesisPath:genArgs
 
   let p = proc solanaGenesisPath genArgs
-  readCreateProcessWithExitCode p "" >>= \case
-    good@(ExitSuccess, _, _) -> print good
-    bad -> error $ show bad
+      go n = do
+        readCreateProcessWithExitCode p "" >>= \case
+          good@(ExitSuccess, _, _) -> print good
+          (ExitFailure 1,"",bad@"Error: IO(Custom { kind: Other, error: \"Error checking to unpack genesis archive: Archive error: extra entry found: \\\"genesis.bin\\\"\" })\n") -> do
+            putStrLn $ "Failed attempt " <> show n <> " at generating genesis file: " <> show bad
+            removeDirectoryRecursive ledgerPath
+            go (n+1)
+          bad -> error $ "Unexpected failure solana-genesis\n\t" <> show bad
+
+  go (1 :: Int)
 
   faucet <- spawnProcess solanaFaucetPath
     ["--keypair", solanaFaucetKeypairFile]
