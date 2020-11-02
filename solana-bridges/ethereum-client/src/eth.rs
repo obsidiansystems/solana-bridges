@@ -1,7 +1,7 @@
 pub use ethereum_types::{Bloom, H160, H256, H512, H64, U256};
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
-use std::{collections::HashSet, result::Result, vec::Vec};
+use std::{result::Result, vec::Vec};
 
 use tiny_keccak::{Hasher, Keccak};
 
@@ -212,7 +212,6 @@ where
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
-    let seed = get_seedhash(epoch);
     let full_size = get_full_size(epoch);
 
     let (_mix_hash, result) =
