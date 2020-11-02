@@ -2,8 +2,13 @@ use quickcheck_macros::quickcheck;
 
 use crate::{instruction::*, parameters::*, processor::*, types::*};
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    collections::HashSet,
+};
+use std::ops::Deref;
+use std::str::FromStr;
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
@@ -13,8 +18,6 @@ use crate::prove::*;
 use ethereum_types::{Bloom, H160, H256, H64, U256};
 use rlp::{Decodable, DecoderError, Rlp, RlpStream};
 use solana_sdk::clock::Epoch;
-use std::ops::Deref;
-use std::str::FromStr;
 
 mod blocks;
 mod relayer_runs;
@@ -110,18 +113,38 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     })
 }
 
+pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashSet<u32>) {
+    use ethash::*;
+    const EPOCH_LENGTH: u64 = 30000;
+    let epoch = (header.number / EPOCH_LENGTH) as usize;
+    let seed = get_seedhash(epoch);
+    let cache_size = get_cache_size(epoch);
+
+    let mut cache = vec![0; cache_size];
+    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
+
+    let mut v = HashSet::new();
+
+    let res = verify_pow(header, |i| {
+        v.insert(i);
+        calc_dataset_item(&cache, i)
+    });
+
+    (res, v)
+}
+
 // Slow tests ~ 1min each without cache sharing
 //#[ignore]
 #[test]
 fn test_pow() -> Result<(), TestError> {
     fn test_header_pow(header: &[u8]) -> Result<bool, TestError> {
-        Ok(verify_pow(&decode_rlp(header)?))
+        Ok(verify_pow_from_scratch(&decode_rlp(header)?).0)
     }
 
     let mut header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
-    assert!(verify_pow(&header_400000));
+    assert!(verify_pow_from_scratch(&header_400000).0);
     header_400000.nonce = H64::zero();
-    assert!(!verify_pow(&header_400000));
+    assert!(!verify_pow_from_scratch(&header_400000).0);
     assert!(test_header_pow(HEADER_400001)?);
     assert!(test_header_pow(HEADER_8996776)?);
     return Ok(());

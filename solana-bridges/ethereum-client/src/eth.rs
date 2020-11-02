@@ -1,7 +1,7 @@
-pub use ethereum_types::{Bloom, H160, H256, H64, U256};
+pub use ethereum_types::{Bloom, H160, H256, H512, H64, U256};
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
-use std::{result::Result, vec::Vec};
+use std::{collections::HashSet, result::Result, vec::Vec};
 
 use tiny_keccak::{Hasher, Keccak};
 
@@ -205,23 +205,16 @@ pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Resul
     Ok(())
 }
 
-pub fn verify_pow(header: &BlockHeader) -> bool {
+pub fn verify_pow<F>(header: &BlockHeader, lookup: F) -> bool
+    where F: FnMut(u32) -> H512
+{
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
     let seed = get_seedhash(epoch);
-    let cache_size = get_cache_size(epoch);
     let full_size = get_full_size(epoch);
 
-    let mut cache = vec![0; cache_size];
-    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
-
-    let mut v = std::collections::HashSet::new();
-
-    let (_mix_hash, result) = hashimoto(hash_header(&header, true), header.nonce, full_size, |i| {
-        v.insert(i);
-        calc_dataset_item(&cache, i)
-    });
+    let (_mix_hash, result) = hashimoto(hash_header(&header, true), header.nonce, full_size, lookup);
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;

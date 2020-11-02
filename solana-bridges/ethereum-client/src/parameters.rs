@@ -114,7 +114,7 @@ pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, Pr
     read_block(data, (data.offset + (len - 1)) % len)
 }
 
-pub fn write_new_block(
+pub fn write_new_block_unvalidated(
     data: &mut Storage,
     header: &BlockHeader,
     old_total_difficulty_opt: Option<&U256>,

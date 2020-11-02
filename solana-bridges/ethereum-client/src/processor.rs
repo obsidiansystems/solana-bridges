@@ -104,3 +104,13 @@ pub fn process_instruction<'a>(
         }
     })
 }
+
+pub fn write_new_block(
+    data: &mut Storage,
+    header: &BlockHeader,
+    old_total_difficulty_opt: Option<&U256>,
+    elems: &AccessedElements,
+) -> Result<(), ProgramError> {
+
+    write_new_block_unvalidated(data, header, old_total_difficulty_opt, elems)
+}
