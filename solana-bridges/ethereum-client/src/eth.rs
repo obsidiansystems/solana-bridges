@@ -206,7 +206,8 @@ pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Resul
 }
 
 pub fn verify_pow<F>(header: &BlockHeader, lookup: F) -> bool
-    where F: FnMut(u32) -> H512
+where
+    F: FnMut(u32) -> H512,
 {
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
@@ -214,7 +215,8 @@ pub fn verify_pow<F>(header: &BlockHeader, lookup: F) -> bool
     let seed = get_seedhash(epoch);
     let full_size = get_full_size(epoch);
 
-    let (_mix_hash, result) = hashimoto(hash_header(&header, true), header.nonce, full_size, lookup);
+    let (_mix_hash, result) =
+        hashimoto(hash_header(&header, true), header.nonce, full_size, lookup);
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;

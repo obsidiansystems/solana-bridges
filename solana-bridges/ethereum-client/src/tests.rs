@@ -2,13 +2,7 @@ use quickcheck_macros::quickcheck;
 
 use crate::{instruction::*, parameters::*, processor::*, types::*};
 
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    collections::HashSet,
-};
-use std::ops::Deref;
-use std::str::FromStr;
+use std::{cell::RefCell, collections::HashSet, ops::Deref, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
