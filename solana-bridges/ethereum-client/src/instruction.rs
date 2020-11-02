@@ -13,6 +13,13 @@ use solana_sdk::program_error::ProgramError;
 pub struct Initialize {
     pub total_difficulty: Box<U256>,
     pub header: Box<BlockHeader>,
+    pub elements: Box<AccessedElements>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct NewBlock {
+    pub header: Box<BlockHeader>,
+    pub elements: Box<AccessedElements>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
@@ -37,7 +44,7 @@ pub struct Challenge {
 pub enum Instruction {
     Noop,
     Initialize(Box<Initialize>),
-    NewBlock(Box<BlockHeader>),
+    NewBlock(Box<NewBlock>),
     ProveInclusion(Box<ProveInclusion>),
     Challenge(Box<Challenge>),
 }

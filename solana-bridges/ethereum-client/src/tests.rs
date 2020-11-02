@@ -70,6 +70,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 header: Box::new(header_400000),
                 total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+                elements: Box::new(DUMMY_ELEMS),
             }))
             .pack();
             process_instruction(&program_id, &accounts, &instruction_init)
@@ -79,7 +80,8 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         for n in 1..block_count {
             {
                 let r = accounts[0].data.try_borrow().unwrap();
-                let data = interp(&*r);
+                let data = interp(&*r)
+                    .map_err(TestError::ProgError)?;
                 println!(
                     "ring size: {}, full: {}, current block short no: {}",
                     data.headers.len(),
@@ -88,7 +90,10 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 );
             }
             let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
-            let instruction_new: Vec<u8> = Instruction::NewBlock(header_4000xx).pack();
+            let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
+                header: header_4000xx,
+                elements: Box::new(DUMMY_ELEMS),
+            })).pack();
             process_instruction(&program_id, &accounts, &instruction_new)
                 .map_err(TestError::ProgError)?;
         }
@@ -96,7 +101,8 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         let raw_data = accounts[0]
             .try_borrow_data()
             .map_err(TestError::ProgError)?;
-        let data = interp(&*raw_data);
+        let data = interp(&*raw_data)
+            .map_err(TestError::ProgError)?;
 
         assert_eq!(block_count % data.headers.len(), data.offset);
         assert_eq!(400000 - 1 + block_count as u64, data.height);
@@ -107,7 +113,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 }
 
 // Slow tests ~ 1min each without cache sharing
-#[ignore]
+//#[ignore]
 #[test]
 fn test_pow() -> Result<(), TestError> {
     fn test_header_pow(header: &[u8]) -> Result<bool, TestError> {
@@ -135,6 +141,7 @@ fn test_rlp_initialize(w0: u64, w1: u64, w2: u64, w3: u64) -> Result<(), TestErr
     let expected = Initialize {
         total_difficulty: Box::new(U256([w0, w1, w2, w3])),
         header: Box::new(decoded_header_0()?),
+        elements: Box::new(DUMMY_ELEMS),
     };
     let rlp = {
         let mut s = RlpStream::new();
@@ -280,7 +287,7 @@ fn relayer_run_1() -> Result<(), TestError> {
         for instr in &relayer_runs::RUN_1 {
             process_instruction(&program_id, &accounts, instr).unwrap();
             //let r = accounts[0].data.try_borrow().unwrap();
-            //let data = interp(&*r);
+            //let data = interp(&*r)?;
             //println!("{:#?}", data);
         }
 
@@ -306,6 +313,7 @@ where
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 total_difficulty: Box::new(U256::zero()),
                 header: Box::new(header.clone()),
+                elements: Box::new(DUMMY_ELEMS),
             }))
             .pack();
             process_instruction(&program_id, &accounts, &instruction_init).unwrap();
@@ -343,7 +351,7 @@ pub fn test_inclusion_instruction_bad_block() -> () {
     // note the err() to require an error;
     let res = test_inclusion_instruction(HEADER_DATA, |header| {
         let mut block_hash = Box::new(hash_header(&header, false));
-        block_hash.0[5] += 1;
+        (*block_hash).0[5] += 1;
         ProveInclusion {
             height: header.number,
             block_hash,

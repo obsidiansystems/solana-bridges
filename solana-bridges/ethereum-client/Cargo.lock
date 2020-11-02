@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "ethash"
 version = "0.4.0"
-source = "git+https://github.com/obsidiansystems/ethash?branch=solana#4add0c468aba470aa5b2dc8278ec795a0925e0bc"
+source = "git+https://github.com/obsidiansystems/ethash?branch=solana#ab5d59f9a44edbd7750d04ee0de387e1c6776d89"
 dependencies = [
  "byteorder",
  "ethereum-types",

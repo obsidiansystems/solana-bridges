@@ -216,8 +216,13 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
     let mut cache = vec![0; cache_size];
     make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
 
+    let mut v = std::collections::HashSet::new();
+
     let (_mix_hash, result) =
-        hashimoto_light(hash_header(&header, true), header.nonce, full_size, &cache);
+        hashimoto(hash_header(&header, true), header.nonce, full_size, |i| {
+            v.insert(i);
+            calc_dataset_item(&cache, i)
+        });
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
@@ -318,3 +323,48 @@ impl PartialEq for ExtraData {
 }
 
 impl Eq for ExtraData {}
+
+// factored array to avoid fixed size array trait limits
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+pub struct AccessedElements([[(u32, (H256, H256)); 4]; 32]);
+
+// These impls flatten it into a [..; 128]
+
+impl Encodable for AccessedElements {
+    fn rlp_append(&self, stream: &mut RlpStream) {
+        stream.begin_list(128);
+        for x in &self.0 {
+            for &(ref k, (ref v1, ref v2)) in x {
+                stream.begin_list(3);
+                stream.append(k);
+                stream.append(v1);
+                stream.append(v2);
+            }
+        }
+    }
+}
+
+impl Decodable for AccessedElements {
+    fn decode(serialized: &Rlp) -> Result<Self, DecoderError> {
+        let mut s: Self = AccessedElements(unsafe { ::std::mem::uninitialized() });
+        let mut i = serialized.iter();
+        for x in s.0.iter_mut() {
+            for y in x.iter_mut() {
+                let s2 = i.next().ok_or(DecoderError::RlpIsTooShort)?;
+                *y = {
+                    let mut j = s2.iter();
+                    let idx = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
+                    let v1 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
+                    let v2 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
+                    if j.next().is_some() { Err(DecoderError::RlpIsTooBig)?; }
+                    (idx, (v1, v2))
+                };
+            }
+        }
+        if i.next().is_some() { Err(DecoderError::RlpIsTooBig)?; }
+        Ok(s)
+    }
+}
+
+pub const DUMMY_ELEMS: AccessedElements =
+    AccessedElements([[(0, (H256::zero(), H256::zero())); 4]; 32]);

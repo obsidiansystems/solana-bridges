@@ -2,8 +2,6 @@
 
 use crate::{eth::*, instruction::*, parameters::*, prove::*, types::*};
 
-use std::mem;
-
 use rlp::Rlp;
 
 use solana_sdk::{
@@ -40,9 +38,8 @@ pub fn process_instruction<'a>(
                 return Err(ProgramError::MissingRequiredSignature);
             }
 
-            guard_sufficient_storage(&account)?;
             let mut raw_data = account.try_borrow_mut_data()?;
-            let data = interp_mut(&mut *raw_data);
+            let ref mut data = *interp_mut(&mut *raw_data)?;
 
             match data {
                 Storage {
@@ -55,26 +52,25 @@ pub fn process_instruction<'a>(
             };
             verify_block(&item.header, None).map_err(CustomError::to_program_error)?;
 
-            write_new_block(data, &item.header, Some(&item.total_difficulty))?;
+            write_new_block(data, &item.header, Some(&item.total_difficulty), &item.elements)?;
         }
-        Instruction::NewBlock(header) => {
-            guard_sufficient_storage(&account)?;
+        Instruction::NewBlock(nb) => {
+            let NewBlock { header, elements } = *nb;
             let mut raw_data = account.try_borrow_mut_data()?;
-            let data = interp_mut(&mut *raw_data);
+            let ref mut data = *interp_mut(&mut *raw_data)?;
 
             let parent =
                 read_prev_block(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             verify_block(&header, Some(&parent.header)).map_err(CustomError::to_program_error)?;
 
-            write_new_block(data, &header, None)?;
+            write_new_block(data, &header, None, &elements)?;
         }
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
                 return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
             }
-            guard_sufficient_storage(&account)?;
-            let mut raw_data = account.try_borrow_mut_data()?;
-            let data = interp(&mut *raw_data);
+            let raw_data = account.try_borrow_data()?;
+            let data = interp(&*raw_data)?;
 
             let min_h = min_height(data);
             if min_h > pi.height {
@@ -102,111 +98,4 @@ pub fn process_instruction<'a>(
         Instruction::Challenge(_c) => {
         }
     })
-}
-
-#[inline]
-pub fn interp(raw_data: &[u8]) -> &Storage {
-    let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / mem::size_of::<RingItem>();
-    let hacked_data = &raw_data[..block_len];
-    // FIXME use proper DST stuff once it exists
-    let res: &Storage = unsafe { std::mem::transmute(hacked_data) };
-    // because no stride != size
-    debug_assert!(
-        std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN
-    );
-    debug_assert_eq!(res.headers.len(), block_len);
-    res
-}
-
-#[inline]
-pub fn interp_mut(raw_data: &mut [u8]) -> &mut Storage {
-    let raw_len = raw_data.len();
-    let block_len = raw_data[BLOCKS_OFFSET..].len() / mem::size_of::<RingItem>();
-    let hacked_data = &mut raw_data[..block_len];
-    // FIXME use proper DST stuff once it exists
-    let res: &mut Storage = unsafe { std::mem::transmute(hacked_data) };
-    // because no stride != size
-    debug_assert!(
-        std::mem::size_of_val(res) <= (raw_len + STORAGE_ALIGN - 1 / STORAGE_ALIGN) * STORAGE_ALIGN
-    );
-    debug_assert_eq!(res.headers.len(), block_len);
-    res
-}
-
-pub fn min_height(data: &Storage) -> u64 {
-    let len = data.headers.len();
-    match *data {
-        Storage {
-            full: false,
-            offset,
-            ..
-        } => data.height - offset as u64 + 1,
-        Storage { full: true, .. } => data.height - len as u64 + 1,
-    }
-}
-
-pub fn lowest_offset(data: &Storage) -> usize {
-    match *data {
-        Storage { full: false, .. } => 0,
-        Storage {
-            full: true, offset, ..
-        } => offset,
-    }
-}
-
-pub fn read_block<'a>(data: &'a Storage, idx: usize) -> Result<Option<&'a RingItem>, ProgramError> {
-    let len = data.headers.len();
-    match *data {
-        Storage {
-            full: false,
-            offset,
-            ..
-        } if idx < offset => (),
-        Storage { full: true, .. } if idx < len => (),
-        _ => return Ok(None),
-    };
-    assert!(data.height != 0);
-    let ref header = data.headers[idx];
-    Ok(Some(header))
-}
-
-pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, ProgramError> {
-    let len = data.headers.len();
-    read_block(data, (data.offset + (len - 1)) % len)
-}
-
-pub fn write_new_block(
-    data: &mut Storage,
-    header: &BlockHeader,
-    old_total_difficulty_opt: Option<&U256>,
-) -> Result<(), ProgramError> {
-    let old_offset = data.offset;
-
-    let total_difficulty = match old_total_difficulty_opt {
-        Some(&d) => d,
-        None => match read_prev_block(data)? {
-            None => U256::zero(),
-            Some(prev_item) => prev_item.total_difficulty + header.difficulty,
-        },
-    };
-
-    data.headers[old_offset] = RingItem {
-        header: header.clone(),
-        total_difficulty,
-    };
-
-    data.height = header.number;
-    data.offset = (old_offset + 1) % data.headers.len();
-    data.full |= data.offset <= old_offset;
-
-    return Ok(());
-}
-
-fn guard_sufficient_storage(account: &AccountInfo) -> Result<(), ProgramError> {
-    if MIN_BUF_SIZE > account.data_len() {
-        info!("Account data length too small for holding state");
-        return Err(ProgramError::AccountDataTooSmall);
-    }
-    return Ok(());
 }
