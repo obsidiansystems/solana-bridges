@@ -93,3 +93,11 @@ executable run-solana-testnet
   ghc-options:         -Wall -threaded
   build-depends:       base >=4.13 && <4.14
                      , solana-bridges
+
+executable generate-solana-genesis
+  main-is:             GenerateSolanaGenesis.hs
+  hs-source-dirs:      src-bin
+  default-language:    Haskell2010
+  ghc-options:         -Wall -threaded
+  build-depends:       base >=4.13 && <4.14
+                     , solana-bridges
