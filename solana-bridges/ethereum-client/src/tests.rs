@@ -80,8 +80,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         for n in 1..block_count {
             {
                 let r = accounts[0].data.try_borrow().unwrap();
-                let data = interp(&*r)
-                    .map_err(TestError::ProgError)?;
+                let data = interp(&*r).map_err(TestError::ProgError)?;
                 println!(
                     "ring size: {}, full: {}, current block short no: {}",
                     data.headers.len(),
@@ -101,8 +100,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         let raw_data = accounts[0]
             .try_borrow_data()
             .map_err(TestError::ProgError)?;
-        let data = interp(&*raw_data)
-            .map_err(TestError::ProgError)?;
+        let data = interp(&*raw_data).map_err(TestError::ProgError)?;
 
         assert_eq!(block_count % data.headers.len(), data.offset);
         assert_eq!(400000 - 1 + block_count as u64, data.height);

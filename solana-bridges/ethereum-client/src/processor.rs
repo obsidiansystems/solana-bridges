@@ -52,7 +52,12 @@ pub fn process_instruction<'a>(
             };
             verify_block(&item.header, None).map_err(CustomError::to_program_error)?;
 
-            write_new_block(data, &item.header, Some(&item.total_difficulty), &item.elements)?;
+            write_new_block(
+                data,
+                &item.header,
+                Some(&item.total_difficulty),
+                &item.elements,
+            )?;
         }
         Instruction::NewBlock(nb) => {
             let NewBlock { header, elements } = *nb;

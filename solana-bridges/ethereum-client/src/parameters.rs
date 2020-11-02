@@ -1,13 +1,10 @@
 use std::mem;
 
-use solana_sdk::{
-    program_error::ProgramError,
-    info,
-};
+use solana_sdk::{info, program_error::ProgramError};
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
-use crate::eth::{BlockHeader, U256, AccessedElements};
+use crate::eth::{AccessedElements, BlockHeader, U256};
 
 pub const BLOCKS_OFFSET: usize = mem::size_of::<usize>() + mem::size_of::<u64>() + 8; // TODO better
 pub const MIN_BUF_SIZE: usize = BLOCKS_OFFSET + mem::size_of::<RingItem>();

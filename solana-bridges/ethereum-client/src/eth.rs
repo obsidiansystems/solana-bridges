@@ -218,11 +218,10 @@ pub fn verify_pow(header: &BlockHeader) -> bool {
 
     let mut v = std::collections::HashSet::new();
 
-    let (_mix_hash, result) =
-        hashimoto(hash_header(&header, true), header.nonce, full_size, |i| {
-            v.insert(i);
-            calc_dataset_item(&cache, i)
-        });
+    let (_mix_hash, result) = hashimoto(hash_header(&header, true), header.nonce, full_size, |i| {
+        v.insert(i);
+        calc_dataset_item(&cache, i)
+    });
     let target = cross_boundary(header.difficulty);
 
     return U256::from_big_endian(result.as_fixed_bytes()) <= target;
@@ -356,12 +355,16 @@ impl Decodable for AccessedElements {
                     let idx = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
                     let v1 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
                     let v2 = j.next().ok_or(DecoderError::RlpIsTooShort)?.as_val()?;
-                    if j.next().is_some() { Err(DecoderError::RlpIsTooBig)?; }
+                    if j.next().is_some() {
+                        Err(DecoderError::RlpIsTooBig)?;
+                    }
                     (idx, (v1, v2))
                 };
             }
         }
-        if i.next().is_some() { Err(DecoderError::RlpIsTooBig)?; }
+        if i.next().is_some() {
+            Err(DecoderError::RlpIsTooBig)?;
+        }
         Ok(s)
     }
 }
