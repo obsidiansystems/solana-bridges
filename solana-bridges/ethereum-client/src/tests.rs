@@ -44,6 +44,7 @@ fn block_construction() -> Result<(), TestError> {
     Ok(())
 }
 
+#[ignore]
 #[quickcheck]
 fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
     buf_len *= std::mem::size_of::<RingItem>() / 7;
@@ -107,6 +108,27 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     })
 }
 
+pub fn verify_pow_from_scratch_indexes(header: &BlockHeader) -> (bool, Vec<H512>) {
+    use ethash::*;
+    const EPOCH_LENGTH: u64 = 30000;
+    let epoch = (header.number / EPOCH_LENGTH) as usize;
+    let seed = get_seedhash(epoch);
+    let cache_size = get_cache_size(epoch);
+
+    let mut cache = vec![0; cache_size];
+    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
+
+    let mut v = Vec::new();
+
+    let res = verify_pow(header, |i| {
+        let elem = calc_dataset_item(&cache, i);
+        v.push(elem);
+        elem
+    });
+
+    (res, v)
+}
+
 pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashMap<u32, H512>) {
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
@@ -157,10 +179,10 @@ fn test_pow_2() -> Result<(), TestError> {
 #[ignore]
 #[test]
 fn dump_entries() -> Result<(), TestError> {
-    let x = verify_pow_from_scratch(&decode_rlp(inclusion::test_1::HEADER_DATA)?).1;
+    let x = verify_pow_from_scratch_indexes(&decode_rlp(HEADER_400000)?).1;
     let mut res = String::new();
-    for (k, v) in x {
-        res += &*std::format!("        ({:#8x}, hex!(\"{:#x}\"))\n", k, v);
+    for node in x {
+        res += &*std::format!("        hex!(\"{:#x}\"),\n", node);
     }
     panic!("{}", res);
 }
@@ -299,6 +321,7 @@ where
     })
 }
 
+#[ignore]
 #[test]
 fn relayer_run_0() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 16];
@@ -314,6 +337,7 @@ fn relayer_run_0() -> Result<(), TestError> {
     })
 }
 
+#[ignore]
 #[test]
 fn relayer_run_1() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 12];
@@ -380,18 +404,21 @@ where
     })
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_0() -> Result<(), DecoderError> {
     use inclusion::test_0::*;
     test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_1() -> Result<(), DecoderError> {
     use inclusion::test_1::*;
     test_inclusion(RECEIPT_INDEX, RECEIPT_DATA, HEADER_DATA, PROOF_DATA)
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_instruction_bad_block() -> () {
     use inclusion::test_0::*;
@@ -414,6 +441,7 @@ pub fn test_inclusion_instruction_bad_block() -> () {
     );
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_instruction_too_easy() {
     use inclusion::test_0::*;
@@ -432,6 +460,7 @@ pub fn test_inclusion_instruction_too_easy() {
     );
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_instruction_bad_proof() {
     use inclusion::test_0::*;
@@ -454,6 +483,7 @@ pub fn test_inclusion_instruction_bad_proof() {
     );
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
     use inclusion::test_0::*;
@@ -467,6 +497,7 @@ pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
     })
 }
 
+#[ignore]
 #[test]
 pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
     use inclusion::test_1::*;
@@ -479,6 +510,16 @@ pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
         min_difficulty: Box::new(U256::zero()),
     })
 }
+
+#[test]
+pub fn test_pow_indices_400k() -> Result<(), TestError> {
+    use inclusion::test_2::*;
+    return match verify_pow_indexes(&decode_rlp(HEADER_400000)?, HEADER_400K_ELEMS) {
+        true => Ok (()),
+        false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
+    }
+}
+
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
     let expected = BlockHeader {

@@ -105,6 +105,13 @@ pub fn process_instruction<'a>(
     })
 }
 
+pub fn verify_pow_indexes(header: &BlockHeader, elems: &[[u8; 64]; 128]) -> bool {
+    let mut iter = elems.iter().map(H512::from);
+    verify_pow(&header, |_| {
+        iter.next().unwrap()
+    })
+}
+
 pub fn write_new_block(
     data: &mut Storage,
     header: &BlockHeader,
