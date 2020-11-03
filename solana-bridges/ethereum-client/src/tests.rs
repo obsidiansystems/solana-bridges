@@ -2,7 +2,7 @@ use quickcheck_macros::quickcheck;
 
 use crate::{instruction::*, parameters::*, processor::*, types::*};
 
-use std::{cell::RefCell, collections::HashSet, ops::Deref, rc::Rc, str::FromStr};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
@@ -107,7 +107,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     })
 }
 
-pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashSet<u32>) {
+pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashMap<u32, H512>) {
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
@@ -117,31 +117,41 @@ pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashSet<u32>) {
     let mut cache = vec![0; cache_size];
     make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
 
-    let mut v = HashSet::new();
+    let mut v = HashMap::new();
 
     let res = verify_pow(header, |i| {
-        v.insert(i);
-        calc_dataset_item(&cache, i)
+        let r = calc_dataset_item(&cache, i);
+        v.insert(i, r);
+        r
     });
 
     (res, v)
 }
 
 // Slow tests ~ 1min each without cache sharing
+
 #[ignore]
 #[test]
-fn test_pow() -> Result<(), TestError> {
-    fn test_header_pow(header: &[u8]) -> Result<bool, TestError> {
-        Ok(verify_pow_from_scratch(&decode_rlp(header)?).0)
-    }
-
+fn test_pow_0() -> Result<(), TestError> {
     let mut header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
     assert!(verify_pow_from_scratch(&header_400000).0);
     header_400000.nonce = H64::zero();
     assert!(!verify_pow_from_scratch(&header_400000).0);
-    assert!(test_header_pow(HEADER_400001)?);
-    assert!(test_header_pow(HEADER_8996776)?);
-    return Ok(());
+    Ok(())
+}
+
+#[ignore]
+#[test]
+fn test_pow_1() -> Result<(), TestError> {
+    assert!(verify_pow_from_scratch(&decode_rlp(HEADER_400001)?).0);
+    Ok(())
+}
+
+#[ignore]
+#[test]
+fn test_pow_2() -> Result<(), TestError> {
+    assert!(verify_pow_from_scratch(&decode_rlp(HEADER_8996776)?).0);
+    Ok(())
 }
 
 #[test]
