@@ -154,6 +154,17 @@ fn test_pow_2() -> Result<(), TestError> {
     Ok(())
 }
 
+#[ignore]
+#[test]
+fn dump_entries() -> Result<(), TestError> {
+    let x = verify_pow_from_scratch(&decode_rlp(inclusion::test_1::HEADER_DATA)?).1;
+    let mut res = String::new();
+    for (k, v) in x {
+        res += &*std::format!("        ({:#8x}, hex!(\"{:#x}\"))\n", k, v);
+    }
+    panic!("{}", res);
+}
+
 #[test]
 fn test_roundtrip_rlp_header() -> Result<(), TestError> {
     let expected = decoded_header_0()?;
@@ -323,6 +334,7 @@ fn relayer_run_1() -> Result<(), TestError> {
 
 pub fn test_inclusion_instruction<F>(
     header_data: &[u8],
+    elems_raw: &[(u32, [u8; 64]); 128],
     instruction_fun: F,
 ) -> Result<(), TestError>
 where
@@ -339,7 +351,16 @@ where
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 total_difficulty: Box::new(U256::zero()),
                 header: Box::new(header.clone()),
-                elements: Box::new(DUMMY_ELEMS),
+                elements: {
+                    let mut res = Box::new(DUMMY_ELEMS);
+                    for x in 0..128 {
+                        let ref src = elems_raw[x];
+                        let ref mut dst = res.0[x / 4][x % 4];
+                        dst.0 = src.0;
+                        dst.1 = H512(src.1);
+                    }
+                    res
+                },
             }))
             .pack();
             process_instruction(&program_id, &accounts, &instruction_init).unwrap();
@@ -375,7 +396,7 @@ pub fn test_inclusion_1() -> Result<(), DecoderError> {
 pub fn test_inclusion_instruction_bad_block() -> () {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(HEADER_DATA, |header| {
+    let res = test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header| {
         let mut block_hash = Box::new(hash_header(&header, false));
         (*block_hash).0[5] += 1;
         ProveInclusion {
@@ -397,7 +418,7 @@ pub fn test_inclusion_instruction_bad_block() -> () {
 pub fn test_inclusion_instruction_too_easy() {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+    let res = test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
         height: header.number,
         block_hash: Box::new(hash_header(&header, false)),
         expected_value: RECEIPT_DATA.to_vec(),
@@ -415,7 +436,7 @@ pub fn test_inclusion_instruction_too_easy() {
 pub fn test_inclusion_instruction_bad_proof() {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| {
+    let res = test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| {
         let mut proof = pack_proof(PROOF_DATA);
         proof[5] += 1;
         ProveInclusion {
@@ -436,7 +457,7 @@ pub fn test_inclusion_instruction_bad_proof() {
 #[test]
 pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
     use inclusion::test_0::*;
-    test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
         height: header.number,
         block_hash: Box::new(hash_header(&header, false)),
         expected_value: RECEIPT_DATA.to_vec(),
@@ -449,7 +470,7 @@ pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
 #[test]
 pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
     use inclusion::test_1::*;
-    test_inclusion_instruction(HEADER_DATA, |header: BlockHeader| ProveInclusion {
+    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
         height: header.number,
         block_hash: Box::new(hash_header(&header, false)),
         expected_value: RECEIPT_DATA.to_vec(),

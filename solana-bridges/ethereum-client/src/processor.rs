@@ -117,7 +117,8 @@ pub fn write_new_block(
         // if element is missing just use index 0. Will catch later when proof
         // of work is invalid.
         let idx = elems_flat.binary_search_by_key(&addr, |(k, _)| *k)
-            .ok().unwrap_or(0);
+            // temporarily make addr not 0 for sake of debugging
+            .ok().unwrap_or(addr as usize);
         elems_flat[idx].1
     });
     if !pow_valid {
