@@ -108,7 +108,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     })
 }
 
-pub fn verify_pow_from_scratch_indexes(header: &BlockHeader) -> (bool, Vec<H512>) {
+pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, Vec<(u32, H512)>) {
     use ethash::*;
     const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
@@ -121,29 +121,8 @@ pub fn verify_pow_from_scratch_indexes(header: &BlockHeader) -> (bool, Vec<H512>
     let mut v = Vec::new();
 
     let res = verify_pow(header, |i| {
-        let elem = calc_dataset_item(&cache, i);
-        v.push(elem);
-        elem
-    });
-
-    (res, v)
-}
-
-pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, HashMap<u32, H512>) {
-    use ethash::*;
-    const EPOCH_LENGTH: u64 = 30000;
-    let epoch = (header.number / EPOCH_LENGTH) as usize;
-    let seed = get_seedhash(epoch);
-    let cache_size = get_cache_size(epoch);
-
-    let mut cache = vec![0; cache_size];
-    make_cache(&mut cache, seed); //TODO: hits maximum instructions limit
-
-    let mut v = HashMap::new();
-
-    let res = verify_pow(header, |i| {
         let r = calc_dataset_item(&cache, i);
-        v.insert(i, r);
+        v.push((i, r));
         r
     });
 
@@ -179,10 +158,10 @@ fn test_pow_2() -> Result<(), TestError> {
 #[ignore]
 #[test]
 fn dump_entries() -> Result<(), TestError> {
-    let x = verify_pow_from_scratch_indexes(&decode_rlp(HEADER_400000)?).1;
+    let x = verify_pow_from_scratch(&decode_rlp(HEADER_400000)?).1;
     let mut res = String::new();
-    for node in x {
-        res += &*std::format!("        hex!(\"{:#x}\"),\n", node);
+    for (k, v) in x {
+        res += &*std::format!("        ({:#8x}, hex!(\"{:#x}\"))\n", k, v);
     }
     panic!("{}", res);
 }
@@ -228,11 +207,11 @@ fn test_decoding() -> Result<(), TestError> {
     let header: BlockHeader = decode_rlp(TEST_HEADER_0)?;
     assert_eq!(header, expected);
 
-    let header_400k: BlockHeader = decode_rlp(HEADER_400000)?;
-    assert_eq!(header_400k.number, 400000);
-    assert_eq!(header_400k.difficulty, U256::from(6022643743806 as u64));
+    let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
+    assert_eq!(header_400000.number, 400000);
+    assert_eq!(header_400000.difficulty, U256::from(6022643743806 as u64));
     assert_eq!(
-        hash_header(&header_400k, false),
+        hash_header(&header_400000, false),
         H256::from_str("5d15649e25d8f3e2c0374946078539d200710afc977cdfc6a977bd23f20fa8e8")
             .map_err(|_| TestError::HexError)?
     );
@@ -512,9 +491,11 @@ pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
 }
 
 #[test]
-pub fn test_pow_indices_400k() -> Result<(), TestError> {
-    use inclusion::test_2::*;
-    return match verify_pow_indexes(&decode_rlp(HEADER_400000)?, HEADER_400K_ELEMS) {
+pub fn test_pow_indices_400000() -> Result<(), TestError> {
+    return match verify_pow_indexes(
+        &decode_rlp(HEADER_400000)?,
+        unsafe { std::mem::transmute(&HEADER_400000_ELEMS) })
+    {
         true => Ok (()),
         false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
     }

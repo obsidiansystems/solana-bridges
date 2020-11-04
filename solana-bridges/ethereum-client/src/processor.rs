@@ -105,10 +105,14 @@ pub fn process_instruction<'a>(
     })
 }
 
-pub fn verify_pow_indexes(header: &BlockHeader, elems: &[[u8; 64]; 128]) -> bool {
-    let mut iter = elems.iter().map(H512::from);
-    verify_pow(&header, |_| {
-        iter.next().unwrap()
+pub fn verify_pow_indexes(header: &BlockHeader, elems: &AccessedElements) -> bool {
+    let mut iter = elems.0.iter().flat_map(|x| x.iter());
+    verify_pow(&header, |wanted_addr| {
+        let &(got_addr, h) = iter.next().unwrap();
+        if got_addr != wanted_addr {
+            panic!("next address is not the one we are looking up");
+        }
+        h
     })
 }
 
@@ -118,16 +122,7 @@ pub fn write_new_block(
     old_total_difficulty_opt: Option<&U256>,
     elems: &AccessedElements,
 ) -> Result<(), ProgramError> {
-    let pow_valid = verify_pow(&header, |addr| {
-        // reshape; TODO use safe transmute for this
-        let elems_flat: &[(u32, H512); 128] = unsafe { std::mem::transmute(&elems.0) };
-        // if element is missing just use index 0. Will catch later when proof
-        // of work is invalid.
-        let idx = elems_flat.binary_search_by_key(&addr, |(k, _)| *k)
-            // temporarily make addr not 0 for sake of debugging
-            .ok().unwrap_or(addr as usize);
-        elems_flat[idx].1
-    });
+    let pow_valid = verify_pow_indexes(header, elems);
     if !pow_valid {
         return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
     }
