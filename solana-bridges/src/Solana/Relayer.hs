@@ -406,10 +406,17 @@ blockToHeader rlp = blockHeader
     (blockData, "") = B16.decode $ T.encodeUtf8 rlp
     RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
 
+testSolanaCrypto :: Eth.Provider -> Address -> IO ()
+testSolanaCrypto node ca = do
+  res <- runExceptT $ do
+    getInitialized node ca >>= (liftIO . print)
+    test_sha512 node ca "" >>= (liftIO . print . B16.encode)
+  case res of
+    Right () -> pure ()
+    Left bad -> error bad
 
-
-deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
-deploySolanaClientContract node solanaConfig = do
+deploySolanaClientContractImpl :: Eth.Provider -> IO Address
+deploySolanaClientContractImpl node = do
   let
     runWeb3'' = runWeb3' node
 
@@ -438,7 +445,18 @@ deploySolanaClientContract node solanaConfig = do
   res <- runExceptT $ do
     tx <- deployContract
     receipt <- waitForTx tx
-    ca <- getContractAddress receipt
+    getContractAddress receipt
+
+  case res of
+    Left err -> error err
+    Right ca -> pure ca
+
+
+
+deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
+deploySolanaClientContract node solanaConfig = do
+  ca <- deploySolanaClientContractImpl node
+  res <- runExceptT $ do
     liftIO $ hPutStrLn stderr $ "Initializing contract: " <> show ca
 
     ExceptT $ withSolanaWebSocket solanaConfig $ do
@@ -462,10 +480,10 @@ deploySolanaClientContract node solanaConfig = do
       runExceptT $ initialize node ca slot0 block0 slotLeader0 epochSchedule
 
     liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
-    pure ca
+
   case res of
     Left err -> error err
-    Right ca -> do
+    Right () -> do
       let
         loopUntilInitialized :: Int -> IO ()
         loopUntilInitialized n = do

@@ -29,11 +29,14 @@ import qualified Network.Ethereum.Account as Eth
 import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..))
 import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
+import qualified Data.ByteString as BS
 
 import Solana.Types
 import qualified Ethereum.Contracts.Bindings as Contracts
 
 
+test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m BS.ByteString
+test_sha512 node ca a = bytesFromSol <$> simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
 
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
 getInitialized node ca = simulate node ca "initialized" Contracts.initialized
@@ -96,6 +99,13 @@ unsafeBytes32ToSol = unsafeSizedByteArray . ByteArray.convert . unBase58ByteStri
 
 bytes32FromSol :: Data.Solidity.Prim.Bytes.BytesN 32 -> Base58ByteString
 bytes32FromSol = Base58ByteString . ByteArray.convert . unSizedByteArray
+
+bytesToSol :: BS.ByteString -> Data.Solidity.Prim.Bytes.Bytes
+bytesToSol = ByteArray.convert
+
+bytesFromSol :: Data.Solidity.Prim.Bytes.Bytes -> BS.ByteString
+bytesFromSol = ByteArray.convert
+
 
 invokeContract :: Address
                -> Eth.DefaultAccount Eth.Web3 a

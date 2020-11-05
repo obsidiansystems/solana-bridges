@@ -1,11 +1,13 @@
 pragma solidity >=0.6.0 <0.8.0;
 pragma experimental ABIEncoderV2;
 
-library Sha512 {
+contract SolanaClient {
+
+// library Sha512 {
 
     function rightrotate(uint64 x, uint64 y) internal pure returns (uint64) {
         assert(y<64);
-        return ( x>>y | x<<(64 - y));
+        return ( (x>>y) | uint64(x<<(64 - y)));
     }
 
     struct workvars {
@@ -19,7 +21,7 @@ library Sha512 {
         uint64 h;
     }
 
-    function hash(bytes memory message) public pure returns (bytes memory) {
+    function Sha512_hash(bytes memory message) internal pure returns (bytes memory) {
         uint64[8] memory h = [
             0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
             0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179];
@@ -44,32 +46,32 @@ library Sha512 {
         uint64[80] memory w;
         workvars memory v;
 
-        uint num_chunks = ((message.length + 8) >> 7) + 1;
+        uint num_chunks = ((message.length + 16) >> 7) + 1;
         for (uint chunk = 0; chunk < num_chunks; ++chunk)
         {
             assembly {
-                let l := mload(message) // message length
+                let messageLength := mload(message) // message length
 
                 for { let i := 0 } lt(i, 16) { i := add(i, 1) } { // for each uint64 within the chunk
 
                     let offset := add(mul(chunk, 128), shl(i, 3)) // start of first byte of the word we're looking at.
                     let word := 0
 
-                    switch gt(offset, l) // if we're past the message
+                    switch gt(offset, messageLength) // if we're past the message
                     case 1 {
                         if eq(i,15) {
                             if eq(add(chunk, 1), num_chunks) { // last word of the padded message should be the length
-                                word := l
+                                word := messageLength
                             }
                         }
                     }
                     default {
                         word := shr(mload(add(add(0x20, message), offset)), 192) // read a uint64 from message.
-                        switch lt(add(offset, 7), l) // all 8 bytes ully contained by message
+                        switch lt(add(offset, 7), messageLength) // all 8 bytes ully contained by message
                         case 1 { }
                         default {
-                            word := and(word, shl(sub(0, 1), mul(sub(add(offset, 8), l), 8))) // zero out garbage bytes.
-                            word := or(word, shl(0x80, mul(sub(add(offset, 7), l), 8))) // set first bit after message to 1
+                            word := and(word, shl(sub(0, 1), mul(sub(add(offset, 8), messageLength), 8))) // zero out garbage bytes.
+                            word := or(word, shl(0x80, mul(sub(add(offset, 7), messageLength), 8))) // set first bit after message to 1
                         }
                     }
 
@@ -77,7 +79,7 @@ library Sha512 {
                 }
             }
 
-            // Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array:
+            // Extend the first 16 words into the remaining 64 words w[16..79] of the message schedule array:
             for (uint i = 16; i <= 79 ; ++i) {
                 uint64 s0 = rightrotate(w[i-15], 1) ^ rightrotate(w[i-15], 8) ^ (w[i-15] >> 7);
                 uint64 s1 = rightrotate(w[i-2], 19) ^ rightrotate(w[i-2], 61) ^ (w[i-2] >> 6);
@@ -125,12 +127,17 @@ library Sha512 {
             h[7] = h[7] + v.h;
 
         }
-        return abi.encodePacked(h);
+        uint256[2] memory result =
+            [ uint256(h[0]) << 192 | uint256(h[1]) << 128 | uint256(h[2]) << 64 | uint256(h[3])
+            , uint256(h[4]) << 192 | uint256(h[5]) << 128 | uint256(h[6]) << 64 | uint256(h[7])
+            ];
+
+        return abi.encodePacked(result);
     }
 
 
-}
-library ed25519_simple {
+// }
+// library ed25519_simple {
     // using Sha512 for Sha512.state;
 
     uint256 constant b = 256;
@@ -236,7 +243,7 @@ library ed25519_simple {
     uint256 constant e2256 = 38; // 2**256 % q
     function Hint(bytes memory message) internal pure returns (uint256) {
         // bytes memory digest = hh.finalize();
-        bytes memory digest = Sha512.hash(message);
+        bytes memory digest = Sha512_hash(message);
         assert(digest.length == 64);
         bytes32 lo_bytes;
         bytes32 hi_bytes;
@@ -277,7 +284,7 @@ library ed25519_simple {
         }
     }
 
-    function checkvalid(bytes memory signature, bytes memory message, bytes32 pk) public pure {
+    function checkvalid(bytes memory signature, bytes memory message, bytes32 pk) internal pure {
         if (signature.length != b/4) { revert("signature length is wrong"); }
         if (pk.length != b/8) { revert("public-key length is wrong"); }
         bytes32 s_R_bytes;
@@ -303,7 +310,7 @@ library ed25519_simple {
         }
     }
 
-}
+// }
 
 struct Slot {
     bool hasBlock;
@@ -311,7 +318,6 @@ struct Slot {
     bytes32 leaderPublicKey;
 }
 
-contract SolanaClient {
     uint64 constant HISTORY_SIZE = 100;
     address immutable public creator;
     bool public initialized;
@@ -430,4 +436,19 @@ contract SolanaClient {
         slot.blockHash = 0;
         slot.hasBlock = false;
     }
+
+    // function eq(bytes memory a, bytes memory b) internal pure returns (bool) {
+    //     if (a.length != b.length) { return false; }
+    //     for (uint i = 0; i < a.length; ++i) {
+    //         if (a[i] != b[i]) {
+    //             return false;
+    //         }
+    //     }
+    //     return true;
+    // }
+
+    function test_sha512(bytes memory message) public pure returns (bytes memory) {
+        return Sha512_hash(message);
+    }
+
 }
