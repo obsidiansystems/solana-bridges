@@ -2,6 +2,7 @@ use hex_literal::hex;
 
 use ethereum_types::H128;
 
+/// THE VALIDITY OF THESE HAS NOT YET BEEN CONFIRMED BY OBSIDIAN SYSTEMS.
 pub const EPOCH_ROOTS: [H128; 512] = [
     H128(hex!("55b891e842e58f58956a847cbbf67821")),
     H128(hex!("fba03a3d1902b9256ebe9177d03242fe")),
