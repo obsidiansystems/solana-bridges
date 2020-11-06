@@ -35,8 +35,50 @@ import Solana.Types
 import qualified Ethereum.Contracts.Bindings as Contracts
 
 
+-- test_edwards :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> _ -> _ -> m _
+-- test_edwards node ca x y = simulate node ca "edwareds" (Contracts.edwards x y)
+
+test_curvedistance
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> (Integer, Integer)
+  -> m Integer
+test_curvedistance node ca (x, y) = toInteger <$> simulate node ca "test_curvedistance" (Contracts.test_curvedistance (fromInteger x) (fromInteger y))
+
 test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m BS.ByteString
 test_sha512 node ca a = bytesFromSol <$> simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
+
+test_ed25519_verify
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> BS.ByteString -> BS.ByteString -> Base58ByteString
+  -> m Bool
+test_ed25519_verify node ca sig msg pk = simulate node ca "test_ed25519_verify" (Contracts.test_ed25519_verify (bytesToSol sig) (bytesToSol msg) (unsafeBytes32ToSol pk))
+
+
+test_xrecover
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> Integer -> m Integer
+test_xrecover node ca x = toInteger <$> simulate node ca "test_xrecover" (Contracts.xrecover $ fromInteger x)
+
+test_decodepoint
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> Base58ByteString
+  -> m (Integer, Integer)
+test_decodepoint node ca x = bimap toInteger toInteger <$> simulate node ca "test_decodepoint" (Contracts.decodepoint $ unsafeBytes32ToSol x)
+
+test_decodeint
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> Base58ByteString
+  -> m Integer
+test_decodeint node ca x = toInteger <$> simulate node ca "test_decodeint" (Contracts.decodeint $ unsafeBytes32ToSol x)
+
+-- test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m Eth.TxReceipt
+-- test_sha512 node ca a = simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
+
 
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
 getInitialized node ca = simulate node ca "initialized" Contracts.initialized

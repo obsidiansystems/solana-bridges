@@ -47,36 +47,33 @@ contract SolanaClient {
         workvars memory v;
 
         uint num_chunks = ((message.length + 16) >> 7) + 1;
-        for (uint chunk = 0; chunk < num_chunks; ++chunk)
-        {
-            assembly {
-                let messageLength := mload(message) // message length
+        uint messageLength = message.length;
+        for (uint chunk = 0; chunk < num_chunks; ++chunk) {
 
-                for { let i := 0 } lt(i, 16) { i := add(i, 1) } { // for each uint64 within the chunk
+            for ( uint i = 0 ; i < 16 ; ++i ) { // for each uint64 within the chunk
 
-                    let offset := add(mul(chunk, 128), shl(i, 3)) // start of first byte of the word we're looking at.
-                    let word := 0
+                uint offset = ((chunk * (1024/8)) + (i * (64/8))); // start of first byte of the word we're looking at.
+                uint word = 0;
 
-                    switch gt(offset, messageLength) // if we're past the message
-                    case 1 {
-                        if eq(i,15) {
-                            if eq(add(chunk, 1), num_chunks) { // last word of the padded message should be the length
-                                word := messageLength
-                            }
+                if (offset > messageLength) { // if we're past the message
+                    if (i == 15) {
+                        if ((chunk + 1) == num_chunks) { // last word of the padded message should be the length
+                            word = messageLength << 3; // length in bits
                         }
                     }
-                    default {
-                        word := shr(mload(add(add(0x20, message), offset)), 192) // read a uint64 from message.
-                        switch lt(add(offset, 7), messageLength) // all 8 bytes ully contained by message
-                        case 1 { }
-                        default {
-                            word := and(word, shl(sub(0, 1), mul(sub(add(offset, 8), messageLength), 8))) // zero out garbage bytes.
-                            word := or(word, shl(0x80, mul(sub(add(offset, 7), messageLength), 8))) // set first bit after message to 1
-                        }
+                } else {
+                    assembly {
+                        word := shr(192, mload(add(add(offset, 32), message)))
                     }
 
-                    mstore(add(w, shl(i, 5)), word)
+                    if ((offset + 7) < messageLength) { // all 8 bytes fully contained by message
+                    } else {
+                        word &= (uint256(~0) << (((offset + 8) - messageLength) * 8)); // zero out garbage bytes.
+                        word |= (0x80 << (((offset + 7) - messageLength) * 8)); // set first bit after message to 1
+                    }
                 }
+
+                w[i] = uint64(word);
             }
 
             // Extend the first 16 words into the remaining 64 words w[16..79] of the message schedule array:
@@ -155,28 +152,63 @@ contract SolanaClient {
 
     uint256 constant minus_one = q - 1;
 
-    function expmod(uint256 base, uint256 e, uint256 m) internal pure returns (uint256) {
-        if (e == 0) {
+    // from: https://github.com/androlo/standard-contracts/blob/master/contracts/src/crypto/ECCMath.sol
+    /// @dev Modular inverse of a (mod p) using euclid.
+    /// 'a' and 'p' must be co-prime.
+    /// @param a The number.
+    /// @param p The mmodulus.
+    /// @return x such that ax = 1 (mod p)
+    function invmod(uint a, uint p) internal pure returns (uint) {
+        if (a == 0 || a == p || p == 0) {revert("inv range");}
+        if (a > p)
+            a = a % p;
+        int t1;
+        int t2 = 1;
+        uint r1 = p;
+        uint r2 = a;
+        uint qq;
+        while (r2 != 0) {
+            qq = r1 / r2;
+            (t1, t2, r1, r2) = (t2, t1 - int(qq) * t2, r2, r1 - qq * r2);
+        }
+        if (t1 < 0)
+            return (p - uint(-t1));
+        return uint(t1);
+    }
+
+    /// @dev Modular exponentiation, base^e % m
+    /// Basically the same as can be found here:
+    /// https://github.com/ethereum/serpent/blob/develop/examples/ecc/modexp.se
+    /// @param base The base.
+    /// @param e The exponent.
+    /// @param m The modulus.
+    /// @return r such that r = base**e (mod m)
+    function expmod(uint base, uint e, uint m) public pure returns (uint r) {
+        if (base == 0)
+            return 0;
+        if (e == 0)
             return 1;
-        } else {
-            uint256 t = expmod(base, e >> 1, m);
-            t = mulmod(t, t, m);
-            if (e & 1 != 0) {
-                t = mulmod(t, base, m);
+        if (m == 0) {revert("expmond range");}
+        r = 1;
+        for (uint bit = 2 ** 255; bit != 0; bit /= 16) {
+            assembly {
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, bit)))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 2))))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 4))))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 8))))), m)
             }
-            return t;
         }
     }
 
-    function inv(uint256 x) internal pure returns (uint256) { return expmod(x, q-2, q); }
-    function neg(uint256 x) internal pure returns (uint256) { return q - x; }
+    function inv(uint256 x) public pure returns (uint256) { return invmod(x, q); }
+    function neg(uint256 x) public pure returns (uint256) { return q - x; }
 
-    function xrecover(uint256 y) internal pure returns (uint256) {
+    function xrecover(uint256 y) public pure returns (uint256) {
         // xx = (y*y-1) * inv(d*y*y+1)
         uint256 yy = mulmod(y, y, q);
         uint256 xx = mulmod(addmod(yy, minus_one, q), inv(addmod(mulmod(d, yy, q), 1, q)), q);
 
-        uint256 x = expmod(xx, (q + 3 >> 3), q);
+        uint256 x = expmod(xx, ((q + 3) >> 3), q);
 
         if (mulmod(x, x, q) != xx) { x = mulmod(x, I, q); }
         if (x & 1 != 0) { x = q - x; }
@@ -188,7 +220,7 @@ contract SolanaClient {
         uint256 y;
     }
 
-    function edwards(edwards_point memory P, edwards_point memory Q) internal pure returns (edwards_point memory PQ) {
+    function edwards(edwards_point memory P, edwards_point memory Q) public pure returns (edwards_point memory PQ) {
         uint256 x1 = P.x;
         uint256 y1 = P.y;
         uint256 x2 = Q.x;
@@ -205,20 +237,15 @@ contract SolanaClient {
         PQ.y = mulmod(addmod(y1y2, x1x2, q), inv(addmod(1, neg(dxy), q)), q);
     }
 
-    function swap_bytes32(bytes32 x) internal pure returns (bytes32) {
-        bytes32 y;
-        y  = x[ 0] << (31*8) | x[ 1] << (30*8) | x[ 2] << (29*8) | x[ 3] << (28*8);
-        y |= x[ 4] << (27*8) | x[ 5] << (26*8) | x[ 6] << (25*8) | x[ 7] << (24*8);
-        y |= x[ 8] << (23*8) | x[ 9] << (22*8) | x[10] << (21*8) | x[11] << (20*8);
-        y |= x[12] << (19*8) | x[13] << (18*8) | x[14] << (17*8) | x[15] << (16*8);
-        y |= x[16] << (15*8) | x[17] << (14*8) | x[18] << (13*8) | x[19] << (12*8);
-        y |= x[20] << (11*8) | x[21] << (10*8) | x[22] << ( 9*8) | x[23] << ( 8*8);
-        y |= x[24] << ( 7*8) | x[25] << ( 6*8) | x[26] << ( 5*8) | x[27] << ( 4*8);
-        y |= x[28] << ( 3*8) | x[29] << ( 2*8) | x[30] << ( 1*8) | x[31];
-        return y;
+    function swap_bytes32(bytes32 x) public pure returns (bytes32) {
+        uint256 y;
+        for (uint i = 0; i < 32; ++i) {
+            y = y | (uint256(uint8(x[i])) << (i * 8));
+        }
+        return bytes32(y);
     }
 
-    function scalarmult(edwards_point memory P, uint256 e) internal pure returns (edwards_point memory Q) {
+    function scalarmult(edwards_point memory P, uint256 e) public pure returns (edwards_point memory Q) {
         if (e == 0) {
             Q.x = 0;
             Q.y = 1;
@@ -256,21 +283,32 @@ contract SolanaClient {
         return addmod(lo, mulmod(hi, e2256, q), q);
     }
 
-    function isoncurve(edwards_point memory P) internal pure returns (bool) {
-        uint256 x = P.x;
-        uint256 y = P.y;
-        uint256 xx = inv(mulmod(x, x, q));
-        uint256 yy = mulmod(y, y, q);
-        uint256 dxxyy = mulmod(d, mulmod(xx, yy, q), q);
-        return addmod(xx, addmod(yy, addmod(minus_one, dxxyy, q), q), q) == 0;
-        // return (-x*x + y*y - 1 - d*x*x*y*y) % q == 0
+    function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
+        edwards_point memory P;
+        P.x = x;
+        P.y = y;
+        return curvedistance(P);
     }
 
-    function decodeint(bytes32 x) internal pure returns (uint256) {
+    function curvedistance(edwards_point memory P) public pure returns (uint256) {
+        uint256 x = P.x;
+        uint256 y = P.y;
+        uint256 minux_xx = q - (mulmod(x, x, q));
+        uint256 yy = mulmod(y, y, q);
+        uint256 dxxyy = mulmod(d, mulmod(minux_xx, yy, q), q);
+        return addmod(minux_xx, addmod(yy, addmod(minus_one, dxxyy, q), q), q);
+    }
+
+    function isoncurve(edwards_point memory P) internal pure returns (bool) {
+        // return (-x*x + y*y - 1 - d*x*x*y*y) % q == 0
+        return curvedistance(P) == 0;
+    }
+
+    function decodeint(bytes32 x) public pure returns (uint256) {
         return uint256(swap_bytes32(x));
     }
 
-    function decodepoint(bytes32 s) internal pure returns (edwards_point memory P) {
+    function decodepoint(bytes32 s) public pure returns (edwards_point memory P) {
         uint256 dec_s = decodeint(s);
         uint256 y = dec_s & ((1 << 255) - 1);
         uint256 x = xrecover(y);
@@ -284,7 +322,7 @@ contract SolanaClient {
         }
     }
 
-    function checkvalid(bytes memory signature, bytes memory message, bytes32 pk) internal pure {
+    function ed25519_valid(bytes memory signature, bytes memory message, bytes32 pk) internal pure returns (bool) {
         if (signature.length != b/4) { revert("signature length is wrong"); }
         if (pk.length != b/8) { revert("public-key length is wrong"); }
         bytes32 s_R_bytes;
@@ -305,9 +343,8 @@ contract SolanaClient {
 
         edwards_point memory BS = scalarmult(B, S);
         edwards_point memory sigS = edwards(R,scalarmult(A,h));
-        if (BS.x != sigS.x || BS.y != sigS.y) {
-            revert("signature does not pass verification");
-        }
+
+        return !(BS.x != sigS.x || BS.y != sigS.y); // else { revert("signature does not pass verification"); }
     }
 
 // }
@@ -437,18 +474,12 @@ struct Slot {
         slot.hasBlock = false;
     }
 
-    // function eq(bytes memory a, bytes memory b) internal pure returns (bool) {
-    //     if (a.length != b.length) { return false; }
-    //     for (uint i = 0; i < a.length; ++i) {
-    //         if (a[i] != b[i]) {
-    //             return false;
-    //         }
-    //     }
-    //     return true;
-    // }
-
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
         return Sha512_hash(message);
+    }
+
+    function test_ed25519_verify(bytes memory signature, bytes memory message, bytes32 pk) public pure returns (bool) {
+        return ed25519_valid(signature, message, pk);
     }
 
 }

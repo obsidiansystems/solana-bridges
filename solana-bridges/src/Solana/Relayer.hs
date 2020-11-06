@@ -1,13 +1,14 @@
-{-# LANGUAGE EmptyCase #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PackageImports #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE EmptyCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -30,6 +31,7 @@ import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.Bits
 import Data.ByteArray.HexString
+import qualified Data.ByteArray as ByteArray
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
@@ -43,6 +45,7 @@ import Data.Text (Text)
 import Data.Void (Void)
 import Data.Word
 import Network.Ethereum.Api.Types (Call(..))
+import qualified Network.Ethereum.Api.Types as Eth
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
@@ -72,14 +75,15 @@ import qualified Network.Ethereum.Api.Eth as Eth
   ( getTransactionReceipt
   , getBlockByNumber
   , sendTransaction)
-import qualified Network.Ethereum.Api.Types as Eth
-  ( Block(..)
-  , Call(..)
-  , TxReceipt(..)
-  , Quantity (..)
-  )
+-- import qualified Network.Ethereum.Api.Types as Eth
+--   ( Block(..)
+--   , Call(..)
+--   , TxReceipt(..)
+--   , Quantity (..)
+--   )
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
+import Numeric (showHex)
 
 import Ethereum.Contracts as Contracts
 import Ethereum.Contracts.Dist (solanaClientContractBin)
@@ -320,7 +324,7 @@ createContract :: Address -> HexString -> Call
 createContract fromAddr hex = Eth.Call
     { callFrom = Just fromAddr
     , callTo = Nothing
-    , callGas = Just 1e6
+    , callGas = Just 1e7
     , callGasPrice = Just 1
     , callValue = Nothing
     , callData = Just hex
@@ -408,9 +412,63 @@ blockToHeader rlp = blockHeader
 
 testSolanaCrypto :: Eth.Provider -> Address -> IO ()
 testSolanaCrypto node ca = do
+  print ca
+  let
+    toHexString :: Integer -> String
+    toHexString = \x -> showHex x ""
+    check_ed25519_testvector msg (HexString pk) (HexString sig) = do
+      testSig <- test_ed25519_verify node ca sig msg (Base58ByteString pk)
+      unless testSig $ error $ unlines
+        [ "ed25519_valid test vector failed:"
+        , "sig:" <> show (HexString sig)
+        , "msg:" <> show msg
+        , "pubkey" <> show (HexString pk)
+        ]
+    check_sha512_testvector msg (HexString expectedDigest) = do
+      testDigest <- test_sha512 node ca msg
+      unless (expectedDigest == testDigest) $ error $ unlines
+        [ "sha512 test vector failed:"
+        , "msg: " <> show msg
+        , "expected: " <> show (HexString expectedDigest)
+        , "got: " <> show (HexString testDigest)
+        ]
+
   res <- runExceptT $ do
-    getInitialized node ca >>= (liftIO . print)
-    test_sha512 node ca "" >>= (liftIO . print . B16.encode)
+    _ <- getInitialized node ca
+    liftIO $ putStrLn "sha512-0"
+    check_sha512_testvector
+      "abc"
+      "0xDDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A2192992A274FC1A836BA3C23A3FEEBBD454D4423643CE80E2A9AC94FA54CA49F"
+
+    liftIO $ putStrLn "sha512-1"
+    check_sha512_testvector
+      "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
+      "0x8E959B75DAE313DA8CF4F72814FC143F8F7779C6EB9F7FA17299AEADB6889018501D289E4900F7E4331B99DEC4B5433AC7D329EEB6DD26545E96E55B874BE909"
+  
+
+    liftIO $ putStrLn "c25519-decodeint"
+    test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= liftIO . print . toHexString
+
+    liftIO $ putStrLn "c25519-curvedistance"
+    test_curvedistance node ca
+      ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
+      , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
+      >>= liftIO . print . toHexString
+
+
+    liftIO $ putStrLn "c25519-xrecover"
+    test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= liftIO . print . toHexString
+    -- xrecover e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82aL 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5L
+
+    liftIO $ putStrLn "c25519-decodepoint"
+    test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= liftIO . print . bimap toHexString toHexString
+
+    liftIO $ putStrLn "ec25519-test1"
+    check_ed25519_testvector ""
+     "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+     "0xe5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+
+    liftIO $ putStrLn "OK"
   case res of
     Right () -> pure ()
     Left bad -> error bad
@@ -497,19 +555,12 @@ deploySolanaClientContract node solanaConfig = do
       loopUntilInitialized 10
       pure ca
 
--- <<<<<<< HEAD
--- relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
--- relaySolanaToEthereum node ca = do
--- =======
--- solanaClientContractBin :: BS.ByteString
--- solanaClientContractBin = $(embedFile "solana-client/dist/SolanaClient.bin")
 
 relaySolanaToEthereum :: Eth.Provider -> SolanaRpcConfig -> Address -> IO ()
 relaySolanaToEthereum node solanaConfig ca = do
   -- map from epoch to schedule
   leaderSchedulesRef :: MVar (Map Word64 SolanaLeaderSchedule) <- newMVar Map.empty
 
---- >>>>>>> store slot leader with each block
   res <- runExceptT $ do
 
     void $ getSeenBlocks node ca
