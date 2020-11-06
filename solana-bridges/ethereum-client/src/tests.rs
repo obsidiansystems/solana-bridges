@@ -337,7 +337,7 @@ fn relayer_run_1() -> Result<(), TestError> {
 
 pub fn test_inclusion_instruction<F>(
     header_data: &[u8],
-    elems_raw: &[(u32, [u8; 64]); 128],
+    elems_raw: &[(u32, H512); 128],
     instruction_fun: F,
 ) -> Result<(), TestError>
 where
@@ -357,10 +357,7 @@ where
                 elements: {
                     let mut res = Box::new(DUMMY_ELEMS);
                     for x in 0..128 {
-                        let ref src = elems_raw[x];
-                        let ref mut dst = res.0[x / 4][x % 4];
-                        dst.0 = src.0;
-                        dst.1 = H512(src.1);
+                        res.0[x / 4][x % 4] = elems_raw[x];
                     }
                     res
                 },
