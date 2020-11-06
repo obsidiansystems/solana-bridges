@@ -258,6 +258,19 @@ let
 
   run-solana-testnet = withSPLEnv "run-solana-testnet";
 
+  ethashproof = with nixpkgs; buildGoModule rec {
+    name = "ethashproof";
+    runVend = true;
+
+    src = fetchFromGitHub {
+      owner = "tranvictor";
+      repo = name;
+      rev = "82a2b716eac4965709898a3dae791b4bace0999a";
+      sha256 = "0xahaiv9i289lp76c0zb68qbz8xk3r2r0grl85zhbk2iykmg6jby";
+    };
+    vendorSha256 = "0chs20pgcxg2wf7y3ppsqfzihhwgaqlrb58f9j56gfpz0va5ysm4";
+  };
+
 in {
   inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
     ethereum-client-prog
@@ -266,6 +279,7 @@ in {
     generate-solana-genesis
     solana-client-tool
     run-solana-testnet
+    ethashproof
   ;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
