@@ -5,6 +5,7 @@ pub mod parameters;
 pub mod processor;
 pub mod prove;
 pub mod types;
+pub mod epoch_roots;
 
 #[cfg(test)]
 mod tests;
