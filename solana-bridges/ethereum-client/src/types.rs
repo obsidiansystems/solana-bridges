@@ -55,6 +55,13 @@ pub enum CustomError {
     InvalidProof_TooEasy,
     #[allow(non_camel_case_types)]
     InvalidProof_BadMerkle,
+
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadBlockHash,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_InvalidIndex,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadMerkle,
 }
 
 pub enum DecodeFrom {
@@ -124,6 +131,10 @@ impl CustomError {
             InvalidProof_BadBlockHash => 18,
             InvalidProof_TooEasy => 19,
             InvalidProof_BadMerkle => 20,
+
+            InvalidChallenge_BadBlockHash => 21,
+            InvalidChallenge_InvalidIndex => 22,
+            InvalidChallenge_BadMerkle => 23,
         })
     }
 }

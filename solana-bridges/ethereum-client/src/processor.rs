@@ -100,7 +100,27 @@ pub fn process_instruction<'a>(
             verify_trie_proof(expected_root, &*pi.key, proof, &*pi.expected_value)
                 .map_err(|_| CustomError::InvalidProof_BadMerkle.to_program_error())?;
         }
-        Instruction::Challenge(_c) => {
+        Instruction::Challenge(challenge) => {
+            if account.is_writable {
+                return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
+            }
+            let raw_data = account.try_borrow_data()?;
+            let data = interp(&*raw_data)?;
+
+            let min_h = min_height(data);
+            if min_h > challenge.height {
+                panic!("too old {} {}", min_h, challenge.height)
+            }
+            let max_h = min_h + data.headers.len() as u64;
+            if max_h <= challenge.height {
+                panic!("too new {} {}", max_h, challenge.height)
+            }
+            let offset = lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
+            let block =
+                read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
+            if &hash_header(&block.header, false) != &*challenge.block_hash {
+                return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
+            }
         }
     })
 }
