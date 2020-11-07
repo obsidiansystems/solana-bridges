@@ -1,13 +1,13 @@
 use quickcheck_macros::quickcheck;
 
-use crate::{instruction::*, parameters::*, processor::*, types::*};
+use crate::{instruction::*, ledger_ring_buffer::*, processor::*, types::*};
 
 use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
 use crate::eth::*;
-use crate::parameters::MIN_BUF_SIZE;
+use crate::ledger_ring_buffer::MIN_BUF_SIZE;
 use crate::prove::*;
 use ethereum_types::{Bloom, H160, H256, H64, U256};
 use rlp::{Decodable, DecoderError, Rlp, RlpStream};

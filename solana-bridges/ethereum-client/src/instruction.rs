@@ -1,5 +1,8 @@
-use crate::eth::*;
-use crate::types::*;
+use crate::{
+    eth::*,
+    types::*,
+    pow_proof::AccessedElement,
+};
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
@@ -13,13 +16,16 @@ use solana_sdk::program_error::ProgramError;
 pub struct Initialize {
     pub total_difficulty: Box<U256>,
     pub header: Box<BlockHeader>,
-    pub elements: Box<AccessedElements>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct NewBlock {
     pub header: Box<BlockHeader>,
-    pub elements: Box<AccessedElements>,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct ProvidePowElement {
+    pub element: Box<AccessedElement>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
@@ -36,6 +42,7 @@ pub struct ProveInclusion {
 pub struct Challenge {
     pub height: u64,
     pub block_hash: Box<ethereum_types::H256>,
+    //pub block_hash: Box<ethereum_types::H256>,
 }
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.
@@ -45,6 +52,7 @@ pub enum Instruction {
     Noop,
     Initialize(Box<Initialize>),
     NewBlock(Box<NewBlock>),
+    ProvidePowElement(Box<ProvidePowElement>),
     ProveInclusion(Box<ProveInclusion>),
     Challenge(Box<Challenge>),
 }

@@ -1,6 +1,6 @@
 #![cfg(feature = "program")]
 
-use crate::{eth::*, instruction::*, parameters::*, prove::*, types::*};
+use crate::{eth::*, instruction::*, ledger_ring_buffer::*, prove::*, types::*};
 
 use rlp::Rlp;
 
@@ -56,11 +56,10 @@ pub fn process_instruction<'a>(
                 data,
                 &item.header,
                 Some(&item.total_difficulty),
-                &item.elements,
             )?;
         }
         Instruction::NewBlock(nb) => {
-            let NewBlock { header, elements } = *nb;
+            let NewBlock { header } = *nb;
             let mut raw_data = account.try_borrow_mut_data()?;
             let ref mut data = *interp_mut(&mut *raw_data)?;
 
@@ -68,7 +67,7 @@ pub fn process_instruction<'a>(
                 read_prev_block(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             verify_block(&header, Some(&parent.header)).map_err(CustomError::to_program_error)?;
 
-            write_new_block(data, &header, None, &elements)?;
+            write_new_block(data, &header, None)?;
         }
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
@@ -140,11 +139,10 @@ pub fn write_new_block(
     data: &mut Storage,
     header: &BlockHeader,
     old_total_difficulty_opt: Option<&U256>,
-    elems: &AccessedElements,
 ) -> Result<(), ProgramError> {
     let pow_valid = verify_pow_indexes(header, elems);
     if !pow_valid {
         return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
     }
-    write_new_block_unvalidated(data, header, old_total_difficulty_opt, elems)
+    write_new_block_unvalidated(data, header, old_total_difficulty_opt)
 }
