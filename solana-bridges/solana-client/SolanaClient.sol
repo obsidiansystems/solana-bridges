@@ -106,8 +106,8 @@ contract SolanaClient {
         slot.blockMerkleRoot = 0;
     }
 
-    function verifyTransaction(bytes32[16][] calldata proof, uint64 slot, bytes calldata leaf, uint64 index) external view returns (bool) {
-        return this.verifyMerkleProof(proof, slots[slotOffset(slot)].blockMerkleRoot, leaf, index);
+    function verifyTransaction(bytes32[16][] calldata proof, uint64 slot, bytes calldata transaction, uint64 index) external view returns (bool) {
+        return this.verifyMerkleProof(proof, slots[slotOffset(slot)].blockMerkleRoot, transaction, index);
     }
 
     function verifyMerkleProof(bytes32[16][] calldata proof, bytes32 root, bytes calldata leaf, uint64 index) external pure returns (bool) {

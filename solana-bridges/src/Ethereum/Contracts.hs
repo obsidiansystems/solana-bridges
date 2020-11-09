@@ -63,10 +63,10 @@ addBlocks node ca blocks = void $ submit node ca "addBlocks" $ Contracts.addBloc
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
-verifyMerkleProof :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> [[ByteString]] -> Digest SHA256 -> ByteString -> Word64 -> m Bool
+verifyMerkleProof :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> [[Digest SHA256]] -> Digest SHA256 -> ByteString -> Word64 -> m Bool
 verifyMerkleProof node ca proof root leaf index = simulate node ca "verifyMerkleProof" $
   Contracts.verifyMerkleProof
-    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert)) proof)
+    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert . sha256ToBytes32)) proof)
     (sha256ToBytes32 root)
     (ByteArray.convert leaf)
     (word64ToSol index)
