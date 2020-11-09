@@ -1,14 +1,19 @@
 use quickcheck_macros::quickcheck;
 
-use crate::{instruction::*, ledger_ring_buffer::*, processor::*, types::*};
+use crate::{
+    instruction::*,
+    ledger_ring_buffer::*,
+    pow_proof::*,
+    processor::*,
+    types::*,
+    eth::*,
+    prove::*,
+};
 
 use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
-use crate::eth::*;
-use crate::ledger_ring_buffer::MIN_BUF_SIZE;
-use crate::prove::*;
 use ethereum_types::{Bloom, H160, H256, H64, U256};
 use rlp::{Decodable, DecoderError, Rlp, RlpStream};
 use solana_sdk::clock::Epoch;
@@ -68,7 +73,6 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 header: Box::new(header_400000),
                 total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
-                elements: Box::new(DUMMY_ELEMS),
             }))
             .pack();
             process_instruction(&program_id, &accounts, &instruction_init)
@@ -89,7 +93,6 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
             let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
                 header: header_4000xx,
-                elements: Box::new(DUMMY_ELEMS),
             })).pack();
             process_instruction(&program_id, &accounts, &instruction_new)
                 .map_err(TestError::ProgError)?;
@@ -178,14 +181,12 @@ fn test_rlp_initialize(w0: u64, w1: u64, w2: u64, w3: u64) -> Result<(), TestErr
     let expected = Initialize {
         total_difficulty: Box::new(U256([w0, w1, w2, w3])),
         header: Box::new(decoded_header_0()?),
-        elements: Box::new(DUMMY_ELEMS),
     };
     let rlp = {
         let mut s = RlpStream::new();
-        s.begin_list(3);
+        s.begin_list(2);
         s.append(&*expected.total_difficulty);
         s.append(&*expected.header);
-        s.append(&*expected.elements);
         s.out()
     };
     assert_eq!(expected, decode_rlp(&rlp)?);
@@ -354,13 +355,6 @@ where
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                 total_difficulty: Box::new(U256::zero()),
                 header: Box::new(header.clone()),
-                elements: {
-                    let mut res = Box::new(DUMMY_ELEMS);
-                    for x in 0..128 {
-                        res.0[x / 4][x % 4] = elems_raw[x];
-                    }
-                    res
-                },
             }))
             .pack();
             process_instruction(&program_id, &accounts, &instruction_init).unwrap();
@@ -489,10 +483,11 @@ pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
 
 #[test]
 pub fn test_pow_indices_400000() -> Result<(), TestError> {
-    return match verify_pow_indexes(
-        &decode_rlp(HEADER_400000)?,
-        unsafe { std::mem::transmute(&HEADER_400000_ELEMS) })
-    {
+    return match verify_pow_indexes(&mut RingItem {
+        total_difficulty: U256::zero(),
+        header: decode_rlp(HEADER_400000)?,
+        elements: unsafe { std::mem::transmute(HEADER_400000_ELEMS) },
+    }) {
         true => Ok (()),
         false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
     }
@@ -592,5 +587,9 @@ fn decoded_header_0() -> Result<BlockHeader, TestError> {
     return Ok(expected);
 }
 
-const DUMMY_ELEMS: AccessedElements =
-    AccessedElements([[(0, (H512::zero())); 4]; 32]);
+const DUMMY_ELEM: AccessedElement = AccessedElement {
+    address: 0,
+    value: H512::zero(),
+};
+
+const DUMMY_ELEMS: AccessedElements = AccessedElements([[DUMMY_ELEM; 4]; 32]);
