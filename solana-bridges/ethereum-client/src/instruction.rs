@@ -25,7 +25,7 @@ pub struct NewBlock {
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct ProvidePowElement {
-    pub element: Box<AccessedElement>,
+    pub element: Box<H512>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
@@ -73,12 +73,16 @@ impl Instruction {
                 buf.push(2);
                 buf.extend_from_slice(&rlp::encode(block));
             }
-            Self::ProveInclusion(ref pi) => {
+            Self::ProvidePowElement(ref block) => {
                 buf.push(3);
+                buf.extend_from_slice(&rlp::encode(block));
+            }
+            Self::ProveInclusion(ref pi) => {
+                buf.push(4);
                 buf.extend_from_slice(&rlp::encode(pi));
             }
             Self::Challenge(ref c) => {
-                buf.push(4);
+                buf.push(5);
                 buf.extend_from_slice(&rlp::encode(c));
             }
         }
@@ -102,9 +106,13 @@ impl Instruction {
                 .map(Self::NewBlock),
             3 => rlp
                 .as_val()
+                .map_err(|e| CustomError::from_rlp(DecodeFrom::PowElement, e))
+                .map(Self::ProvidePowElement),
+            4 => rlp
+                .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))
                 .map(Self::ProveInclusion),
-            4 => rlp
+            5 => rlp
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Challenge, e))
                 .map(Self::Challenge),

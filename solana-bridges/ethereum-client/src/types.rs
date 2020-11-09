@@ -16,6 +16,8 @@ pub enum CustomError {
     #[cfg(not(test))]
     DecodeDifficultyAndHeaderFailed,
     #[cfg(not(test))]
+    DecodePowElementFailed,
+    #[cfg(not(test))]
     DecodeInclusionInstructionFailed,
     #[cfg(not(test))]
     DecodeChallengeInstructionFailed,
@@ -26,6 +28,8 @@ pub enum CustomError {
     DecodeHeaderFailed(rlp::DecoderError),
     #[cfg(test)]
     DecodeDifficultyAndHeaderFailed(rlp::DecoderError),
+    #[cfg(test)]
+    DecodePowElementFailed(rlp::DecoderError),
     #[cfg(test)]
     DecodeInclusionInstructionFailed(rlp::DecoderError),
     #[cfg(test)]
@@ -70,6 +74,7 @@ pub enum DecodeFrom {
     DifficultyAndHeader,
     Inclusion,
     Challenge,
+    PowElement,
 }
 
 impl CustomError {
@@ -81,8 +86,10 @@ impl CustomError {
             Block => DecodeBlockFailed,
             Header => DecodeHeaderFailed,
             DifficultyAndHeader => DecodeDifficultyAndHeaderFailed,
+            PowElement => DecodePowElementFailed,
             Inclusion => DecodeInclusionInstructionFailed,
             Challenge => DecodeChallengeInstructionFailed,
+
         }
     }
     #[cfg(test)]
@@ -93,6 +100,7 @@ impl CustomError {
             Block => DecodeBlockFailed(e),
             Header => DecodeHeaderFailed(e),
             DifficultyAndHeader => DecodeDifficultyAndHeaderFailed(e),
+            PowElement => DecodePowElementFailed(e),
             Inclusion => DecodeInclusionInstructionFailed(e),
             Challenge => DecodeChallengeInstructionFailed(e),
         }
@@ -112,17 +120,18 @@ impl CustomError {
             DecodeBlockFailed(_) => 2,
             DecodeHeaderFailed(_) => 3,
             DecodeDifficultyAndHeaderFailed(_) => 4,
-            DecodeInclusionInstructionFailed(_) => 5,
-            DecodeChallengeInstructionFailed(_) => 6,
+            DecodePowElementFailed(_) => 5,
+            DecodeInclusionInstructionFailed(_) => 6,
+            DecodeChallengeInstructionFailed(_) => 7,
 
-            VerifyHeaderFailed_NonConsecutiveHeight => 7,
-            VerifyHeaderFailed_NonMonotonicTimestamp => 8,
-            VerifyHeaderFailed_InvalidParentHash => 9,
-            VerifyHeaderFailed_TooMuchExtraData => 10,
-            VerifyHeaderFailed_InvalidProofOfWork => 11,
+            VerifyHeaderFailed_NonConsecutiveHeight => 8,
+            VerifyHeaderFailed_NonMonotonicTimestamp => 9,
+            VerifyHeaderFailed_InvalidParentHash => 10,
+            VerifyHeaderFailed_TooMuchExtraData => 11,
+            VerifyHeaderFailed_InvalidProofOfWork => 12,
 
-            BlockNotFound => 12,
-            UnpackExtraDataFailed => 13,
+            BlockNotFound => 13,
+            UnpackExtraDataFailed => 14,
             InvalidAccountOwner => 14,
             DeserializeStorageFailed => 15,
             AlreadyInitialized => 16,

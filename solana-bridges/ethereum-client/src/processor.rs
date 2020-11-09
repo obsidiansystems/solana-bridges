@@ -1,6 +1,13 @@
 #![cfg(feature = "program")]
 
-use crate::{eth::*, instruction::*, ledger_ring_buffer::*, prove::*, types::*};
+use crate::{
+    eth::*,
+    instruction::*,
+    ledger_ring_buffer::*,
+    pow_proof::*,
+    prove::*,
+    types::*,
+};
 
 use rlp::Rlp;
 
@@ -69,6 +76,31 @@ pub fn process_instruction<'a>(
 
             write_new_block(data, &header, None)?;
         }
+        Instruction::ProvidePowElement(ppe) => {
+            let mut raw_data = account.try_borrow_mut_data()?;
+            let ref mut data = *interp_mut(&mut *raw_data)?;
+            data.ethash_elements = match data.ethash_elements {
+                None => panic!("Waiting for new block, cannot accept another PoW element."),
+                Some(n) => {
+                    let parent =
+                        read_prev_block_mut(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
+                    parent.elements.0[(n / 4) as usize][(n % 4) as usize].value = *ppe.element;
+                    if n < 128 {
+                        // do nothing but increment
+                        Some(n + 1)
+                    } else {
+                        // We have all the blocks now, verify PoW and write addresses
+                        let pow_valid = verify_pow_indexes(parent);
+                        if !pow_valid {
+                            return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
+                        }
+
+                        // indicate we are ready for new address
+                        None
+                    }
+                },
+            }
+        }
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
                 return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
@@ -124,14 +156,13 @@ pub fn process_instruction<'a>(
     })
 }
 
-pub fn verify_pow_indexes(header: &BlockHeader, elems: &AccessedElements) -> bool {
-    let mut iter = elems.0.iter().flat_map(|x| x.iter());
-    verify_pow(&header, |wanted_addr| {
-        let &(got_addr, h) = iter.next().unwrap();
-        if got_addr != wanted_addr {
-            panic!("next address is not the one we are looking up");
-        }
-        h
+pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
+    let mut iter = ri.elements.0.iter_mut().flat_map(|x| x.iter_mut());
+    verify_pow(&ri.header, |wanted_addr| {
+        let a = iter.next().unwrap();
+        // Set for challengers, now that we know what it is.
+        a.address = wanted_addr;
+        a.value
     })
 }
 
@@ -140,9 +171,11 @@ pub fn write_new_block(
     header: &BlockHeader,
     old_total_difficulty_opt: Option<&U256>,
 ) -> Result<(), ProgramError> {
-    let pow_valid = verify_pow_indexes(header, elems);
-    if !pow_valid {
-        return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
+    if data.ethash_elements.is_some() {
+        panic!("expected PoW element for previous block, but we're trying to write a new block")
     }
     write_new_block_unvalidated(data, header, old_total_difficulty_opt)
 }
+
+
+
