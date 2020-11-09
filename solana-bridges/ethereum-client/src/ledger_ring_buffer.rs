@@ -4,7 +4,10 @@ use solana_sdk::{info, program_error::ProgramError};
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
-use crate::eth::{AccessedElements, BlockHeader, U256};
+use crate::{
+    eth::{BlockHeader, U256},
+    pow_proof::{AccessedElement, AccessedElements},
+};
 
 pub const BLOCKS_OFFSET: usize = mem::size_of::<usize>() + mem::size_of::<u64>() + 8; // TODO better
 pub const MIN_BUF_SIZE: usize = BLOCKS_OFFSET + mem::size_of::<RingItem>();
@@ -24,6 +27,10 @@ pub struct StorageT<X: ?Sized> {
     pub height: u64,
     pub offset: usize,
     pub full: bool,
+    /// How many elements to do we have:
+    /// None: ready for next block
+    /// Some(x): have x blocks, x in [0, 128)
+    pub ethash_elements: Option<u8>,
     pub headers: X,
 }
 
@@ -109,16 +116,36 @@ pub fn read_block<'a>(data: &'a Storage, idx: usize) -> Result<Option<&'a RingIt
     Ok(Some(header))
 }
 
+pub fn read_block_mut<'a>(data: &'a mut Storage, idx: usize) -> Result<Option<&'a mut RingItem>, ProgramError> {
+    let len = data.headers.len();
+    match *data {
+        Storage {
+            full: false,
+            offset,
+            ..
+        } if idx < offset => (),
+        Storage { full: true, .. } if idx < len => (),
+        _ => return Ok(None),
+    };
+    assert!(data.height != 0);
+    let ref mut header = data.headers[idx];
+    Ok(Some(header))
+}
+
 pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, ProgramError> {
     let len = data.headers.len();
     read_block(data, (data.offset + (len - 1)) % len)
+}
+
+pub fn read_prev_block_mut<'a>(data: &'a mut Storage) -> Result<Option<&'a mut RingItem>, ProgramError> {
+    let len = data.headers.len();
+    read_block_mut(data, (data.offset + (len - 1)) % len)
 }
 
 pub fn write_new_block_unvalidated(
     data: &mut Storage,
     header: &BlockHeader,
     old_total_difficulty_opt: Option<&U256>,
-    elems: &AccessedElements,
 ) -> Result<(), ProgramError> {
     let old_offset = data.offset;
 
@@ -130,11 +157,11 @@ pub fn write_new_block_unvalidated(
         },
     };
 
-    data.headers[old_offset] = RingItem {
-        header: header.clone(),
-        total_difficulty,
-        elements: *elems,
-    };
+    {
+        let ref mut x = data.headers[old_offset];
+        x.header = header.clone();
+        x.total_difficulty = total_difficulty;
+    }
 
     data.height = header.number;
     data.offset = (old_offset + 1) % data.headers.len();
