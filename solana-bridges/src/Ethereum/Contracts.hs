@@ -45,8 +45,19 @@ test_curvedistance
   -> m Integer
 test_curvedistance node ca (x, y) = toInteger <$> simulate node ca "test_curvedistance" (Contracts.test_curvedistance (fromInteger x) (fromInteger y))
 
+test_scalarmult
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> (Integer, Integer)
+  -> BS.ByteString
+  -> m (Integer, Integer)
+test_scalarmult node ca (x, y) z = bimap toInteger toInteger <$> simulate node ca "test_scalarmult" (Contracts.scalarmult (fromInteger x, fromInteger y) (bytesToSol z))
+
 test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m BS.ByteString
 test_sha512 node ca a = bytesFromSol <$> simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
+
+test_sha512_gas :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m Eth.TxReceipt
+test_sha512_gas node ca a = simulate node ca "test_sha512" (Eth.send $ Contracts.Test_sha512Data (bytesToSol a))
 
 test_ed25519_verify
   :: (MonadError String m, MonadIO m)
@@ -54,6 +65,13 @@ test_ed25519_verify
   -> BS.ByteString -> BS.ByteString -> Base58ByteString
   -> m Bool
 test_ed25519_verify node ca sig msg pk = simulate node ca "test_ed25519_verify" (Contracts.test_ed25519_verify (bytesToSol sig) (bytesToSol msg) (unsafeBytes32ToSol pk))
+
+test_ed25519_verify_gas
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> BS.ByteString -> BS.ByteString -> Base58ByteString
+  -> m Eth.TxReceipt
+test_ed25519_verify_gas node ca sig msg pk = simulate node ca "" (Eth.send $ Contracts.Test_ed25519_verifyData (bytesToSol sig) (bytesToSol msg) (unsafeBytes32ToSol pk))
 
 
 test_xrecover
@@ -75,6 +93,13 @@ test_decodeint
   -> Base58ByteString
   -> m Integer
 test_decodeint node ca x = toInteger <$> simulate node ca "test_decodeint" (Contracts.decodeint $ unsafeBytes32ToSol x)
+
+test_packMessage
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> Base58ByteString -> Base58ByteString -> BS.ByteString
+  -> m BS.ByteString
+test_packMessage node ca x y z = bytesFromSol <$> simulate node ca "test_decodeint" (Contracts.packMessage (unsafeBytes32ToSol x) (unsafeBytes32ToSol y) (bytesToSol z))
 
 -- test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m Eth.TxReceipt
 -- test_sha512 node ca a = simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
@@ -154,7 +179,7 @@ invokeContract :: Address
                -> Eth.Web3 a
 invokeContract a = Eth.withAccount ()
                    . Eth.withParam (Eth.to .~ a)
-                   . Eth.withParam (Eth.gasLimit .~ 25e6) -- TODO: estimate gas before call instead of using default value of --rpc.gascap
+                   . Eth.withParam (Eth.gasLimit .~ 99e6) -- TODO: estimate gas before call instead of using default value of --rpc.gascap
                    . Eth.withParam (Eth.gasPrice .~ (1 :: Eth.Wei))
 
 simulate :: (MonadIO m, MonadError String m, Show a) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 a -> m a

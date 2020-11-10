@@ -159,9 +159,9 @@ contract SolanaClient {
     /// @param p The mmodulus.
     /// @return x such that ax = 1 (mod p)
     function invmod(uint a, uint p) internal pure returns (uint) {
-        if (a == 0 || a == p || p == 0) {revert("inv range");}
-        if (a > p)
-            a = a % p;
+        // if (a == 0 || a == p || p == 0) {revert("inv range");}
+        // if (a > p)
+        //     a = a % p;
         int t1;
         int t2 = 1;
         uint r1 = p;
@@ -188,14 +188,14 @@ contract SolanaClient {
             return 0;
         if (e == 0)
             return 1;
-        if (m == 0) {revert("expmond range");}
+        // if (m == 0) {revert("expmond range");}
         r = 1;
         for (uint bit = 2 ** 255; bit != 0; bit /= 16) {
             assembly {
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, bit)))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 2))))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 4))))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, div(bit, 8))))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e,        bit )))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(1, bit))))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(2, bit))))), m)
+                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(3, bit))))), m)
             }
         }
     }
@@ -245,14 +245,24 @@ contract SolanaClient {
         return bytes32(y);
     }
 
-    function scalarmult(edwards_point memory P, uint256 e) public pure returns (edwards_point memory Q) {
-        if (e == 0) {
-            Q.x = 0;
-            Q.y = 1;
-        } else {
-            Q = scalarmult(P,e >> 1);
-            Q = edwards(Q,Q);
-            if (e & 1 != 0) { Q = edwards(Q,P); }
+    function scalarmult(edwards_point memory P0, bytes memory e_bytes) public pure returns (edwards_point memory Q) {
+        edwards_point memory P;
+        Q.x = 0; Q.y = 1;
+        P.x = P0.x;
+        P.y = P0.y;
+
+        uint256 e = 0;
+        for (int i = int(e_bytes.length) - 1; i >= 0 ; --i) {
+            e = uint256(uint8(e_bytes[uint(i)])) + mulmod(e, 0x100, l);
+        }
+        e = e % l;
+
+        while (e != 0) {
+            if (e & 1 != 0) {
+                Q = edwards(Q, P);
+            }
+            e = e >> 1;
+            P = edwards(P, P);
         }
     }
 
@@ -268,20 +278,6 @@ contract SolanaClient {
     }
 
     uint256 constant e2256 = 38; // 2**256 % q
-    function Hint(bytes memory message) internal pure returns (uint256) {
-        // bytes memory digest = hh.finalize();
-        bytes memory digest = Sha512_hash(message);
-        assert(digest.length == 64);
-        bytes32 lo_bytes;
-        bytes32 hi_bytes;
-        assembly {
-            lo_bytes := mload(add(0x20, digest))
-            hi_bytes := mload(add(0x40, digest))
-        }
-        uint256 lo = decodeint(lo_bytes);
-        uint256 hi = decodeint(hi_bytes);
-        return addmod(lo, mulmod(hi, e2256, q), q);
-    }
 
     function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
         edwards_point memory P;
@@ -322,29 +318,34 @@ contract SolanaClient {
         }
     }
 
+    function packMessage(bytes32 encodeR, bytes32 pk, bytes memory message) public pure returns (bytes memory packedMessage) {
+        packedMessage = abi.encodePacked(encodeR, pk, message);
+    }
+
     function ed25519_valid(bytes memory signature, bytes memory message, bytes32 pk) internal pure returns (bool) {
         if (signature.length != b/4) { revert("signature length is wrong"); }
         if (pk.length != b/8) { revert("public-key length is wrong"); }
         bytes32 s_R_bytes;
-        bytes32 s_A_bytes;
+        bytes memory S = new bytes(32);
         assembly {
             s_R_bytes := mload(add(0x20, signature))
-            s_A_bytes := mload(add(0x40, signature))
+            mstore(add(0x20, S), mload(add(0x40, signature)))
         }
         edwards_point memory R = decodepoint(s_R_bytes);
         edwards_point memory A = decodepoint(pk);
-        uint256 S = decodeint(s_A_bytes);
 
-        uint256 h = Hint(abi.encodePacked(encodepoint(R), pk, message));
+        bytes memory packedMessage = packMessage(encodepoint(R), pk, message);
+        bytes memory h = Sha512_hash(packedMessage);
+        edwards_point memory Ah = scalarmult(A, h);
 
         edwards_point memory B;
         B.x = Bx;
         B.y = By;
 
         edwards_point memory BS = scalarmult(B, S);
-        edwards_point memory sigS = edwards(R,scalarmult(A,h));
+        edwards_point memory sigS = edwards(R, Ah);
 
-        return !(BS.x != sigS.x || BS.y != sigS.y); // else { revert("signature does not pass verification"); }
+        return (BS.x == sigS.x && BS.y == sigS.y); // else { revert("signature does not pass verification"); }
     }
 
 // }
@@ -477,6 +478,15 @@ struct Slot {
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
         return Sha512_hash(message);
     }
+
+    // function challenge_leader_signature(uint64 slot) {
+    //     if (slot < self.earliest_slot) {
+    //         reject("block missing");
+    //     }
+    //     if (!ed25519_valid(slots[slot].signature, slots[slot].blockhash, slots[slot].leader)) {
+    //         selfdestruct(sender);
+    //     }
+    // }
 
     function test_ed25519_verify(bytes memory signature, bytes memory message, bytes32 pk) public pure returns (bool) {
         return ed25519_valid(signature, message, pk);
