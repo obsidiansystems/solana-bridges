@@ -514,11 +514,27 @@ pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
 
 #[test]
 pub fn test_pow_indices_400000() -> Result<(), TestError> {
-    return match verify_pow_indexes(&mut RingItem {
+    let dir = Path::new(file!()).parent().unwrap().parent().unwrap().join("data/ethash-proof");
+    let blocks_with_proofs: ethash_proof::BlockWithProofs =
+        ethash_proof::read_block(&*{
+            let mut data = dir.clone();
+            data.push("mainnet-400000.json");
+            data
+        });
+
+    let mut ri = RingItem {
         total_difficulty: U256::zero(),
-        header: decode_rlp(HEADER_400000)?,
-        elements: unsafe { std::mem::transmute(HEADER_400000_ELEMS) },
-    }) {
+        header: decode_rlp(&*blocks_with_proofs.header_rlp)?,
+        elements: DUMMY_ELEMS,
+    };
+
+    let mut i = 0;
+    for h in blocks_with_proofs.elements_512() {
+        ri.elements.0[i / 4][i % 4].value = h;
+    }
+
+
+    return match verify_pow_indexes(&mut ri) {
         true => Ok (()),
         false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
     }
