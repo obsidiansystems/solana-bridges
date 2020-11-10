@@ -109,10 +109,12 @@ test-suite contracts
   type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test
+  ghc-options:  -Wall -threaded
   build-depends: base
                , solana-bridges
                , async
                , bytestring
+               , containers
                , cryptonite
                , data-default
                , hspec

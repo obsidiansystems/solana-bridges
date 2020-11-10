@@ -1,20 +1,19 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE TypeApplications #-}
 
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (withAsync)
-import Control.Exception
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Except (runExceptT)
 import Crypto.Hash (Digest, SHA256, hash)
+import Data.Bool (bool)
 import qualified Data.ByteArray as ByteArray
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.Default
-import Data.Functor (void)
+import qualified Data.ByteString.Char8 as BSC
 import Data.Solidity.Prim.Address (Address)
+import Data.Tree (Tree (..))
+import GHC.Word (Word64)
 import Network.Web3.Provider (Provider)
-import Test.Hspec (Spec, it, describe, hspec, shouldBe)
+import Test.Hspec (it, describe, hspec, shouldBe)
 
 import Ethereum.Contracts
 import Solana.Relayer
@@ -55,3 +54,38 @@ sha256 = hash
 
 merkleParent :: [Digest SHA256] -> Digest SHA256
 merkleParent = sha256 . BS.concat . fmap ByteArray.convert
+
+verifyProof
+  :: Provider
+  -> Address
+  -> [[Digest SHA256]]
+  -> Digest SHA256
+  -> ByteString
+  -> Word64
+  -> IO ()
+verifyProof node contract proof root leaf offset = do
+  putStrLn $ "Verifying inclusion proof"
+  putStrLn $ unlines $ fmap ("  " <>) $
+    [ "of length: " <> show (length proof)
+    , "for value: " <> show leaf
+    , "at offset: " <> show offset
+    , "of merkle tree with root: " <> show root
+    , "on contract with address: " <> show contract
+    ]
+  runExceptT (verifyMerkleProof node contract proof root leaf offset) >>= \case
+    Left err -> putStrLn $ "Error: " <> show err
+    Right res -> putStrLn $ "Verification " <> bool "failed" "succeeded" res
+
+labels :: [Char]
+labels = "abcdefghijklmnop"
+
+leafs :: ByteString -> [Digest SHA256]
+leafs x = fmap (sha256 . (x <>) . BSC.singleton) labels
+
+subroots :: [Digest SHA256]
+subroots = fmap (merkleParent . leafs . BSC.singleton) labels
+
+mkTree :: [Char] -> Tree String
+mkTree ls = Node "" $ flip fmap ls $ \l ->
+  Node [] $ flip fmap ls $ \s ->
+    Node [l, s] []
