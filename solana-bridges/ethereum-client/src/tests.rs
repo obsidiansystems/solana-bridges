@@ -51,13 +51,13 @@ fn block_construction() -> Result<(), TestError> {
     Ok(())
 }
 
-#[ignore]
 #[quickcheck]
 fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
     buf_len *= std::mem::size_of::<RingItem>() / 7;
     buf_len += MIN_BUF_SIZE;
 
     block_count += 1;
+    block_count = std::cmp::min(block_count, 5);
 
     let program_id = Pubkey::default();
 
@@ -65,11 +65,6 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
     with_account(&mut *raw_data, |account| {
         let accounts = vec![account];
-
-        let raw_data = accounts[0]
-            .try_borrow_data()
-            .map_err(TestError::ProgError)?;
-        let data = interp(&*raw_data).map_err(TestError::ProgError)?;
 
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
         process_instruction(&program_id, &accounts, &instruction_noop)
@@ -107,15 +102,21 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             let blocks_with_proofs: ethash_proof::BlockWithProofs =
                 ethash_proof::read_block(&*{
                     let mut data = dir.clone();
-                    data.push(&*format!("mainnet-400{:3}.json", n));
+                    data.push(&*format!("mainnet-400{:03}.json", n));
                     data
                 });
-            println!(
-                "ring size: {}, full: {}, current block short no: {}",
-                data.headers.len(),
-                data.full,
-                n
-            );
+            {
+                let raw_data = accounts[0]
+                    .try_borrow_data()
+                    .map_err(TestError::ProgError)?;
+                let data = interp(&*raw_data).map_err(TestError::ProgError)?;
+                println!(
+                    "ring size: {}, full: {}, current block short no: {}",
+                    data.headers.len(),
+                    data.full,
+                    n
+                );
+            }
             {
                 let header_4000xx: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
                 let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
@@ -133,6 +134,11 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                     .map_err(TestError::ProgError)?;
             }
         }
+
+        let raw_data = accounts[0]
+            .try_borrow_data()
+            .map_err(TestError::ProgError)?;
+        let data = interp(&*raw_data).map_err(TestError::ProgError)?;
 
         assert_eq!(block_count % data.headers.len(), data.offset);
         assert_eq!(400000 - 1 + block_count as u64, data.height);

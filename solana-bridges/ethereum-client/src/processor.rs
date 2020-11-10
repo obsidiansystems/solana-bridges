@@ -85,7 +85,7 @@ pub fn process_instruction<'a>(
                     let parent =
                         read_prev_block_mut(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
                     parent.elements.0[(n / 4) as usize][(n % 4) as usize].value = *ppe.element;
-                    if n < 128 {
+                    if n < 127 {
                         // do nothing but increment
                         Some(n + 1)
                     } else {
@@ -174,7 +174,9 @@ pub fn write_new_block(
     if data.ethash_elements.is_some() {
         panic!("expected PoW element for previous block, but we're trying to write a new block")
     }
-    write_new_block_unvalidated(data, header, old_total_difficulty_opt)
+    write_new_block_unvalidated(data, header, old_total_difficulty_opt)?;
+    data.ethash_elements = Some(0);
+    Ok(())
 }
 
 
