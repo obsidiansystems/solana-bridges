@@ -10,13 +10,15 @@ use crate::{
     prove::*,
 };
 
-use std::{cell::RefCell, collections::HashMap, ops::Deref, rc::Rc, str::FromStr};
+use std::{cell::RefCell, collections::HashMap, path::Path, ops::Deref, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
 use ethereum_types::{Bloom, H160, H256, H64, U256};
 use rlp::{Decodable, DecoderError, Rlp, RlpStream};
 use solana_sdk::clock::Epoch;
+
+mod ethash_proof;
 
 mod blocks;
 mod relayer_runs;
@@ -64,44 +66,73 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
     with_account(&mut *raw_data, |account| {
         let accounts = vec![account];
 
-        let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-        process_instruction(&program_id, &accounts, &instruction_noop)
-            .map_err(TestError::ProgError)?;
-
-        {
-            let header_400000: BlockHeader = decode_rlp(HEADER_400000)?;
-            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
-                header: Box::new(header_400000),
-                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
-            }))
-            .pack();
-            process_instruction(&program_id, &accounts, &instruction_init)
-                .map_err(TestError::ProgError)?;
-        }
-
-        for n in 1..block_count {
-            {
-                let r = accounts[0].data.try_borrow().unwrap();
-                let data = interp(&*r).map_err(TestError::ProgError)?;
-                println!(
-                    "ring size: {}, full: {}, current block short no: {}",
-                    data.headers.len(),
-                    data.full,
-                    n
-                );
-            }
-            let header_4000xx = decode_rlp(HEADER_4000XX[n])?;
-            let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
-                header: header_4000xx,
-            })).pack();
-            process_instruction(&program_id, &accounts, &instruction_new)
-                .map_err(TestError::ProgError)?;
-        }
-
         let raw_data = accounts[0]
             .try_borrow_data()
             .map_err(TestError::ProgError)?;
         let data = interp(&*raw_data).map_err(TestError::ProgError)?;
+
+        let instruction_noop: Vec<u8> = Instruction::Noop.pack();
+        process_instruction(&program_id, &accounts, &instruction_noop)
+            .map_err(TestError::ProgError)?;
+
+        let dir = Path::new(file!()).parent().unwrap().parent().unwrap().join("data/ethash-proof");
+        {
+            let blocks_with_proofs: ethash_proof::BlockWithProofs =
+                ethash_proof::read_block(&*{
+                    let mut data = dir.clone();
+                    data.push("mainnet-400000.json");
+                    data
+                });
+            {
+                let header_400000: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
+                let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                    header: Box::new(header_400000),
+                    total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+                }))
+                    .pack();
+                process_instruction(&program_id, &accounts, &instruction_init)
+                    .map_err(TestError::ProgError)?;
+            }
+            for h in blocks_with_proofs.elements_512() {
+                let instruction_init: Vec<u8> = Instruction::ProvidePowElement(Box::new(ProvidePowElement {
+                    element: Box::new(h),
+                }))
+                    .pack();
+                process_instruction(&program_id, &accounts, &instruction_init)
+                    .map_err(TestError::ProgError)?;
+            }
+        }
+
+        for n in 1..block_count {
+            let blocks_with_proofs: ethash_proof::BlockWithProofs =
+                ethash_proof::read_block(&*{
+                    let mut data = dir.clone();
+                    data.push(&*format!("mainnet-400{:3}.json", n));
+                    data
+                });
+            println!(
+                "ring size: {}, full: {}, current block short no: {}",
+                data.headers.len(),
+                data.full,
+                n
+            );
+            {
+                let header_4000xx: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
+                let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
+                    header: Box::new(header_4000xx),
+                })).pack();
+                process_instruction(&program_id, &accounts, &instruction_new)
+                    .map_err(TestError::ProgError)?;
+            }
+            for h in blocks_with_proofs.elements_512() {
+                let instruction_init: Vec<u8> = Instruction::ProvidePowElement(Box::new(ProvidePowElement {
+                    element: Box::new(h),
+                }))
+                    .pack();
+                process_instruction(&program_id, &accounts, &instruction_init)
+                    .map_err(TestError::ProgError)?;
+            }
+        }
 
         assert_eq!(block_count % data.headers.len(), data.offset);
         assert_eq!(400000 - 1 + block_count as u64, data.height);

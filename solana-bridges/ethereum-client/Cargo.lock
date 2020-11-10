@@ -1607,6 +1607,8 @@ dependencies = [
  "quickcheck_macros",
  "rlp",
  "rlp-derive",
+ "serde",
+ "serde_json",
  "solana-sdk",
  "tiny-keccak",
 ]
