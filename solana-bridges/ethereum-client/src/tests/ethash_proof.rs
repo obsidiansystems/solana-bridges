@@ -38,13 +38,33 @@ pub struct RootsCollection {
     pub dag_merkle_roots: Vec<H128>,
 }
 
+trait HashExt {
+    fn from_slice_extend(s: &[u8]) -> Self;
+}
+
+macro_rules! impl_from_slice_extend {
+	  ( $name:ident ) => {
+        impl HashExt for $name {
+            fn from_slice_extend(s: &[u8]) -> $name {
+                let mut res = $name::zero();
+                assert!(s.len() <= $name::len_bytes());
+                res.0[$name::len_bytes() - s.len() ..].copy_from_slice(s);
+                res
+            }
+        }
+    }
+}
+
+impl_from_slice_extend! { H128 }
+impl_from_slice_extend! { H256 }
+
 impl From<RootsCollectionRaw> for RootsCollection {
     fn from(item: RootsCollectionRaw) -> Self {
         Self {
             dag_merkle_roots: item
                 .dag_merkle_roots
                 .iter()
-                .map(|e| H128::from_slice(&*e.0))
+                .map(|e| H128::from_slice_extend(&*e.0))
                 .collect(),
         }
     }
@@ -73,12 +93,12 @@ impl From<BlockWithProofsRaw> for BlockWithProofs {
         Self {
             proof_length: item.proof_length,
             header_rlp: item.header_rlp.0,
-            merkle_root: H128::from_slice(&*item.merkle_root.0),
-            elements: item.elements.iter().map(|e| H256::from_slice(&*e.0)).collect(),
+            merkle_root: H128::from_slice_extend(&*item.merkle_root.0),
+            elements: item.elements.iter().map(|e| H256::from_slice_extend(&*e.0)).collect(),
             merkle_proofs: item
                 .merkle_proofs
                 .iter()
-                .map(|e| H128::from_slice(&*e.0))
+                .map(|e| H128::from_slice_extend(&*e.0))
                 .collect(),
         }
     }

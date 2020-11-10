@@ -533,7 +533,6 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
         ri.elements.0[i / 4][i % 4].value = h;
     }
 
-
     return match verify_pow_indexes(&mut ri) {
         true => Ok (()),
         false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
