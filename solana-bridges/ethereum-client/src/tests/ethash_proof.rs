@@ -42,6 +42,7 @@ trait HashExt {
     fn from_slice_extend(s: &[u8]) -> Self;
 }
 
+// Also handles converting the endianness
 macro_rules! impl_from_slice_extend {
 	  ( $name:ident ) => {
         impl HashExt for $name {
@@ -49,6 +50,7 @@ macro_rules! impl_from_slice_extend {
                 let mut res = $name::zero();
                 assert!(s.len() <= $name::len_bytes());
                 res.0[$name::len_bytes() - s.len() ..].copy_from_slice(s);
+                res.0.reverse();
                 res
             }
         }
