@@ -531,9 +531,10 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
     let mut i = 0;
     for h in blocks_with_proofs.elements_512() {
         ri.elements.0[i / 4][i % 4].value = h;
+        i += 1;
     }
 
-    return match verify_pow_indexes(&mut ri) {
+    match verify_pow_indexes(&mut ri) {
         true => Ok (()),
         false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
     }
