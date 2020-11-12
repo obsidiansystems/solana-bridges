@@ -1,9 +1,9 @@
 // Code taken from https://github.com/near/rainbow-bridge
 
 //use crate::{DoubleNodeWithMerkleProof, EthClient};
-use ethereum_types::{H128, H160, H256, H512, H64, U256};
+use arrayref::mut_array_refs;
+use ethereum_types::{H128, H256, H512};
 use hex::FromHex;
-use rlp::RlpStream;
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
 
@@ -15,7 +15,7 @@ impl<'de> Deserialize<'de> for Hex {
     where
         D: Deserializer<'de>,
     {
-        let mut s = <String as Deserialize>::deserialize(deserializer)?;
+        let mut s: String = Deserialize::deserialize(deserializer)?;
         if s.starts_with("0x") {
             s = s[2..].to_string();
         }
@@ -118,8 +118,11 @@ fn combine_dag_h256_to_h512<'a>(elements: &'a [H256]) -> impl Iterator<Item = H5
         .filter(|(i, _)| i % 2 == 0)
         .map(|(_, (a, b))| {
             let mut buffer = H512::zero();
-            buffer.0[..32].copy_from_slice(&a.0);
-            buffer.0[32..].copy_from_slice(&b.0);
+            {
+                let (a_r, b_r) = mut_array_refs!(&mut buffer.0, 32, 32);
+                *a_r = a.0;
+                *b_r = b.0;
+            }
             buffer
         })
 }

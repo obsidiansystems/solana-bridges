@@ -1,7 +1,14 @@
 #![cfg(feature = "program")]
 
+use arrayref::{
+    array_ref,
+    mut_array_refs,
+};
+use ethereum_types::{H128, H256};
+
 use crate::{
     eth::*,
+    epoch_roots::EPOCH_ROOTS,
     instruction::*,
     ledger_ring_buffer::*,
     pow_proof::*,
@@ -12,6 +19,7 @@ use crate::{
 use rlp::Rlp;
 
 use solana_sdk::{
+    hash::hash as sha256,
     account_info::{next_account_info, AccountInfo},
     entrypoint_deprecated::ProgramResult,
     info,
@@ -80,7 +88,7 @@ pub fn process_instruction<'a>(
                 Some(n) => {
                     let parent = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
-                    parent.elements.0[(n / 4) as usize][(n % 4) as usize].value = *ppe.element;
+                    parent.elements[n].value = *ppe.element;
                     if n < 127 {
                         // do nothing but increment
                         Some(n + 1)
@@ -144,6 +152,9 @@ pub fn process_instruction<'a>(
             if max_h <= challenge.height {
                 panic!("too new {} {}", max_h, challenge.height)
             }
+
+            // Check that we've actually run the PoW for this one
+
             let offset =
                 lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
             let block =
@@ -152,11 +163,81 @@ pub fn process_instruction<'a>(
                 return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
             }
 
-            if challenge.element_index >= 128 {
-                panic!("element must be between 0 and 128")
+            if challenge.element_index >= 64 {
+                panic!("element pair index must be between 0 and 64")
             }
+
+            let challenged_0 = &block.elements[challenge.element_index * 2];
+            let challenged_1 = &block.elements[challenge.element_index * 2 + 1];
+
+            // Make sure addresses are in the form (n, n + 1) (failure would
+            // indicate contract bug not bad input.)
+            if challenged_0.address + 1 != challenged_1.address {
+                panic!("non-consecutive addresses")
+            }
+
+            let found = Box::new(ElementPair {
+                e0: challenged_0.value,
+                e1: challenged_1.value,
+            });
+
+            if challenge.element_pair == found {
+                panic!("challenger is trying to confirm not refute validity");
+            }
+
+            let merkel_root = EPOCH_ROOTS[(challenge.height / EPOCH_LENGTH) as usize];
+
+            let calculated_root = apply_merkle_proof(
+                &challenge.element_pair,
+                &*challenge.merkle_spine,
+                challenged_0.address);
+
+            if calculated_root != merkel_root {
+                panic!("roots don't match, challenge is invalid")
+            }
+
+            // TODO self destruct and give funds to challenger.
+            give_bounty_to_challenger()
         }
     })
+}
+
+pub fn give_bounty_to_challenger() {
+    unimplemented!()
+}
+
+pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
+
+    fn truncate_to_h128(arr: H256) -> H128 {
+        H128(*array_ref!(&arr.0, 16, 16))
+    }
+
+    fn hash_h128(l: H128, r: H128) -> H128 {
+        let mut data = [0u8; 64];
+        let (_, l_dst, _, r_dst) = mut_array_refs!(&mut data, 16, 16, 16, 16);
+        *l_dst = l.0;
+        *r_dst = r.0;
+        truncate_to_h128(H256(sha256(&data).0))
+    }
+
+    let mut accum = {
+        let mut data = [0u8; 128];
+        {
+            let (low_dst, high_dst) = mut_array_refs!(&mut data, 64, 64);
+            *low_dst  = elems.e0.0;
+            *high_dst = elems.e1.0;
+        }
+        truncate_to_h128(sha256(&data).0.into())
+    };
+
+    for (i, &sibling) in merkle_spine.iter().enumerate() {
+        if (index >> i as u64) % 2 == 0 {
+            accum = hash_h128(accum, sibling);
+        } else {
+            accum = hash_h128(sibling, accum);
+        }
+    }
+    accum
 }
 
 pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {

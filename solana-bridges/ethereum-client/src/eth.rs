@@ -9,6 +9,8 @@ use crate::types::*;
 
 pub const EXTRA_DATA_MAX_LEN: usize = 32;
 
+pub const EPOCH_LENGTH: u64 = 30000;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ExtraData {
     len: u8,
@@ -210,7 +212,6 @@ where
     F: FnMut(u32) -> H512,
 {
     use ethash::*;
-    const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
     let full_size = get_full_size(epoch);
 

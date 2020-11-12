@@ -10,7 +10,7 @@ use crate::{
     prove::*,
 };
 
-use std::{cell::RefCell, collections::HashMap, ops::Deref, path::Path, rc::Rc, str::FromStr};
+use std::{cell::RefCell, ops::Deref, path::Path, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
@@ -157,7 +157,6 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
 pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, Vec<(u32, H512)>) {
     use ethash::*;
-    const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
     let seed = get_seedhash(epoch);
     let cache_size = get_cache_size(epoch);
@@ -557,7 +556,7 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
 
     let mut i = 0;
     for h in blocks_with_proofs.elements_512() {
-        ri.elements.0[i / 4][i % 4].value = h;
+        ri.elements[i].value = h;
         i += 1;
     }
 

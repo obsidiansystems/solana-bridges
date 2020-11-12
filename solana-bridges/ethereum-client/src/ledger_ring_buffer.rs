@@ -8,7 +8,7 @@ use ethereum_types::U256;
 
 use crate::{
     eth::BlockHeader,
-    pow_proof::{AccessedElement, AccessedElements},
+    pow_proof::AccessedElements,
 };
 
 pub const BLOCKS_OFFSET: usize = mem::size_of::<usize>() + mem::size_of::<u64>() + 8; // TODO better
