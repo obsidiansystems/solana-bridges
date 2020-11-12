@@ -1,6 +1,7 @@
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NumDecimals #-}
@@ -27,6 +28,7 @@ import Control.Monad.Trans (lift)
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
+import Data.Aeson.Types (Parser, explicitParseField, listParser)
 import Data.Bits
 import Data.ByteArray.HexString
 import Data.Default (def)
@@ -35,11 +37,13 @@ import Data.Foldable
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
 import Data.Maybe(fromMaybe)
+import Data.Semigroup (stimesMonoid)
 import Data.Solidity.Prim.Address (Address)
 import Data.String (IsString)
 import Data.Text (Text)
 import Data.Void (Void)
 import Data.Word
+import GHC.Generics (Generic)
 import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
@@ -58,6 +62,7 @@ import qualified Data.Binary.Get as Binary
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
@@ -527,6 +532,55 @@ data ContractConfig = ContractConfig
  , _contractConfig_accountId :: Text
  , _contractConfig_loopStart :: Maybe Word64
  } deriving (Show, Eq, Ord)
+
+data EthashData = EthashData
+  { _ethashData_header :: HexString
+  , _ethashData_merkleRoot :: HexString
+  , _ethashData_proofLength :: Word
+  , _ethashData_elements :: [HexString]
+  , _ethashData_merkleProofs :: [HexString]
+  } deriving (Show, Eq, Ord, Generic)
+
+instance FromJSON EthashData where
+    parseJSON = withObject "EthashData" $ \v -> EthashData
+        <$> explicitParseField parseHex v "header_rlp"
+        <*> explicitParseField parseHex v "merkle_root"
+        <*> v .: "proof_length"
+        <*> explicitParseField (listParser parseHex) v "elements"
+        <*> explicitParseField (listParser parseHex) v "merkle_proofs"
+      where
+        parseHex :: Value -> Parser HexString
+        parseHex = withText "hex" $ fmap reverseEndianness . parseJSON . String . pad . T.drop 2
+
+        reverseEndianness :: HexString -> HexString
+        reverseEndianness = HexString . BS.reverse . unHexString
+
+        pad :: Text -> Text
+        pad x =
+          let size = max 0 (64 - T.length x)
+          in stimesMonoid size "0" <> x
+
+getEthashElements :: Word64 -> IO (Either Text [HexString])
+getEthashElements blockHeight = runExceptT $ do
+  liftIO $ putStrLn $ "Getting ethash proof data for block " <> show blockHeight
+  output <- liftIO $ readProcess ethashproofRelayerPath [show blockHeight] ""
+  ethashData <- case eitherDecode' $ LBS.fromStrict $ BSC.dropWhile (/= '{') $ BSC.pack output of
+    Left err -> throwError $ T.pack err
+    Right d -> pure d
+  let elems = _ethashData_elements ethashData
+      len = length elems
+      paired = fmap snd
+               $ filter (\(x, _) -> x `mod` 2 == 0)
+               $ zip [(0 :: Int)..]
+               $ zip elems (tail elems)
+  when (len /= 256) $ throwError $ "Invalid length: " <> T.pack (show len)
+  pure $ flip fmap paired $ \(x,y) -> x <> y
+
+ethashproofCachePath :: FilePath
+ethashproofCachePath = $(staticWhich "cache")
+
+ethashproofRelayerPath :: FilePath
+ethashproofRelayerPath = $(staticWhich "relayer")
 
 solcPath :: FilePath
 solcPath = $(staticWhich "solc")

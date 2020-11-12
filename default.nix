@@ -17,7 +17,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool ethashproof] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = doJailbreak (dontCheck (self.callCabal2nix "web3" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
@@ -218,7 +218,7 @@ let
   ethereum-client-src = gitignoreSource ./solana-bridges/ethereum-client;
 
   # Cargo hash must be updated when Cargo.lock file changes.
-  ethereum-client-dep-sha256 = "0j4lfp20rvdnx8gnp2qqi789z3mzlkmzqpijpgy93xy4q3y1z5ar";
+  ethereum-client-dep-sha256 = "1lgp9imanv9nywmxacq51937hzxrw8mlqvyv1wwbqkfpyci9i6mq";
   ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
     name = "ethereum-client";
     src = ethereum-client-src;
