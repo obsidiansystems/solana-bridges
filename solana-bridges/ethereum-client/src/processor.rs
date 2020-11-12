@@ -1,6 +1,10 @@
 #![cfg(feature = "program")]
 
-pub use ethereum_types::{H128, H256};
+use arrayref::{
+    array_ref,
+    mut_array_refs,
+};
+use ethereum_types::{H128, H256};
 
 use crate::{
     eth::*,
@@ -208,23 +212,26 @@ pub fn give_bounty_to_challenger() {
 pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
 
     fn truncate_to_h128(arr: H256) -> H128 {
-        let mut data = H128::zero();
-        data.0.copy_from_slice(&arr.0[16..]);
-        data
+        H128(*array_ref!(&arr.0, 16, 16))
     }
 
     fn hash_h128(l: H128, r: H128) -> H128 {
         let mut data = [0u8; 64];
-        data[16..32].copy_from_slice(&l.0);
-        data[48..64].copy_from_slice(&r.0);
+        let (_, l_dst, _, r_dst) = mut_array_refs!(&mut data, 16, 16, 16, 16);
+        *l_dst = l.0;
+        *r_dst = r.0;
         truncate_to_h128(H256(sha256(&data).0))
     }
 
-    let mut data = [0u8; 128];
-    data[..64].copy_from_slice(&elems.e0.0);
-    data[64..].copy_from_slice(&elems.e1.0);
-
-    let mut accum = truncate_to_h128(sha256(&data).0.into());
+    let mut accum = {
+        let mut data = [0u8; 128];
+        {
+            let (low_dst, high_dst) = mut_array_refs!(&mut data, 64, 64);
+            *low_dst  = elems.e0.0;
+            *high_dst = elems.e1.0;
+        }
+        truncate_to_h128(sha256(&data).0.into())
+    };
 
     for (i, &sibling) in merkle_spine.iter().enumerate() {
         if (index >> i as u64) % 2 == 0 {
