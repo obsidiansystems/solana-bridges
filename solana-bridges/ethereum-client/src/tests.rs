@@ -14,7 +14,7 @@ use std::{cell::RefCell, ops::Deref, path::Path, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
-use ethereum_types::{Bloom, H160, H256, H64, U256};
+use ethereum_types::{Bloom, H160, H256, H64, H512, U256};
 use rlp::{Decodable, DecoderError, Rlp, RlpStream};
 use solana_sdk::clock::Epoch;
 
@@ -155,7 +155,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
 pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, Vec<(u32, H512)>) {
     use ethash::*;
-    let epoch = (header.number / EPOCH_LENGTH) as usize;
+    let epoch = height_to_epoch(header.number) as usize;
     let seed = get_seedhash(epoch);
     let cache_size = get_cache_size(epoch);
 
@@ -552,20 +552,15 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
         elements: DUMMY_ELEMS,
     };
 
-    let mut i = 0;
-    for h in blocks_with_proofs.elements_512() {
-        ri.elements[i].value = h;
-        i += 1;
+    for (i, h) in blocks_with_proofs.elements_512().enumerate() {
+        ri.elements[i as u8].value = h;
     }
 
     //println!("{:#?}", ri);
 
-    match verify_pow_indexes(&mut ri) {
-        true => Ok(()),
-        false => Err(TestError::ProgError(
-            CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error(),
-        )),
-    }
+    assert!(verify_pow_indexes(&mut ri));
+
+    Ok(())
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {

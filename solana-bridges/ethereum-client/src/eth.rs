@@ -207,12 +207,16 @@ pub fn verify_block(header: &BlockHeader, parent: Option<&BlockHeader>) -> Resul
     Ok(())
 }
 
+pub fn height_to_epoch(h: u64) -> u64 {
+    h / EPOCH_LENGTH
+}
+
 pub fn verify_pow<F>(header: &BlockHeader, lookup: F) -> bool
 where
     F: FnMut(u32) -> H512,
 {
     use ethash::*;
-    let epoch = (header.number / EPOCH_LENGTH) as usize;
+    let epoch = height_to_epoch(header.number) as usize;
     let full_size = get_full_size(epoch);
 
     let (_mix_hash, result) =

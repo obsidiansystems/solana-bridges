@@ -1,30 +1,24 @@
 #![cfg(feature = "program")]
 
-use arrayref::{
-    array_ref,
-    mut_array_refs,
-};
-use ethereum_types::{H128, H256};
-
-use crate::{
-    eth::*,
-    epoch_roots::EPOCH_ROOTS,
-    instruction::*,
-    ledger_ring_buffer::*,
-    pow_proof::*,
-    prove::*,
-    types::*,
-};
+use ethereum_types::U256;
 
 use rlp::Rlp;
 
 use solana_sdk::{
-    hash::hash as sha256,
     account_info::{next_account_info, AccountInfo},
     entrypoint_deprecated::ProgramResult,
     info,
     program_error::ProgramError,
     pubkey::Pubkey,
+};
+
+use crate::{
+    eth::*,
+    instruction::*,
+    ledger_ring_buffer::*,
+    pow_proof::*,
+    prove::*,
+    types::*,
 };
 
 pub fn process_instruction<'a>(
@@ -184,14 +178,13 @@ pub fn process_instruction<'a>(
                 panic!("challenger is trying to confirm not refute validity");
             }
 
-            let merkel_root = EPOCH_ROOTS[(challenge.height / EPOCH_LENGTH) as usize];
-
-            let calculated_root = apply_merkle_proof(
+            let proof_is_valid = check_pow_element_merkle_proof(
+                challenge.height,
                 &challenge.element_pair,
                 &*challenge.merkle_spine,
                 challenged_0.address);
 
-            if calculated_root != merkel_root {
+            if !proof_is_valid {
                 panic!("roots don't match, challenge is invalid")
             }
 
@@ -203,50 +196,6 @@ pub fn process_instruction<'a>(
 
 pub fn give_bounty_to_challenger() {
     unimplemented!()
-}
-
-pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
-
-    fn truncate_to_h128(arr: H256) -> H128 {
-        H128(*array_ref!(&arr.0, 16, 16))
-    }
-
-    fn hash_h128(l: H128, r: H128) -> H128 {
-        let mut data = [0u8; 64];
-        let (_, l_dst, _, r_dst) = mut_array_refs!(&mut data, 16, 16, 16, 16);
-        *l_dst = l.0;
-        *r_dst = r.0;
-        truncate_to_h128(H256(sha256(&data).0))
-    }
-
-    let mut accum = {
-        let mut data = [0u8; 128];
-        {
-            let (low_dst, high_dst) = mut_array_refs!(&mut data, 64, 64);
-            *low_dst  = elems.e0.0;
-            *high_dst = elems.e1.0;
-        }
-        truncate_to_h128(sha256(&data).0.into())
-    };
-
-    for (i, &sibling) in merkle_spine.iter().enumerate() {
-        if (index >> i as u64) % 2 == 0 {
-            accum = hash_h128(accum, sibling);
-        } else {
-            accum = hash_h128(sibling, accum);
-        }
-    }
-    accum
-}
-
-pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
-    let mut iter = ri.elements.0.iter_mut().flat_map(|x| x.iter_mut());
-    verify_pow(&ri.header, |wanted_addr| {
-        let a = iter.next().unwrap();
-        // Set for challengers, now that we know what it is.
-        a.address = wanted_addr;
-        a.value
-    })
 }
 
 pub fn write_new_block(
