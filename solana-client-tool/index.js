@@ -186,6 +186,14 @@ async function newBlock(argv) {
         isWritable: true
     };
 }
+async function provideEthashElement(argv) {
+    const instructionData = Buffer.from("03" + argv.element, argv.elementEncoding);
+    return {
+        instructionData,
+        isSigner: false,
+        isWritable: true
+    };
+}
 
 async function doInclusionProof(argv) {
     logger.log("args", argv);
@@ -313,6 +321,12 @@ yargs
             , 'instruction-encoding': {default: 'hex'}
             })
         , callCmd(doCall(newBlock)))
+    .command('provide-ethash-element', 'provide ethash element'
+        , (yargv) => commandArgs(yargv).options(
+            { 'element': {demand: true}
+              , 'element-encoding': {default: 'hex'}
+            })
+        , callCmd(doCall(provideEthashElement)))
 
     .command('inclusion-proof', 'inclusion proof'
         , (yargv) => yargv.options(

@@ -341,6 +341,13 @@ createContract fromAddr hex = Eth.Call
     , callNonce = Nothing
     }
 
+data SolanaClientState = SolanaClientState
+  { _solanaClientState_height :: Word64
+  , _solanaClientState_offset :: Word64
+  , _solanaClientState_full :: Word8 --Bool
+  , _solanaClientState_ethashElements :: Maybe Word8
+  } deriving (Eq, Ord, Show, Generic)
+
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
 relayEthereumToSolana configFile config = do
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
@@ -349,15 +356,29 @@ relayEthereumToSolana configFile config = do
         , "--output", "json"
         ]
 
-  (highestBlock, nextBlockOffset, isFull) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+      getSolanaClientState = SolanaClientState
+        <$> Binary.getWord64le
+        <*> Binary.getWord64le
+        <*> Binary.getWord8
+        <*> getElements
+        where
+          getElements = do
+            tag <- Binary.getWord8
+            if tag == 1
+              then Just <$> Binary.getWord8
+              else pure Nothing
+
+  client@(SolanaClientState highestBlock nextBlockOffset isFull ethashElementCount) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
     (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
       x :: Value <- eitherDecode' accountData
       x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
       () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
       x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ Binary.runGetOrFail ((,,) <$> Binary.getWord64le <*> Binary.getWord64le <*> Binary.getWord8) $ LBS.fromStrict x2
+      bimap (view _3) (view _3) $ Binary.runGetOrFail getSolanaClientState $ LBS.fromStrict x2
 
     bad -> error $ show bad
+
+  print client
 
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
         (0, 0, 0) -> Nothing
@@ -378,6 +399,39 @@ relayEthereumToSolana configFile config = do
               case res of
                 Left e -> fail $ show e
                 Right res' -> pure res'
+
+            bridgeToolProc command args =
+              proc solanaBridgeToolPath $ fmap T.unpack $
+                 [ command
+                 , "--config", T.pack configFile
+                 -- , "--payer", "/dev/null"
+                 ] <> args
+
+            relayEthashElements :: [HexString] -> IO ()
+            relayEthashElements elems = for_ ethashElementCount $ \count -> do
+              let previouslySent = fromIntegral count
+              ifor_ (drop previouslySent elems) $ \idx e -> do
+                let
+                  d = RLP.RLPArray [RLP.RLPString $ unHexString e]
+                  dataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize d
+                  p = bridgeToolProc "provide-ethash-element"
+                    ["--element", dataHex]
+
+                putStrLn $ "Providing ethash element #" <> show (previouslySent + idx) <> ": " <> show e
+                readCreateProcessWithExitCode p "" >>= \case
+                  (ExitSuccess, txn, _) -> putStrLn txn
+                  bad -> error $ show bad
+                pure ()
+
+              pure ()
+
+        -- Ensure we can supply ethash elements before relaying anything
+        elems <- getEthashElements n >>= \case
+          Left err -> error (T.unpack err)
+          Right ee -> pure ee
+
+        relayEthashElements elems
+
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing
           True -> fmap (Just . Eth.blockTotalDifficulty) $
@@ -393,12 +447,9 @@ relayEthereumToSolana configFile config = do
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
         T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
-        let p = (proc solanaBridgeToolPath $ T.unpack <$>
-                  [ (if n == loopStart then "initialize" else "new-block")
-                  , "--config", T.pack configFile
-                  -- , "--payer", "/dev/null"
-                  , "--instruction", instructionDataHex
-                  ])
+        let p = bridgeToolProc (if n == loopStart then "initialize" else "new-block")
+              ["--instruction", instructionDataHex]
+
         readCreateProcessWithExitCode p "" >>= \case
           (ExitSuccess, txn, _) -> putStrLn txn
           bad -> error $ show bad
