@@ -83,17 +83,15 @@ struct BlockWithProofsRaw {
 
 #[derive(Debug, Deserialize)]
 pub struct BlockWithProofs {
-    pub proof_length: u64,
     pub header_rlp: Vec<u8>,
     pub merkle_root: H128,
     pub elements: Vec<H256>,
-    pub merkle_proofs: Vec<H128>,
+    pub merkle_proofs: Vec<Vec<H128>>,
 }
 
 impl From<BlockWithProofsRaw> for BlockWithProofs {
     fn from(item: BlockWithProofsRaw) -> Self {
         Self {
-            proof_length: item.proof_length,
             header_rlp: item.header_rlp.0,
             merkle_root: H128::from_slice_extend(&*item.merkle_root.0),
             elements: item
@@ -103,8 +101,8 @@ impl From<BlockWithProofsRaw> for BlockWithProofs {
                 .collect(),
             merkle_proofs: item
                 .merkle_proofs
-                .iter()
-                .map(|e| H128::from_slice_extend(&*e.0))
+                .chunks(item.proof_length as usize)
+                .map(|s| s.iter().map(|e| H128::from_slice_extend(&*e.0)).collect())
                 .collect(),
         }
     }

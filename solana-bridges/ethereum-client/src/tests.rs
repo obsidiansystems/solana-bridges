@@ -78,13 +78,13 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             .unwrap()
             .join("data/ethash-proof");
         {
-            let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+            let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
                 let mut data = dir.clone();
                 data.push("mainnet-400000.json");
                 data
             });
             {
-                let header_400000: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
+                let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
                 let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                     header: Box::new(header_400000),
                     total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
@@ -93,7 +93,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 process_instruction(&program_id, &accounts, &instruction_init)
                     .map_err(TestError::ProgError)?;
             }
-            for h in blocks_with_proofs.elements_512() {
+            for h in block_with_proofs.elements_512() {
                 let instruction_pow: Vec<u8> =
                     Instruction::ProvidePowElement(Box::new(ProvidePowElement {
                         element: Box::new(h),
@@ -105,7 +105,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         }
 
         for n in 1..block_count {
-            let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+            let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
                 let mut data = dir.clone();
                 data.push(&*format!("mainnet-400{:03}.json", n));
                 data
@@ -123,13 +123,13 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 );
             }
             {
-                let header_4000xx: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
+                let header_4000xx: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
                 let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(header_4000xx))
                     .pack();
                 process_instruction(&program_id, &accounts, &instruction_new)
                     .map_err(TestError::ProgError)?;
             }
-            for h in blocks_with_proofs.elements_512() {
+            for h in block_with_proofs.elements_512() {
                 let instruction_pow: Vec<u8> =
                     Instruction::ProvidePowElement(Box::new(ProvidePowElement {
                         element: Box::new(h),
@@ -540,7 +540,7 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
         .parent()
         .unwrap()
         .join("data/ethash-proof");
-    let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
         let mut data = dir.clone();
         data.push("mainnet-400000.json");
         data
@@ -548,17 +548,58 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
 
     let mut ri = RingItem {
         total_difficulty: U256::zero(),
-        header: decode_rlp(&*blocks_with_proofs.header_rlp)?,
+        header: decode_rlp(&*block_with_proofs.header_rlp)?,
         elements: DUMMY_ELEMS,
     };
 
-    for (i, h) in blocks_with_proofs.elements_512().enumerate() {
+    for (i, h) in block_with_proofs.elements_512().enumerate() {
         ri.elements[i as u8].value = h;
     }
 
     //println!("{:#?}", ri);
 
     assert!(verify_pow_indexes(&mut ri));
+
+    Ok(())
+}
+
+#[test]
+pub fn test_pow_element_proof() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut ri = RingItem {
+        total_difficulty: U256::zero(),
+        header: decode_rlp(&*block_with_proofs.header_rlp)?,
+        elements: DUMMY_ELEMS,
+    };
+
+    for (i, h) in block_with_proofs.elements_512().enumerate() {
+        ri.elements[i as u8].value = h;
+    }
+
+    //println!("{:#?}", ri);
+
+    let wanted_merkle_root = get_wanted_merkle_root(ri.header.number);
+
+    let got_merkle_root = apply_pow_element_merkle_proof(
+        &ElementPair {
+            e0: ri.elements[0].value,
+            e1: ri.elements[1].value,
+        },
+        &*block_with_proofs.merkle_proofs[0],
+        ri.elements[0].address);
+
+    assert_eq!(got_merkle_root, wanted_merkle_root);
 
     Ok(())
 }

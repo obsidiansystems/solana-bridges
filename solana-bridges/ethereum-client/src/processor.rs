@@ -178,13 +178,15 @@ pub fn process_instruction<'a>(
                 panic!("challenger is trying to confirm not refute validity");
             }
 
-            let proof_is_valid = check_pow_element_merkle_proof(
-                challenge.height,
+            let wanted_merkle_root = get_wanted_merkle_root(challenge.height);
+
+            let got_merkle_root = apply_pow_element_merkle_proof(
                 &challenge.element_pair,
                 &*challenge.merkle_spine,
-                challenged_0.address);
+                challenged_0.address,
+            );
 
-            if !proof_is_valid {
+            if got_merkle_root != wanted_merkle_root {
                 panic!("roots don't match, challenge is invalid")
             }
 

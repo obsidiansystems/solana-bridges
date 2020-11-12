@@ -73,12 +73,8 @@ pub fn apply_pow_element_merkle_proof(elems: &ElementPair, merkle_spine: &[H128]
     accum
 }
 
-pub fn check_pow_element_merkle_proof(height: u64, elems: &ElementPair, merkle_spine: &[H128], index: u32) -> bool {
-    let merkel_root = EPOCH_ROOTS[height_to_epoch(height) as usize];
-
-    let calculated_root = apply_pow_element_merkle_proof(elems, merkle_spine, index);
-
-    calculated_root == merkel_root
+pub fn get_wanted_merkle_root(height: u64) -> H128 {
+    EPOCH_ROOTS[height_to_epoch(height) as usize]
 }
 
 pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
