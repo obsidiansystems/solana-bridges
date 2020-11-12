@@ -124,10 +124,8 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
             }
             {
                 let header_4000xx: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
-                let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
-                    header: Box::new(header_4000xx),
-                }))
-                .pack();
+                let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(header_4000xx))
+                    .pack();
                 process_instruction(&program_id, &accounts, &instruction_new)
                     .map_err(TestError::ProgError)?;
             }

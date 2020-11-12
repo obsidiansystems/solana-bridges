@@ -69,8 +69,7 @@ pub fn process_instruction<'a>(
 
             write_new_block(data, &item.header, Some(&item.total_difficulty))?;
         }
-        Instruction::NewBlock(nb) => {
-            let NewBlock { header } = *nb;
+        Instruction::NewBlock(header) => {
             let mut raw_data = account.try_borrow_mut_data()?;
             let ref mut data = *interp_mut(&mut *raw_data)?;
 

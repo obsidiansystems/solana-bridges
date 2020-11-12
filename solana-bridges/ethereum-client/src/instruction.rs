@@ -18,11 +18,6 @@ pub struct Initialize {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
-pub struct NewBlock {
-    pub header: Box<BlockHeader>,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct ProvidePowElement {
     pub element: Box<H512>,
 }
@@ -59,7 +54,7 @@ pub struct ElementPair {
 pub enum Instruction {
     Noop,
     Initialize(Box<Initialize>),
-    NewBlock(Box<NewBlock>),
+    NewBlock(Box<BlockHeader>),
     ProvidePowElement(Box<ProvidePowElement>),
     ProveInclusion(Box<ProveInclusion>),
     Challenge(Box<Challenge>),
