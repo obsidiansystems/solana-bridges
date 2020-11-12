@@ -79,11 +79,11 @@ verifyProof node contract proof root leaf offset = do
 labels :: [Char]
 labels = "abcdefghijklmnop"
 
-leafs :: ByteString -> [Digest SHA256]
-leafs x = fmap (sha256 . (x <>) . BSC.singleton) labels
+leaves :: ByteString -> [Digest SHA256]
+leaves x = fmap (sha256 . (x <>) . BSC.singleton) labels
 
-subroots :: [Digest SHA256]
-subroots = fmap (merkleParent . leafs . BSC.singleton) labels
+branches :: [Digest SHA256]
+branches = fmap (merkleParent . leaves . BSC.singleton) labels
 
 mkTree :: [Char] -> Tree String
 mkTree ls = Node "" $ flip fmap ls $ \l ->
