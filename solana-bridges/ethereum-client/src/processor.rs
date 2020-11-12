@@ -146,6 +146,9 @@ pub fn process_instruction<'a>(
             if max_h <= challenge.height {
                 panic!("too new {} {}", max_h, challenge.height)
             }
+
+            // Check that we've actually run the PoW for this one
+
             let offset =
                 lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
             let block =
@@ -160,7 +163,11 @@ pub fn process_instruction<'a>(
 
             let merkel_root = get_current_epoch_merkel_root();
 
-            let challengee = get_pow_element(block, challenge.element_index);
+            let element_being_challenged = get_pow_element(block, challenge.element_index);
+
+            if(elements_match(element_being_challenged, )) {
+                panic!("challenger matches challengee") //TODO: Return an actual error
+            }
 
             // Verify that the element provided in the proof doesn't match the one we have (invalid challenge if it matches)
 
@@ -174,6 +181,10 @@ pub fn get_current_epoch_merkel_root() -> H128 {
 }
 
 pub fn get_pow_element(ri: &RingItem, i: u8) -> &AccessedElement {
+    unimplemented!()
+}
+
+pub fn elements_match(a: &AccessedElement, b: &AccessedElement) -> bool {
     unimplemented!()
 }
 
