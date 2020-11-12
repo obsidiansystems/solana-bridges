@@ -18,8 +18,17 @@ pub struct AccessedElement {
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct AccessedElements(pub [[AccessedElement; 4]; 32]);
 
-impl AccessedElements {
-    
+impl std::ops::Index<u8> for AccessedElements {
+    type Output = AccessedElement;
+    fn index(&self, n: u8) -> &Self::Output {
+        &self.0[(n / 4) as usize][(n % 4) as usize]
+    }
+}
+
+impl std::ops::IndexMut<u8> for AccessedElements {
+    fn index_mut(&mut self, n: u8) -> &mut Self::Output {
+        &mut self.0[(n / 4) as usize][(n % 4) as usize]
+    }
 }
 
 // These impls flatten it into a [..; 128]

@@ -82,7 +82,7 @@ pub fn process_instruction<'a>(
                 Some(n) => {
                     let parent = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
-                    parent.elements.0[(n / 4) as usize][(n % 4) as usize].value = *ppe.element;
+                    parent.elements[n].value = *ppe.element;
                     if n < 127 {
                         // do nothing but increment
                         Some(n + 1)
@@ -157,26 +157,40 @@ pub fn process_instruction<'a>(
                 return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
             }
 
-            if challenge.element_index >= 643 {
+            if challenge.element_index >= 64 {
                 panic!("element pair index must be between 0 and 64")
             }
 
+            let challenged_0 = &block.elements[challenge.element_index * 2];
+            let challenged_1 = &block.elements[challenge.element_index * 2 + 1];
+
             // Make sure addresses are in the form (n, n + 1) (failure would
             // indicate contract bug not bad input.)
-            block.ethash_elements;
+            if challenged_0.address + 1 != challenged_1.address {
+                panic!("non-consecutive addresses")
+            }
 
+            let found = Box::new(ElementPair {
+                e0: challenged_0.value,
+                e1: challenged_1.value,
+            });
+
+            if challenge.element_pair == found {
+                panic!("challenger is trying to confirm not refute validity");
+            }
 
             let merkel_root = get_current_epoch_merkel_root();
 
-            let element_being_challenged = get_pow_element(block, challenge.element_index);
+            let calculated_root = apply_merkle_proof(
+                &challenge.element_pair,
+                &*challenge.merkle_spine,
+                challenged_0.address);
 
-            if(elements_match(element_being_challenged, )) {
-                panic!("challenger matches challengee") //TODO: Return an actual error
+            if calculated_root != merkel_root {
+                panic!("roots don't match, challenge is invalid")
             }
 
-            // Verify that the element provided in the proof doesn't match the one we have (invalid challenge if it matches)
-
-            // Start at the element they provided and go up the proof until you get to the epoch root
+            // TODO self destruct and give funds to challenger.
         }
     })
 }
@@ -185,11 +199,7 @@ pub fn get_current_epoch_merkel_root() -> H128 {
     unimplemented!()
 }
 
-pub fn get_pow_element(ri: &RingItem, i: u8) -> &AccessedElement {
-    unimplemented!()
-}
-
-pub fn elements_match(a: &AccessedElement, b: &AccessedElement) -> bool {
+pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
     unimplemented!()
 }
 
