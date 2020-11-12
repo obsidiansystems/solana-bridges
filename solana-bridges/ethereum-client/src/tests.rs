@@ -10,7 +10,7 @@ use crate::{
     prove::*,
 };
 
-use std::{cell::RefCell, collections::HashMap, ops::Deref, path::Path, rc::Rc, str::FromStr};
+use std::{cell::RefCell, ops::Deref, path::Path, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 

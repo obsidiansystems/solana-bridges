@@ -1,12 +1,6 @@
-use std::mem;
-
 pub use ethereum_types::{H512, U256};
 
-use solana_sdk::{info, program_error::ProgramError};
-
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
-
-use crate::eth::BlockHeader;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct AccessedElement {

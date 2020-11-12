@@ -1,7 +1,6 @@
 use crate::{
     eth::*,
     types::*,
-    pow_proof::AccessedElement,
 };
 use rlp::{self, Rlp};
 use std::mem::size_of;

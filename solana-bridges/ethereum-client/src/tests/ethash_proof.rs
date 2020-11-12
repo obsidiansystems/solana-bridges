@@ -2,9 +2,8 @@
 
 //use crate::{DoubleNodeWithMerkleProof, EthClient};
 use arrayref::mut_array_refs;
-use ethereum_types::{H128, H160, H256, H512, H64, U256};
+use ethereum_types::{H128, H256, H512};
 use hex::FromHex;
-use rlp::RlpStream;
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
 
