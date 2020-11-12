@@ -6,7 +6,7 @@ use crate::{
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
-use ethereum_types::{U256, H128, H256, H512};
+use ethereum_types::{H128, H256, H512, U256};
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 

@@ -1,7 +1,7 @@
 // Code taken from https://github.com/near/rainbow-bridge
 
 //use crate::{DoubleNodeWithMerkleProof, EthClient};
-use ethereum_types::{H160, H128, H256, H512, H64, U256};
+use ethereum_types::{H128, H160, H256, H512, H64, U256};
 use hex::FromHex;
 use rlp::RlpStream;
 use serde::{Deserialize, Deserializer};
@@ -44,17 +44,17 @@ trait HashExt {
 
 // Also handles converting the endianness
 macro_rules! impl_from_slice_extend {
-	  ( $name:ident ) => {
+    ( $name:ident ) => {
         impl HashExt for $name {
             fn from_slice_extend(s: &[u8]) -> $name {
                 let mut res = $name::zero();
                 assert!(s.len() <= $name::len_bytes());
-                res.0[$name::len_bytes() - s.len() ..].copy_from_slice(s);
+                res.0[$name::len_bytes() - s.len()..].copy_from_slice(s);
                 res.0.reverse();
                 res
             }
         }
-    }
+    };
 }
 
 impl_from_slice_extend! { H128 }
@@ -96,7 +96,11 @@ impl From<BlockWithProofsRaw> for BlockWithProofs {
             proof_length: item.proof_length,
             header_rlp: item.header_rlp.0,
             merkle_root: H128::from_slice_extend(&*item.merkle_root.0),
-            elements: item.elements.iter().map(|e| H256::from_slice_extend(&*e.0)).collect(),
+            elements: item
+                .elements
+                .iter()
+                .map(|e| H256::from_slice_extend(&*e.0))
+                .collect(),
             merkle_proofs: item
                 .merkle_proofs
                 .iter()
@@ -106,7 +110,7 @@ impl From<BlockWithProofsRaw> for BlockWithProofs {
     }
 }
 
-fn combine_dag_h256_to_h512<'a>(elements: &'a [H256]) -> impl Iterator<Item=H512> + 'a {
+fn combine_dag_h256_to_h512<'a>(elements: &'a [H256]) -> impl Iterator<Item = H512> + 'a {
     elements
         .iter()
         .zip(elements.iter().skip(1))
@@ -121,7 +125,7 @@ fn combine_dag_h256_to_h512<'a>(elements: &'a [H256]) -> impl Iterator<Item=H512
 }
 
 impl BlockWithProofs {
-    pub fn elements_512<'a>(&'a self) -> impl Iterator<Item=H512> + 'a {
+    pub fn elements_512<'a>(&'a self) -> impl Iterator<Item = H512> + 'a {
         combine_dag_h256_to_h512(&*self.elements)
     }
 

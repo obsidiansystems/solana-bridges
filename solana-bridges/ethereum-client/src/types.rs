@@ -89,7 +89,6 @@ impl CustomError {
             PowElement => DecodePowElementFailed,
             Inclusion => DecodeInclusionInstructionFailed,
             Challenge => DecodeChallengeInstructionFailed,
-
         }
     }
     #[cfg(test)]

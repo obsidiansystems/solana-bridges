@@ -7,7 +7,7 @@ use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodabl
 use ethereum_types::U256;
 
 use crate::{
-    eth::{BlockHeader},
+    eth::BlockHeader,
     pow_proof::{AccessedElement, AccessedElements},
 };
 
@@ -118,7 +118,10 @@ pub fn read_block<'a>(data: &'a Storage, idx: usize) -> Result<Option<&'a RingIt
     Ok(Some(header))
 }
 
-pub fn read_block_mut<'a>(data: &'a mut Storage, idx: usize) -> Result<Option<&'a mut RingItem>, ProgramError> {
+pub fn read_block_mut<'a>(
+    data: &'a mut Storage,
+    idx: usize,
+) -> Result<Option<&'a mut RingItem>, ProgramError> {
     let len = data.headers.len();
     match *data {
         Storage {
@@ -139,7 +142,9 @@ pub fn read_prev_block<'a>(data: &'a Storage) -> Result<Option<&'a RingItem>, Pr
     read_block(data, (data.offset + (len - 1)) % len)
 }
 
-pub fn read_prev_block_mut<'a>(data: &'a mut Storage) -> Result<Option<&'a mut RingItem>, ProgramError> {
+pub fn read_prev_block_mut<'a>(
+    data: &'a mut Storage,
+) -> Result<Option<&'a mut RingItem>, ProgramError> {
     let len = data.headers.len();
     read_block_mut(data, (data.offset + (len - 1)) % len)
 }

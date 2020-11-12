@@ -10,7 +10,7 @@ use crate::{
     prove::*,
 };
 
-use std::{cell::RefCell, collections::HashMap, path::Path, ops::Deref, rc::Rc, str::FromStr};
+use std::{cell::RefCell, collections::HashMap, ops::Deref, path::Path, rc::Rc, str::FromStr};
 
 use solana_sdk::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey};
 
@@ -71,28 +71,33 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         process_instruction(&program_id, &accounts, &instruction_noop)
             .map_err(TestError::ProgError)?;
 
-        let dir = Path::new(file!()).parent().unwrap().parent().unwrap().join("data/ethash-proof");
+        let dir = Path::new(file!())
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("data/ethash-proof");
         {
-            let blocks_with_proofs: ethash_proof::BlockWithProofs =
-                ethash_proof::read_block(&*{
-                    let mut data = dir.clone();
-                    data.push("mainnet-400000.json");
-                    data
-                });
+            let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+                let mut data = dir.clone();
+                data.push("mainnet-400000.json");
+                data
+            });
             {
                 let header_400000: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
                 let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                     header: Box::new(header_400000),
                     total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
                 }))
-                    .pack();
+                .pack();
                 process_instruction(&program_id, &accounts, &instruction_init)
                     .map_err(TestError::ProgError)?;
             }
             for h in blocks_with_proofs.elements_512() {
-                let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ProvidePowElement {
-                    element: Box::new(h),
-                }))
+                let instruction_pow: Vec<u8> =
+                    Instruction::ProvidePowElement(Box::new(ProvidePowElement {
+                        element: Box::new(h),
+                    }))
                     .pack();
                 process_instruction(&program_id, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;
@@ -100,12 +105,11 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         }
 
         for n in 1..block_count {
-            let blocks_with_proofs: ethash_proof::BlockWithProofs =
-                ethash_proof::read_block(&*{
-                    let mut data = dir.clone();
-                    data.push(&*format!("mainnet-400{:03}.json", n));
-                    data
-                });
+            let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+                let mut data = dir.clone();
+                data.push(&*format!("mainnet-400{:03}.json", n));
+                data
+            });
             {
                 let raw_data = accounts[0]
                     .try_borrow_data()
@@ -122,14 +126,16 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 let header_4000xx: BlockHeader = decode_rlp(&*blocks_with_proofs.header_rlp)?;
                 let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(NewBlock {
                     header: Box::new(header_4000xx),
-                })).pack();
+                }))
+                .pack();
                 process_instruction(&program_id, &accounts, &instruction_new)
                     .map_err(TestError::ProgError)?;
             }
             for h in blocks_with_proofs.elements_512() {
-                let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ProvidePowElement {
-                    element: Box::new(h),
-                }))
+                let instruction_pow: Vec<u8> =
+                    Instruction::ProvidePowElement(Box::new(ProvidePowElement {
+                        element: Box::new(h),
+                    }))
                     .pack();
                 process_instruction(&program_id, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;
@@ -461,13 +467,15 @@ pub fn test_inclusion_instruction_bad_block() -> () {
 pub fn test_inclusion_instruction_too_easy() {
     use inclusion::test_0::*;
     // note the err() to require an error;
-    let res = test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
-        height: header.number,
-        block_hash: Box::new(hash_header(&header, false)),
-        expected_value: RECEIPT_DATA.to_vec(),
-        key: rlp::encode(&RECEIPT_INDEX),
-        proof: pack_proof(PROOF_DATA),
-        min_difficulty: Box::new(U256([9, 9, 9, 9])),
+    let res = test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| {
+        ProveInclusion {
+            height: header.number,
+            block_hash: Box::new(hash_header(&header, false)),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: Box::new(U256([9, 9, 9, 9])),
+        }
     });
     assert_eq!(
         res.err().unwrap(),
@@ -500,38 +508,46 @@ pub fn test_inclusion_instruction_bad_proof() {
 #[test]
 pub fn test_inclusion_instruction_0() -> Result<(), TestError> {
     use inclusion::test_0::*;
-    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
-        height: header.number,
-        block_hash: Box::new(hash_header(&header, false)),
-        expected_value: RECEIPT_DATA.to_vec(),
-        key: rlp::encode(&RECEIPT_INDEX),
-        proof: pack_proof(PROOF_DATA),
-        min_difficulty: Box::new(U256::zero()),
+    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| {
+        ProveInclusion {
+            height: header.number,
+            block_hash: Box::new(hash_header(&header, false)),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: Box::new(U256::zero()),
+        }
     })
 }
 
 #[test]
 pub fn test_inclusion_instruction_1() -> Result<(), TestError> {
     use inclusion::test_1::*;
-    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| ProveInclusion {
-        height: header.number,
-        block_hash: Box::new(hash_header(&header, false)),
-        expected_value: RECEIPT_DATA.to_vec(),
-        key: rlp::encode(&RECEIPT_INDEX),
-        proof: pack_proof(PROOF_DATA),
-        min_difficulty: Box::new(U256::zero()),
+    test_inclusion_instruction(HEADER_DATA, HEADER_POW_ELEMS, |header: BlockHeader| {
+        ProveInclusion {
+            height: header.number,
+            block_hash: Box::new(hash_header(&header, false)),
+            expected_value: RECEIPT_DATA.to_vec(),
+            key: rlp::encode(&RECEIPT_INDEX),
+            proof: pack_proof(PROOF_DATA),
+            min_difficulty: Box::new(U256::zero()),
+        }
     })
 }
 
 #[test]
 pub fn test_pow_indices_400000() -> Result<(), TestError> {
-    let dir = Path::new(file!()).parent().unwrap().parent().unwrap().join("data/ethash-proof");
-    let blocks_with_proofs: ethash_proof::BlockWithProofs =
-        ethash_proof::read_block(&*{
-            let mut data = dir.clone();
-            data.push("mainnet-400000.json");
-            data
-        });
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let blocks_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
 
     let mut ri = RingItem {
         total_difficulty: U256::zero(),
@@ -548,11 +564,12 @@ pub fn test_pow_indices_400000() -> Result<(), TestError> {
     //println!("{:#?}", ri);
 
     match verify_pow_indexes(&mut ri) {
-        true => Ok (()),
-        false => Err (TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error())),
+        true => Ok(()),
+        false => Err(TestError::ProgError(
+            CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error(),
+        )),
     }
 }
-
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
     let expected = BlockHeader {

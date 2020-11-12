@@ -59,11 +59,7 @@ pub fn process_instruction<'a>(
             };
             verify_block(&item.header, None).map_err(CustomError::to_program_error)?;
 
-            write_new_block(
-                data,
-                &item.header,
-                Some(&item.total_difficulty),
-            )?;
+            write_new_block(data, &item.header, Some(&item.total_difficulty))?;
         }
         Instruction::NewBlock(nb) => {
             let NewBlock { header } = *nb;
@@ -82,8 +78,8 @@ pub fn process_instruction<'a>(
             data.ethash_elements = match data.ethash_elements {
                 None => panic!("Waiting for new block, cannot accept another PoW element."),
                 Some(n) => {
-                    let parent =
-                        read_prev_block_mut(data)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
+                    let parent = read_prev_block_mut(data)?
+                        .ok_or(CustomError::BlockNotFound.to_program_error())?;
                     parent.elements.0[(n / 4) as usize][(n % 4) as usize].value = *ppe.element;
                     if n < 127 {
                         // do nothing but increment
@@ -92,7 +88,8 @@ pub fn process_instruction<'a>(
                         // We have all the blocks now, verify PoW and write addresses
                         let pow_valid = verify_pow_indexes(parent);
                         if !pow_valid {
-                            return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error());
+                            return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
+                                .to_program_error());
                         }
 
                         // indicate we are ready for new address
@@ -146,7 +143,8 @@ pub fn process_instruction<'a>(
             if max_h <= challenge.height {
                 panic!("too new {} {}", max_h, challenge.height)
             }
-            let offset = lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
+            let offset =
+                lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
             let block =
                 read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             if &hash_header(&block.header, false) != &*challenge.block_hash {
@@ -178,6 +176,3 @@ pub fn write_new_block(
     data.ethash_elements = Some(0);
     Ok(())
 }
-
-
-
