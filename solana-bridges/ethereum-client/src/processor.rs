@@ -119,6 +119,7 @@ pub fn process_instruction<'a>(
             if &hash_header(&block.header, false) != &*pi.block_hash {
                 return Err(CustomError::InvalidProof_BadBlockHash.to_program_error());
             }
+
             if &block.total_difficulty < &*pi.min_difficulty {
                 return Err(CustomError::InvalidProof_TooEasy.to_program_error());
             }
@@ -149,6 +150,10 @@ pub fn process_instruction<'a>(
                 read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             if &hash_header(&block.header, false) != &*challenge.block_hash {
                 return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
+            }
+
+            if challenge.element_index >= 128 {
+                panic!("element must be between 0 and 128")
             }
         }
     })

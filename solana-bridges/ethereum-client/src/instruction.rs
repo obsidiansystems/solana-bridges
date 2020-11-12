@@ -42,6 +42,8 @@ pub struct ProveInclusion {
 pub struct Challenge {
     pub height: u64,
     pub block_hash: Box<H256>,
+    /// in access order
+    pub element_index: u8,
     pub merkle_spine: Vec<H128>,
 }
 
