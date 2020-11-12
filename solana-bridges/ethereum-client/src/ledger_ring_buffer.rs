@@ -4,8 +4,10 @@ use solana_sdk::{info, program_error::ProgramError};
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
+use ethereum_types::U256;
+
 use crate::{
-    eth::{BlockHeader, U256},
+    eth::{BlockHeader},
     pow_proof::{AccessedElement, AccessedElements},
 };
 

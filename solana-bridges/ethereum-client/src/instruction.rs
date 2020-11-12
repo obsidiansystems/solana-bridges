@@ -6,7 +6,7 @@ use crate::{
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
-pub use ethereum_types::U256;
+use ethereum_types::{U256, H128, H256, H512};
 
 use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
 
@@ -31,7 +31,7 @@ pub struct ProvidePowElement {
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct ProveInclusion {
     pub height: u64,
-    pub block_hash: Box<ethereum_types::H256>,
+    pub block_hash: Box<H256>,
     pub key: Vec<u8>,
     pub expected_value: Vec<u8>,
     pub proof: Vec<u8>,
@@ -41,8 +41,8 @@ pub struct ProveInclusion {
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
 pub struct Challenge {
     pub height: u64,
-    pub block_hash: Box<ethereum_types::H256>,
-    //pub block_hash: Box<ethereum_types::H256>,
+    pub block_hash: Box<H256>,
+    pub merkle_spine: Vec<H128>,
 }
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.
