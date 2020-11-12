@@ -16,7 +16,7 @@ impl<'de> Deserialize<'de> for Hex {
     where
         D: Deserializer<'de>,
     {
-        let mut s = <String as Deserialize>::deserialize(deserializer)?;
+        let mut s: String = Deserialize::deserialize(deserializer)?;
         if s.starts_with("0x") {
             s = s[2..].to_string();
         }
