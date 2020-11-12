@@ -8,6 +8,7 @@ use ethereum_types::{H128, H256};
 
 use crate::{
     eth::*,
+    epoch_roots::EPOCH_ROOTS,
     instruction::*,
     ledger_ring_buffer::*,
     pow_proof::*,
@@ -184,7 +185,7 @@ pub fn process_instruction<'a>(
                 panic!("challenger is trying to confirm not refute validity");
             }
 
-            let merkel_root = get_current_epoch_merkel_root();
+            let merkel_root = EPOCH_ROOTS[(challenge.height / EPOCH_LENGTH) as usize];
 
             let calculated_root = apply_merkle_proof(
                 &challenge.element_pair,
@@ -199,10 +200,6 @@ pub fn process_instruction<'a>(
             give_bounty_to_challenger()
         }
     })
-}
-
-pub fn get_current_epoch_merkel_root() -> H128 {
-    unimplemented!()
 }
 
 pub fn give_bounty_to_challenger() {

@@ -157,7 +157,6 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
 
 pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, Vec<(u32, H512)>) {
     use ethash::*;
-    const EPOCH_LENGTH: u64 = 30000;
     let epoch = (header.number / EPOCH_LENGTH) as usize;
     let seed = get_seedhash(epoch);
     let cache_size = get_cache_size(epoch);
