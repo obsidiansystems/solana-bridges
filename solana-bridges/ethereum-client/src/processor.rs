@@ -1,6 +1,6 @@
 #![cfg(feature = "program")]
 
-pub use ethereum_types::{H128};
+pub use ethereum_types::{H128, H256};
 
 use crate::{
     eth::*,
@@ -14,6 +14,7 @@ use crate::{
 use rlp::Rlp;
 
 use solana_sdk::{
+    hash::hash as sha256,
     account_info::{next_account_info, AccountInfo},
     entrypoint_deprecated::ProgramResult,
     info,
@@ -191,6 +192,7 @@ pub fn process_instruction<'a>(
             }
 
             // TODO self destruct and give funds to challenger.
+            give_bounty_to_challenger()
         }
     })
 }
@@ -199,8 +201,39 @@ pub fn get_current_epoch_merkel_root() -> H128 {
     unimplemented!()
 }
 
-pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
+pub fn give_bounty_to_challenger() {
     unimplemented!()
+}
+
+pub fn apply_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
+
+    fn truncate_to_h128(arr: H256) -> H128 {
+        let mut data = H128::zero();
+        data.0.copy_from_slice(&arr.0[16..]);
+        data
+    }
+
+    fn hash_h128(l: H128, r: H128) -> H128 {
+        let mut data = [0u8; 64];
+        data[16..32].copy_from_slice(&l.0);
+        data[48..64].copy_from_slice(&r.0);
+        truncate_to_h128(H256(sha256(&data).0))
+    }
+
+    let mut data = [0u8; 128];
+    data[..64].copy_from_slice(&elems.e0.0);
+    data[64..].copy_from_slice(&elems.e1.0);
+
+    let mut accum = truncate_to_h128(sha256(&data).0.into());
+
+    for (i, &sibling) in merkle_spine.iter().enumerate() {
+        if (index >> i as u64) % 2 == 0 {
+            accum = hash_h128(accum, sibling);
+        } else {
+            accum = hash_h128(sibling, accum);
+        }
+    }
+    accum
 }
 
 pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
