@@ -2,8 +2,6 @@ use std::mem;
 
 use solana_sdk::{info, program_error::ProgramError};
 
-use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodableDerive};
-
 use ethereum_types::U256;
 
 use crate::{
@@ -16,7 +14,7 @@ pub const MIN_BUF_SIZE: usize = BLOCKS_OFFSET + mem::size_of::<RingItem>();
 
 pub const STORAGE_ALIGN: usize = std::mem::align_of::<StorageScrach>();
 
-#[derive(Debug, RlpDecodableDerive, RlpEncodableDerive)]
+#[derive(Debug)]
 pub struct RingItem {
     pub total_difficulty: U256,
     pub header: BlockHeader,
