@@ -157,9 +157,14 @@ pub fn process_instruction<'a>(
                 return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
             }
 
-            if challenge.element_index >= 128 {
-                panic!("element must be between 0 and 128")
+            if challenge.element_index >= 643 {
+                panic!("element pair index must be between 0 and 64")
             }
+
+            // Make sure addresses are in the form (n, n + 1) (failure would
+            // indicate contract bug not bad input.)
+            block.ethash_elements;
+
 
             let merkel_root = get_current_epoch_merkel_root();
 

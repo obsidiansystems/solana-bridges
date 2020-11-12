@@ -18,6 +18,10 @@ pub struct AccessedElement {
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub struct AccessedElements(pub [[AccessedElement; 4]; 32]);
 
+impl AccessedElements {
+    
+}
+
 // These impls flatten it into a [..; 128]
 
 impl rlp::Encodable for AccessedElements {
