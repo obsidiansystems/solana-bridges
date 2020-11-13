@@ -28,6 +28,8 @@ library
                      , bytestring
                      , binary
                      , containers
+                     , constraints
+                     , cryptonite
                      , memory
                      , data-default
                      , exceptions
