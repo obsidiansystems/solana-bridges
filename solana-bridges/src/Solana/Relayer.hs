@@ -424,8 +424,8 @@ testSolanaCrypto :: Eth.Provider -> Address -> IO ()
 testSolanaCrypto node ca = do
   print ca
   let
-    toHexString :: Integer -> String
-    toHexString = \x -> showHex x ""
+    -- toHexString :: Integer -> String
+    -- toHexString = \x -> showHex x ""
     toShortHex :: BS.ByteString -> String
     toShortHex = \msg ->
         (show $ if BS.length msg > 16
@@ -486,12 +486,12 @@ testSolanaCrypto node ca = do
     _ <- getInitialized node ca
 
     do
-      asdf <- liftIO $ LBS.readFile "/home/dbornside/src/SOLANA/ed25519-assertions-20201113T112845.txt"
-      for_ (LBS.split (fromIntegral $ Data.Char.ord '\n') asdf) $ \line -> do
+      implTestData <- liftIO $ LBS.readFile "test-extras/ed25519-low-level-tests.txt"
+      for_ (LBS.split (fromIntegral $ Data.Char.ord '\n') implTestData) $ \line -> do
         case eitherDecode' line of
           Left bad -> liftIO $ print (bad, line)
           Right (TestCryptCase fn args expectedResult) -> do
-            liftIO $ LBS.putStrLn line
+            -- liftIO $ LBS.putStrLn line
             Dict <- pure $ testCaseHasOut @Eq fn
             Dict <- pure $ testCaseHasOut @Show fn
             result <- test_impl node ca fn args
@@ -533,20 +533,12 @@ testSolanaCrypto node ca = do
       check_ed25519_testvector "0x72"
         "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
         "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
-      for_ [0..257] $ \len -> do
-        let
-          sk = kdf $ T.encodeUtf8 $ T.pack $ show len
-          pk = Crypto.PubKey.Ed25519.toPublic sk
-          pk' = ByteArray.convert $ pk
-          msg = BS.pack $ take len $ cycle [0..255]
-          sig = ByteArray.convert $ Crypto.PubKey.Ed25519.sign sk pk msg
-        check_ed25519_testvector (HexString msg) (HexString pk') (HexString sig)
 
     when True $ do -- Misc internals tests
 
       let
 
-      for_ [0..1024] $ \len -> do
+      for_ [0..20] $ \len -> do
         check_ed25519_synthetic
           (kdf $ T.encodeUtf8 $ T.pack $ show len)
           (BS.pack $ take len $ cycle [0..255])
