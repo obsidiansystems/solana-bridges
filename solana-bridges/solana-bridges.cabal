@@ -30,6 +30,8 @@ library
                      , binary
                      , cryptonite
                      , containers
+                     , constraints
+                     , cryptonite
                      , memory
                      , data-default
                      , exceptions

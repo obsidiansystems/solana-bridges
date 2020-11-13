@@ -18,6 +18,7 @@ import           Data.Aeson
 import qualified Data.ByteString as BS
 import qualified Network.WebSockets as WebSockets
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Network.HTTP.Client as HTTPClient
 import qualified Network.HTTP.Types.Status as HTTP
 import Network.Socket(withSocketsDo)
@@ -42,8 +43,10 @@ getConfirmedBlock slot = rpcWebRequest'' @_ @(Maybe SolanaCommittedBlock) "getCo
 getConfirmedBlocks :: Word64 -> Word64 -> SolanaRpcM IO [Word64]
 getConfirmedBlocks startSlot endSlot = rpcWebRequest' "getConfirmedBlocks" $ Just (startSlot, endSlot)
 
+-- TODO: the real RPC doesn't work as advertised
 getConfirmedBlocksWithLimit :: Word64 -> Word64 -> SolanaRpcM IO [Word64]
-getConfirmedBlocksWithLimit startSlot endSlot = rpcWebRequest' "getConfirmedBlocksWithLimit" $ Just (startSlot, endSlot)
+-- getConfirmedBlocksWithLimit startSlot endSlot = rpcWebRequest' "getConfirmedBlocksWithLimit" $ Just (startSlot, endSlot)
+getConfirmedBlocksWithLimit startSlot limit = getConfirmedBlocks startSlot (startSlot + limit)
 
 getLeaderSchedule :: Word64 -> SolanaRpcM IO SolanaLeaderSchedule
 getLeaderSchedule slot = rpcWebRequest' @[Word64] @SolanaLeaderSchedule "getLeaderSchedule" $ Just [slot]
@@ -114,7 +117,7 @@ decodeMsg = \case
       Nothing -> Left <$> eitherDecode' x
 
 
-rpcWebRequest'' :: forall a b. (ToJSON a, FromJSON b) => T.Text -> Maybe a -> SolanaRpcM IO (Either Value b)
+rpcWebRequest'' :: forall a b. (Show a, ToJSON a, FromJSON b) => T.Text -> Maybe a -> SolanaRpcM IO (Either Value b)
 rpcWebRequest'' method params = do
   req0 <- SolanaRpcM $ asks _solanaRpcContext_baseRpcRequest -- (HTTPClient.parseRequest "http://127.0.0.1:8899")
   httpMgr <- SolanaRpcM $ asks _solanaRpcContext_httpMgr
@@ -133,13 +136,13 @@ rpcWebRequest'' method params = do
   unless (HTTP.statusIsSuccessful $ HTTPClient.responseStatus resultLBS) $
     error $ show $ HTTPClient.responseStatus resultLBS
 
-  either (error . (<> show (HTTPClient.responseBody resultLBS))) (pure . bimap _solanaRpcError_error _solanaRpcResult_result . unSolanaRpcErrorOrResult)
+  either (error . (\bad -> unlines [bad, show (method, params), show (HTTPClient.responseBody resultLBS)])) (pure . bimap _solanaRpcError_error _solanaRpcResult_result . unSolanaRpcErrorOrResult)
     $ eitherDecode' @(SolanaRpcErrorOrResult b) $ HTTPClient.responseBody resultLBS
 
 rpcWebRequest :: FromJSON b => T.Text -> SolanaRpcM IO b
 rpcWebRequest method = rpcWebRequest' method $ (Nothing :: Maybe Void)
 
-rpcWebRequest' :: (ToJSON a, FromJSON b) => T.Text -> Maybe a -> SolanaRpcM IO b
+rpcWebRequest' :: (Show a, ToJSON a, FromJSON b) => T.Text -> Maybe a -> SolanaRpcM IO b
 rpcWebRequest' method args = rpcWebRequest'' method args >>= either (error . show) pure
 
 
@@ -186,6 +189,11 @@ data SolanaRpcConfig = SolanaRpcConfig
   , _solanaRpcConfig_rpcPort :: Int
   , _solanaRpcConfig_wsPort :: Int
   }
+
+instance FromJSON SolanaRpcConfig where
+  parseJSON v = (\(a, b, c) -> SolanaRpcConfig (T.encodeUtf8 a) b c) <$> parseJSON v
+instance ToJSON SolanaRpcConfig where
+  toJSON (SolanaRpcConfig a b c) = toJSON (T.decodeUtf8 a, b, c)
 
 data SolanaRpcContext = SolanaRpcContext
   { _solanaRpcContext_baseRpcRequest :: HTTPClient.Request
