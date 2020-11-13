@@ -213,6 +213,10 @@ let
     solana-client-evm = with nixpkgs; mkShell {
       buildInputs = [ inotify-tools go-ethereum solc ];
     };
+
+    scripts = with nixpkgs; mkShell {
+      buildInputs = [ solana solana-client-tool ];
+    };
   };
 
   ethereum-client-src = gitignoreSource ./solana-bridges/ethereum-client;
