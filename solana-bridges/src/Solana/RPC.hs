@@ -18,6 +18,7 @@ import           Data.Aeson
 import qualified Data.ByteString as BS
 import qualified Network.WebSockets as WebSockets
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Network.HTTP.Client as HTTPClient
 import qualified Network.HTTP.Types.Status as HTTP
 import Network.Socket(withSocketsDo)
@@ -188,6 +189,11 @@ data SolanaRpcConfig = SolanaRpcConfig
   , _solanaRpcConfig_rpcPort :: Int
   , _solanaRpcConfig_wsPort :: Int
   }
+
+instance FromJSON SolanaRpcConfig where
+  parseJSON v = (\(a, b, c) -> SolanaRpcConfig (T.encodeUtf8 a) b c) <$> parseJSON v
+instance ToJSON SolanaRpcConfig where
+  toJSON (SolanaRpcConfig a b c) = toJSON (T.decodeUtf8 a, b, c)
 
 data SolanaRpcContext = SolanaRpcContext
   { _solanaRpcContext_baseRpcRequest :: HTTPClient.Request

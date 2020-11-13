@@ -26,15 +26,18 @@ import Control.Monad.Except (runExceptT, throwError, ExceptT(..), MonadError)
 import Control.Monad.Fix (fix)
 import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans (lift)
+import Crypto.Hash (hashWith)
+import Crypto.Hash.Algorithms (SHA256(..), SHA512(..))
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.Bits
 import Data.ByteArray.HexString
-import qualified Data.ByteArray as ByteArray
+import Data.Constraint
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
+import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
 import Data.Map (Map)
@@ -45,7 +48,6 @@ import Data.Text (Text)
 import Data.Void (Void)
 import Data.Word
 import Network.Ethereum.Api.Types (Call(..))
-import qualified Network.Ethereum.Api.Types as Eth
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
 import Network.Web3.Provider (runWeb3, runWeb3')
@@ -58,47 +60,35 @@ import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
 import System.Process (CreateProcess(..), createProcess, proc, readProcess, readCreateProcessWithExitCode, spawnProcess, terminateProcess, waitForProcess)
 import System.Which (staticWhich)
+import Text.Read (readEither)
 import qualified Blockchain.Data.RLP as RLP
+import qualified Crypto.Error
+import qualified Crypto.PubKey.Ed25519
 import qualified Data.Binary.Get as Binary
+import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
-import qualified Data.List as List
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Char
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Eth as Eth
-  ( getTransactionReceipt
-  , getBlockByNumber
-  , sendTransaction)
--- import qualified Network.Ethereum.Api.Types as Eth
---   ( Block(..)
---   , Call(..)
---   , TxReceipt(..)
---   , Quantity (..)
---   )
+import qualified Network.Ethereum.Api.Eth as Eth (getBlockByNumber)
+import qualified Network.Ethereum.Api.Eth as Eth (getTransactionReceipt)
+import qualified Network.Ethereum.Api.Eth as Eth (sendTransaction)
+import qualified Network.Ethereum.Api.Types as Eth
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
-import Numeric (showHex)
 
 import Ethereum.Contracts as Contracts
 import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
-
-import Data.Constraint
-import Crypto.Hash (hashWith)
-import Crypto.Hash.Algorithms (SHA256(..), SHA512(..))
-import qualified Crypto.Error
-import qualified Crypto.PubKey.Ed25519
-import qualified Data.Char
-
--- import Control.Monad.IO.Class
--- import Control.Monad.Error
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -115,18 +105,17 @@ mainRelayer = do
       progName <- getProgName
       hPutStrLn stderr $ "USAGE: " <> progName <> " CONFIGFILE.json"
 
-type SolanaToEthereumConfig = (Eth.Provider, Address)
+type SolanaToEthereumConfig = (Eth.Provider, Address, SolanaRpcConfig)
 
 mainRelayerEth :: IO ()
 mainRelayerEth = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile
-      (node, address) :: SolanaToEthereumConfig <- case eitherDecodeStrict' configData of
+      (node, address, solanaConfig) :: SolanaToEthereumConfig <- case eitherDecodeStrict' configData of
           Right c -> pure c
           Left e -> fail $ show e
 
-      let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900)
       relaySolanaToEthereum node solanaConfig address
 
     _ -> do
@@ -146,28 +135,35 @@ uriToProvider uri = case uriScheme uri of
 mainDeploySolanaClientContract :: IO ()
 mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
-    [] -> Right def
-    url:[] -> case parseURI url of
-      Just url' -> uriToProvider url'
-      Nothing -> Left "invalid uri"
+    [] -> Right (def, SolanaRpcConfig "127.0.0.1" 8899 8900)
+    ethUrl:solHost:solPort:solWs:[] -> do
+      ethProvider <- case parseURI ethUrl of
+        Just ethUrl' -> uriToProvider ethUrl'
+        Nothing -> Left "invalid uri"
+      solPort' <- first T.pack $ readEither solPort
+      solWs' <- first T.pack $ readEither solWs
+      pure $ (,) ethProvider $ SolanaRpcConfig (T.encodeUtf8 $ T.pack solHost) solPort' solWs'
     _ -> Left ""
-
-    -- url:[] -> do
 
   case mProvider of
     Left err -> do
       progName <- getProgName
       T.hPutStrLn stderr $ T.unlines
-        ["USAGE: " <> T.pack progName <> " [PROVIDER]"
-        , "\tPROVIDER\tethereum provider url"
+        ["USAGE: " <> T.pack progName <> " [ETH-PROVIDER SOLANA-RPC-HOST SOLANA-PORT SOLANA-WEBSOCKET]"
+        , "\tETH-PROVIDER\tethereum provider url"
         , "\t\thttp://host[:port]"
         -- , "\t\tws://host:port"
+        , "\tSOLANA-RPC-HOST\tsolana validator host"
+        , "\t\thost"
+        , "\tSOLANA-PORT\tsolana validator rpc port"
+        , "\t\tport"
+        , "\tSOLANA-WEBSOCKET\tsolana validator websocket port"
+        , "\t\tport"
         , err
         ]
-    Right provider -> do
-      let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900) -- TODO configurable
+    Right (provider, solanaConfig) -> do
       ca <- deploySolanaClientContract provider solanaConfig
-      let config :: SolanaToEthereumConfig = (provider, ca)
+      let config :: SolanaToEthereumConfig = (provider, ca, solanaConfig)
 
       LBS.putStr $ encode config
       putStrLn ""
@@ -424,8 +420,6 @@ testSolanaCrypto :: Eth.Provider -> Address -> IO ()
 testSolanaCrypto node ca = do
   print ca
   let
-    -- toHexString :: Integer -> String
-    -- toHexString = \x -> showHex x ""
     toShortHex :: BS.ByteString -> String
     toShortHex = \msg ->
         (show $ if BS.length msg > 16
@@ -491,7 +485,6 @@ testSolanaCrypto node ca = do
         case eitherDecode' line of
           Left bad -> liftIO $ print (bad, line)
           Right (TestCryptCase fn args expectedResult) -> do
-            -- liftIO $ LBS.putStrLn line
             Dict <- pure $ testCaseHasOut @Eq fn
             Dict <- pure $ testCaseHasOut @Show fn
             result <- test_impl node ca fn args
@@ -525,54 +518,48 @@ testSolanaCrypto node ca = do
       kdf :: BS.ByteString -> Crypto.PubKey.Ed25519.SecretKey
       kdf x = Crypto.Error.throwCryptoError $ Crypto.PubKey.Ed25519.secretKey $ hashWith SHA256 x
 
-    when True $ do -- NONWORKING
-      check_ed25519_testvector "0xddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
-        "0xec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf"
-        "0xdc2a4459e7369633a52b1bf277839a00201009a3efbf3ecb69bea2186c26b58909351fc9ac90b3ecfdfbc7c66431e0303dca179c138ac17ad9bef1177331a704"
+    check_ed25519_testvector "0xddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+      "0xec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf"
+      "0xdc2a4459e7369633a52b1bf277839a00201009a3efbf3ecb69bea2186c26b58909351fc9ac90b3ecfdfbc7c66431e0303dca179c138ac17ad9bef1177331a704"
 
-      check_ed25519_testvector "0x72"
-        "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
-        "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+    check_ed25519_testvector "0x72"
+      "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+      "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
 
-    when True $ do -- Misc internals tests
+    for_ [0..20] $ \len -> do
+      check_ed25519_synthetic
+        (kdf $ T.encodeUtf8 $ T.pack $ show len)
+        (BS.pack $ take len $ cycle [0..255])
 
+    check_sha512_synthetic "r"
+    for_ [0..257] $ \len -> do
       let
-
-      for_ [0..20] $ \len -> do
-        check_ed25519_synthetic
-          (kdf $ T.encodeUtf8 $ T.pack $ show len)
-          (BS.pack $ take len $ cycle [0..255])
-
-      check_sha512_synthetic "r"
-      for_ [0..257] $ \len -> do
-        let
-          a = BS.pack $ take 32 $ repeat 97
-          b = BS.pack $ take 32 $ repeat 98
-          msg = BS.pack $ take len $ cycle [0..255]
-        test_packMessage node ca (Base58ByteString a) (Base58ByteString b) msg >>= check_value "test_packMessage" (a <> b <> msg)
+        a = BS.pack $ take 32 $ repeat 97
+        b = BS.pack $ take 32 $ repeat 98
+        msg = BS.pack $ take len $ cycle [0..255]
+      test_packMessage node ca (Base58ByteString a) (Base58ByteString b) msg >>= check_value "test_packMessage" (a <> b <> msg)
 
 
-      liftIO $ putStrLn "c25519-decodeint"
-      test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= check_value "c25519-decodeint" 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
+    liftIO $ putStrLn "c25519-decodeint"
+    test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= check_value "c25519-decodeint" 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
 
-      liftIO $ putStrLn "c25519-curvedistance"
-      test_curvedistance node ca
-        ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
-        , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
-        >>= check_value "c25519-curvedistance" 0
+    liftIO $ putStrLn "c25519-curvedistance"
+    test_curvedistance node ca
+      ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
+      , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
+      >>= check_value "c25519-curvedistance" 0
 
 
-      liftIO $ putStrLn "c25519-xrecover"
-      test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
-      
-      liftIO $ putStrLn "c25519-decodepoint"
-      test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
+    liftIO $ putStrLn "c25519-xrecover"
+    test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
+    
+    liftIO $ putStrLn "c25519-decodepoint"
+    test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
 
-      liftIO $ putStrLn "c25519-scalarmult"
-      test_scalarmult node ca (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,0x6666666666666666666666666666666666666666666666666666666666666658) 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
-        >>= check_value "c25519-scalarmult"
-          (0x114237e016d3f2598171d4cc242eee95460ae1ed35857f80c2d214b7e9804938,0x2794ddddd6a5cf42e54475f290e8c5d92c9c6f36c5c16df1e5f992af998a6cfe)
-
+    liftIO $ putStrLn "c25519-scalarmult"
+    test_scalarmult node ca (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,0x6666666666666666666666666666666666666666666666666666666666666658) 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
+      >>= check_value "c25519-scalarmult"
+        (0x114237e016d3f2598171d4cc242eee95460ae1ed35857f80c2d214b7e9804938,0x2794ddddd6a5cf42e54475f290e8c5d92c9c6f36c5c16df1e5f992af998a6cfe)
 
     liftIO $ putStrLn "OK"
   case res of

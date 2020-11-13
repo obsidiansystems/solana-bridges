@@ -480,6 +480,7 @@ struct Slot {
         Slot storage slot = slots[slotOffset(s)];
         slot.blockHash = 0;
         slot.hasBlock = false;
+        slot.leaderPublicKey = 0;
     }
 
     function test_sha512(bytes memory message) public pure returns (bytes memory) {

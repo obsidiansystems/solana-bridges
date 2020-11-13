@@ -134,10 +134,6 @@ def scalarmult_reduced(P, e):
     P = edwards(P,P)
   return Q
 
-# def scalarmult_bytes(P,e_bytes):
-#   assert type(e_bytes) == str
-#   return scalarmult(P, decodeint_mod(e_bytes, l))
-
 def encodeint(y):
   bits = [(y >> i) & 1 for i in range(b)]
   return ''.join([chr(sum([bits[i * 8 + j] << j for j in range(8)])) for i in range(b/8)])
@@ -214,21 +210,6 @@ def decodepoint(s):
   if not isoncurve(P): raise Exception("decoding point that is not on curve")
   return P
 
-# def checkvalid(s,m,pk):
-#   if len(s) != b/4: raise Exception("signature length is wrong")
-#   if len(pk) != b/8: raise Exception("public-key length is wrong")
-#   R = decodepoint(s[0:b/8])
-#   A = decodepoint(pk)
-#   # S = s[b/8:b/4]
-#   S = decodeint(s[b/8:b/4])
-#   h = H(encodepoint(R) + pk + m)
-#   # BS = scalarmult_bytes(B,S)
-#   BS = scalarmult(B,S)
-#   # RhA = edwards(R,scalarmult_bytes(A,h))
-#   RhA = edwards(R,scalarmult(A,decodeint(h)))
-#   if BS != RhA:
-#     raise Exception("signature does not pass verification")
-
 def checkvalid(s,m,pk):
   if len(s) != b/4: raise Exception("signature length is wrong")
   if len(pk) != b/8: raise Exception("public-key length is wrong")
@@ -244,9 +225,7 @@ def checkvalid(s,m,pk):
   RAh = edwards(R,Ah)
   assert isoncurve(RAh)
   if BS != RAh:
-    raise Exception("2 signature does not pass verification")
-  # if encodepoint(BS) != encodepoint(RAh):
-  #   raise Exception("1 signature does not pass verification", R, A, S, h, BS, RAh)
+    raise Exception("signature does not pass verification")
 
 if __name__ == '__main__':
   import json, sys, binascii
