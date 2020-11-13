@@ -220,7 +220,15 @@ contract SolanaClient {
         uint256 y;
     }
 
-    function edwards(edwards_point memory P, edwards_point memory Q) public pure returns (edwards_point memory PQ) {
+    function test_edwards(uint256[2] memory P, uint256[2] memory Q) public pure returns (uint256[2] memory PQ) {
+        edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
+        edwards_point memory Qx; Qx.x = Q[0]; Qx.y = Q[1];
+        edwards_point memory PQx = edwards(Px, Qx);
+        PQ[0] = PQx.x;
+        PQ[1] = PQx.y;
+    }
+
+    function edwards(edwards_point memory P, edwards_point memory Q) internal pure returns (edwards_point memory PQ) {
         uint256 x1 = P.x;
         uint256 y1 = P.y;
         uint256 x2 = Q.x;
@@ -245,16 +253,20 @@ contract SolanaClient {
         return bytes32(y);
     }
 
-    function scalarmult(edwards_point memory P0, bytes memory e_bytes) public pure returns (edwards_point memory Q) {
+    function decodeint_mod(bytes memory s, uint256 m) public pure returns (uint256) {
+        uint256 ss = 0;
+        for (int i = int(s.length) - 1; i >= 0 ; --i) {
+            ss = uint256(uint8(s[uint(i)])) + mulmod(ss, 0x100, m);
+        }
+        ss = ss % m;
+        return ss;
+    }
+
+    function scalarmult(edwards_point memory P0, uint256 e) public pure returns (edwards_point memory Q) {
         edwards_point memory P;
         Q.x = 0; Q.y = 1;
         P.x = P0.x;
         P.y = P0.y;
-
-        uint256 e = 0;
-        for (int i = int(e_bytes.length) - 1; i >= 0 ; --i) {
-            e = uint256(uint8(e_bytes[uint(i)])) + mulmod(e, 0x100, l);
-        }
         e = e % l;
 
         while (e != 0) {
@@ -269,15 +281,19 @@ contract SolanaClient {
     function encodeint(uint256 x) internal pure returns (bytes32) {
         return swap_bytes32(bytes32(x));
     }
-    function encodepoint(edwards_point memory P) internal pure returns (bytes32) {
-        bytes32 y = encodeint(P.y);
-        if (P.x & 1 != 0) {
-            y |= bytes32(uint256(1) << 255);
-        }
-        return y;
+
+    function test_encodepoint(uint256[2] memory P) public pure returns (bytes32) {
+        edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
+        return encodepoint(Px);
     }
 
-    uint256 constant e2256 = 38; // 2**256 % q
+    function encodepoint(edwards_point memory P) internal pure returns (bytes32) {
+        uint256 y = P.y;
+        if (P.x & 1 != 0) {
+            y |= (uint256(1) << 255);
+        }
+        return swap_bytes32(bytes32(y));
+    }
 
     function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
         edwards_point memory P;
@@ -336,19 +352,18 @@ contract SolanaClient {
 
         bytes memory packedMessage = packMessage(encodepoint(R), pk, message);
         bytes memory h = Sha512_hash(packedMessage);
-        edwards_point memory Ah = scalarmult(A, h);
+        edwards_point memory Ah = scalarmult(A, decodeint_mod(h, l));
 
         edwards_point memory B;
         B.x = Bx;
         B.y = By;
 
-        edwards_point memory BS = scalarmult(B, S);
-        edwards_point memory sigS = edwards(R, Ah);
+        edwards_point memory BS = scalarmult(B, decodeint_mod(S, l));
+        edwards_point memory RAh = edwards(R, Ah);
 
-        return (BS.x == sigS.x && BS.y == sigS.y); // else { revert("signature does not pass verification"); }
+        return (BS.x == RAh.x && BS.y == RAh.y); // else { revert("signature does not pass verification"); }
     }
 
-// }
 
 struct Slot {
     bool hasBlock;

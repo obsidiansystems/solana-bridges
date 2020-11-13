@@ -8,6 +8,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
+{-# LANGUAGE OverloadedLists #-}
+{-# LANGUAGE EmptyCase #-}
 
 module Ethereum.Contracts where
 
@@ -30,13 +38,114 @@ import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..))
 import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
 import qualified Data.ByteString as BS
+import Data.ByteArray.HexString
+import Data.Aeson
+import Data.Text (Text)
+import Data.Constraint
 
 import Solana.Types
 import qualified Ethereum.Contracts.Bindings as Contracts
 
 
--- test_edwards :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> _ -> _ -> m _
--- test_edwards node ca x y = simulate node ca "edwareds" (Contracts.edwards x y)
+data TestCrypto a b where
+  TestCrypto_scalarmult :: TestCrypto ((Integer, Integer), Integer) (Integer, Integer)
+  TestCrypto_decodepoint :: TestCrypto HexString (Integer, Integer)
+  -- TestCrypto_Hint :: () -> TestCrypto _
+  TestCrypto_isoncurve :: TestCrypto (Integer, Integer) Bool
+  -- TestCrypto_inv :: TestCrypto Integer Integer
+  TestCrypto_edwards :: TestCrypto ((Integer, Integer), (Integer, Integer)) (Integer, Integer)
+  -- TestCrypto_decodeint :: () -> TestCrypto _
+  -- TestCrypto_encodeint :: () -> TestCrypto _
+  TestCrypto_xrecover :: TestCrypto Integer Integer
+  TestCrypto_encodepoint :: TestCrypto (Integer, Integer) HexString
+
+data TestCryptCase where
+  TestCryptCase :: forall a b. TestCrypto a b -> a -> b -> TestCryptCase
+
+testCaseHasIn
+  :: forall c a b.
+  ( c ((Integer, Integer), (Integer, Integer))
+  , c ((Integer, Integer), Integer)
+  , c (Integer, Integer)
+  , c HexString
+  , c Integer
+  )
+  => TestCrypto a b
+  -> Dict (c a)
+testCaseHasIn = \case
+  TestCrypto_scalarmult -> Dict
+  TestCrypto_decodepoint -> Dict
+  TestCrypto_isoncurve -> Dict
+  TestCrypto_edwards -> Dict
+  TestCrypto_xrecover -> Dict
+  TestCrypto_encodepoint -> Dict
+
+testCaseHasOut
+  :: forall c a b.
+  ( c (Integer, Integer)
+  , c Bool
+  , c HexString
+  , c Integer
+  )
+  => TestCrypto a b
+  -> Dict (c b)
+testCaseHasOut = \case
+  TestCrypto_scalarmult -> Dict
+  TestCrypto_decodepoint -> Dict
+  TestCrypto_isoncurve -> Dict
+  TestCrypto_edwards -> Dict
+  TestCrypto_xrecover -> Dict
+  TestCrypto_encodepoint -> Dict
+
+newtype OneElementArray a = OneElementArray { unOneElementArray :: a }
+instance FromJSON a => FromJSON (OneElementArray a) where
+  parseJSON v = do
+    xs :: [a] <- parseJSON v
+    case xs of
+      [x] -> pure $ OneElementArray x
+      _ -> fail "Wrong number of elements"
+
+instance FromJSON TestCryptCase where
+  parseJSON = withObject "TestCryptCase" $ \v -> do
+    fn :: Text <- v .: "fn"
+    case fn of
+      "scalarmult"  -> TestCryptCase TestCrypto_scalarmult  <$> (                      v .: "args") <*> v .: "result"
+      "decodepoint" -> TestCryptCase TestCrypto_decodepoint <$> (unOneElementArray <$> v .: "args") <*> v .: "result"
+      "isoncurve"   -> TestCryptCase TestCrypto_isoncurve   <$> (unOneElementArray <$> v .: "args") <*> v .: "result"
+      "edwards"     -> TestCryptCase TestCrypto_edwards     <$> (                      v .: "args") <*> v .: "result"
+      "xrecover"    -> TestCryptCase TestCrypto_xrecover    <$> (unOneElementArray <$> v .: "args") <*> v .: "result"
+      "encodepoint" -> TestCryptCase TestCrypto_encodepoint <$> (unOneElementArray <$> v .: "args") <*> v .: "result"
+      _ -> fail "nah"
+
+test_impl
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> TestCrypto a b
+  -> a
+  -> m b
+test_impl node ca = \case
+  TestCrypto_scalarmult -> \(p, e) -> test_scalarmult node ca p e
+  TestCrypto_decodepoint -> \(HexString x) -> test_decodepoint node ca (Base58ByteString x)
+  TestCrypto_isoncurve -> \p -> (== 0) <$> test_curvedistance node ca p
+  TestCrypto_edwards -> \(x, y) -> test_edwards node ca x y
+  TestCrypto_xrecover -> \y -> test_xrecover node ca y
+  TestCrypto_encodepoint -> \p -> HexString <$> test_encodepoint node ca p
+  -- TestCrypto_inv -> \a@() -> test_inv
+
+test_encodepoint
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> (Integer, Integer)
+  -> m BS.ByteString
+test_encodepoint node ca p = ByteArray.convert <$> simulate node ca "encodepoint" (Contracts.test_encodepoint [fromInteger $ fst p, fromInteger $ snd p])
+
+test_edwards
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider -> Address
+  -> (Integer, Integer)
+  -> (Integer, Integer)
+  -> m (Integer, Integer)
+test_edwards node ca x y = (\[xx, yy] -> (toInteger xx, toInteger yy)) <$> simulate node ca "edwareds" (Contracts.test_edwards [fromInteger $ fst x, fromInteger $ snd x] [fromInteger $ fst y, fromInteger $ snd y])
 
 test_curvedistance
   :: (MonadError String m, MonadIO m)
@@ -49,9 +158,9 @@ test_scalarmult
   :: (MonadError String m, MonadIO m)
   => Eth.Provider -> Address
   -> (Integer, Integer)
-  -> BS.ByteString
+  -> Integer
   -> m (Integer, Integer)
-test_scalarmult node ca (x, y) z = bimap toInteger toInteger <$> simulate node ca "test_scalarmult" (Contracts.scalarmult (fromInteger x, fromInteger y) (bytesToSol z))
+test_scalarmult node ca (x, y) z = bimap toInteger toInteger <$> simulate node ca "test_scalarmult" (Contracts.scalarmult (fromInteger x, fromInteger y) (fromInteger z))
 
 test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m BS.ByteString
 test_sha512 node ca a = bytesFromSol <$> simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
