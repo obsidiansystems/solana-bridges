@@ -58,7 +58,7 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, copyFile, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
-import System.IO (stderr, hPutStrLn)
+import System.IO (stdout, stderr, hFlush, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
@@ -345,7 +345,7 @@ data SolanaClientState = SolanaClientState
   { _solanaClientState_height :: Word64
   , _solanaClientState_offset :: Word64
   , _solanaClientState_full :: Word8 --Bool
-  , _solanaClientState_ethashElements :: Maybe Word8
+  , _solanaClientState_ethashElementCount :: Maybe Word8
   } deriving (Eq, Ord, Show, Generic)
 
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
@@ -368,18 +368,18 @@ relayEthereumToSolana configFile config = do
               then Just <$> Binary.getWord8
               else pure Nothing
 
-  client@(SolanaClientState highestBlock nextBlockOffset isFull ethashElementCount) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
-    (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
-      x :: Value <- eitherDecode' accountData
-      x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
-      () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
-      x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ Binary.runGetOrFail getSolanaClientState $ LBS.fromStrict x2
+      fetchClientState = System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+        (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
+          x :: Value <- eitherDecode' accountData
+          x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
+          () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
+          x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
+          bimap (view _3) (view _3) $ Binary.runGetOrFail getSolanaClientState $ LBS.fromStrict x2
 
-    bad -> error $ show bad
+        bad -> error $ show bad
 
-  print client
 
+  SolanaClientState highestBlock nextBlockOffset isFull _ethashElementCount <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
         (0, 0, 0) -> Nothing
         _ -> Just $ succ highestBlock
@@ -407,30 +407,38 @@ relayEthereumToSolana configFile config = do
                  -- , "--payer", "/dev/null"
                  ] <> args
 
-            relayEthashElements :: [HexString] -> IO ()
-            relayEthashElements elems = for_ ethashElementCount $ \count -> do
-              let previouslySent = fromIntegral count
-              ifor_ (drop previouslySent elems) $ \idx e -> do
+            relayEthashElements :: Word8 -> [HexString] -> IO ()
+            relayEthashElements elementsSent elems = do
+              let sent = fromIntegral elementsSent
+              for_ (zip [0..] $ drop sent elems) $ \(idx, e) -> do
                 let
                   d = RLP.RLPArray [RLP.RLPString $ unHexString e]
                   dataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize d
                   p = bridgeToolProc "provide-ethash-element"
                     ["--element", dataHex]
 
-                putStrLn $ "Providing ethash element #" <> show (previouslySent + idx) <> ": " <> show e
+                putStrLn $ "Relaying ethashproof element #" <> show (sent + idx) <> ": " <> show e
+                hFlush stdout
                 readCreateProcessWithExitCode p "" >>= \case
                   (ExitSuccess, txn, _) -> putStrLn txn
                   bad -> error $ show bad
+                hFlush stdout
                 pure ()
 
               pure ()
 
-        -- Ensure we can supply ethash elements before relaying anything
-        elems <- getEthashElements n >>= \case
-          Left err -> error (T.unpack err)
-          Right ee -> pure ee
+        client <- fetchClientState
+        print client
 
-        relayEthashElements elems
+        for_ (_solanaClientState_ethashElementCount client) $ \elementsSent -> do
+          let pendingBlock = n - 1
+          putStrLn $ "Contract is expecting ethash elements for block " <> show pendingBlock
+
+          elems <- getEthashElements pendingBlock >>= \case
+            Left err -> error (T.unpack err)
+            Right ee -> pure ee
+
+          relayEthashElements elementsSent elems
 
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing
