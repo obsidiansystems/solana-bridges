@@ -3,8 +3,6 @@ pragma experimental ABIEncoderV2;
 
 contract SolanaClient {
 
-// library Sha512 {
-
     function rightrotate(uint64 x, uint64 y) internal pure returns (uint64) {
         assert(y<64);
         return ( (x>>y) | uint64(x<<(64 - y)));
@@ -132,11 +130,6 @@ contract SolanaClient {
         return abi.encodePacked(result);
     }
 
-
-// }
-// library ed25519_simple {
-    // using Sha512 for Sha512.state;
-
     uint256 constant b = 256;
     uint256 constant q = 2**255 - 19;
     uint256 constant l = 2**252 + 27742317777372353535851937790883648493;
@@ -147,7 +140,6 @@ contract SolanaClient {
 
     uint256 constant By = 46316835694926478169428394003475163141307993866256225615783033603165251855960; // 4 * inv(5)
     uint256 constant Bx = 15112221349535400772501151409588531511454012693041857206046113283949847762202; // xrecover(By)
-    // uint256 constant B = [Bx % q,By % q]
 
 
     uint256 constant minus_one = q - 1;
