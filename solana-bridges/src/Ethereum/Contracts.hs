@@ -27,7 +27,8 @@ import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
 
 import Solana.Types
-import qualified Ethereum.Contracts.Abi as Contracts
+import qualified Ethereum.Contracts.Bindings as Contracts
+
 
 
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
