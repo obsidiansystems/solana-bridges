@@ -206,8 +206,8 @@ let
   shells = {
     ethereum-client-bpf = shell;
 
-    ethereum-client-x86 = with nixpkgs; mkShell {
-      buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
+    ethereum-client-x86 = nixpkgs.mkShell {
+      nativeBuildInputs = with nixpkgs.buildPackages; [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
     };
 
     solana-client-evm = with nixpkgs; mkShell {

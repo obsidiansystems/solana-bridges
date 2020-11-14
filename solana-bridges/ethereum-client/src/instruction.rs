@@ -1,6 +1,7 @@
 use crate::{
     eth::*,
     types::*,
+    pow_proof::*,
 };
 use rlp::{self, Rlp};
 use std::mem::size_of;
@@ -40,12 +41,6 @@ pub struct Challenge {
     pub element_index: u8,
     pub merkle_spine: Vec<H128>,
     pub element_pair: Box<ElementPair>,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
-pub struct ElementPair {
-    pub e0: H512,
-    pub e1: H512,
 }
 
 // TODO don't reallocate for these, and instead lazily parse the instruction.

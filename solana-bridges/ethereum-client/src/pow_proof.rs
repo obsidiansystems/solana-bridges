@@ -3,7 +3,7 @@ use arrayref::{
     mut_array_refs,
 };
 
-use ethereum_types::{H128, H256, H512};
+use ethereum_types::{H128, H512};
 
 use solana_sdk::hash::hash as sha256;
 
@@ -12,7 +12,6 @@ use rlp_derive::{RlpDecodable as RlpDecodableDerive, RlpEncodable as RlpEncodabl
 use crate::{
     eth::*,
     epoch_roots::EPOCH_ROOTS,
-    instruction::*,
     ledger_ring_buffer::*,
 };
 
@@ -39,37 +38,62 @@ impl std::ops::IndexMut<u8> for AccessedElements {
     }
 }
 
-pub fn apply_pow_element_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], index: u32) -> H128 {
 
-    fn truncate_to_h128(arr: H256) -> H128 {
-        H128(*array_ref!(&arr.0, 16, 16))
-    }
+pub fn hash_h128(arr: &[u8]) -> H128 {
+    let data = sha256(arr).0;
+    H128(*array_ref!(&data, 16, 16))
+}
 
-    fn hash_h128(l: H128, r: H128) -> H128 {
-        let mut data = [0u8; 64];
-        let (_, l_dst, _, r_dst) = mut_array_refs!(&mut data, 16, 16, 16, 16);
-        *l_dst = l.0;
-        *r_dst = r.0;
-        truncate_to_h128(H256(sha256(&data).0))
-    }
+#[derive(Debug, Eq, PartialEq, Clone, Copy, RlpEncodableDerive, RlpDecodableDerive)]
+pub struct ElementPair {
+    pub e0: H512,
+    pub e1: H512,
+}
 
-    let mut accum = {
+impl ElementPair {
+    pub fn reduce(&self) -> H128 {
         let mut data = [0u8; 128];
         {
-            let (low_dst, high_dst) = mut_array_refs!(&mut data, 64, 64);
-            *low_dst  = elems.e0.0;
-            *high_dst = elems.e1.0;
+            {
+                let (a_dst, b_dst) = mut_array_refs!(&mut data, 64, 64);
+                *a_dst = self.e0.0;
+                *b_dst = self.e1.0;
+            }
+            {
+                let (a_dst, b_dst, c_dst, d_dst) = mut_array_refs!(&mut data, 32, 32, 32, 32);
+                a_dst.reverse();
+                b_dst.reverse();
+                c_dst.reverse();
+                d_dst.reverse();
+            }
         }
-        truncate_to_h128(sha256(&data).0.into())
-    };
+        hash_h128(&data)
+    }
+
+}
+
+pub fn combine_h128(l: H128, r: H128) -> H128 {
+    let mut data = [0u8; 64];
+    let (_, l_dst, _, r_dst) = mut_array_refs!(&mut data, 16, 16, 16, 16);
+    *l_dst = l.0;
+    *r_dst = r.0;
+
+    hash_h128(&data)
+}
+
+pub fn apply_pow_element_merkle_proof(elems: &ElementPair, merkle_spine: &[H128], mut index: u32) -> H128 {
+    index /= 2; // because we are looking at a pair of elements.
+
+    let mut accum = elems.reduce();
 
     for (i, &sibling) in merkle_spine.iter().enumerate() {
         if (index >> i as u64) % 2 == 0 {
-            accum = hash_h128(accum, sibling);
+            accum = combine_h128(accum, sibling);
         } else {
-            accum = hash_h128(sibling, accum);
+            accum = combine_h128(sibling, accum);
         }
     }
+
     accum
 }
 

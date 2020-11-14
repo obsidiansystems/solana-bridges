@@ -573,7 +573,7 @@ pub fn test_pow_element_proof() -> Result<(), TestError> {
         .join("data/ethash-proof");
     let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
         let mut data = dir.clone();
-        data.push("mainnet-400000.json");
+        data.push("mainnet-400001.json");
         data
     });
 
@@ -584,7 +584,10 @@ pub fn test_pow_element_proof() -> Result<(), TestError> {
     };
 
     for (i, h) in block_with_proofs.elements_512().enumerate() {
-        ri.elements[i as u8].value = h;
+        ri.elements[i as u8] = AccessedElement {
+            address: 0x2C7A8A,
+            value: h,
+        };
     }
 
     //println!("{:#?}", ri);

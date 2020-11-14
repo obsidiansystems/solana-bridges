@@ -50,7 +50,6 @@ macro_rules! impl_from_slice_extend {
                 let mut res = $name::zero();
                 assert!(s.len() <= $name::len_bytes());
                 res.0[$name::len_bytes() - s.len()..].copy_from_slice(s);
-                res.0.reverse();
                 res
             }
         }
@@ -120,6 +119,8 @@ fn combine_dag_h256_to_h512<'a>(elements: &'a [H256]) -> impl Iterator<Item = H5
                 let (a_r, b_r) = mut_array_refs!(&mut buffer.0, 32, 32);
                 *a_r = a.0;
                 *b_r = b.0;
+                a_r.reverse();
+                b_r.reverse();
             }
             buffer
         })
