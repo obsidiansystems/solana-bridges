@@ -3,18 +3,19 @@
 
 module Solana.Types where
 
-import           Data.Aeson
-import           Data.Aeson.Types (toJSONKeyText)
-import           Data.Aeson.TH
-import qualified Data.Text as T
-import qualified Data.ByteString as BS
-import           Data.Word
-import Data.Time
-import           Data.Text (Text)
-import qualified Data.ByteString.Base58 as Base58
-import qualified Data.Text.Encoding as T
-import           Control.Applicative
+import Control.Applicative
+import Data.Aeson
+import Data.Aeson.TH
+import Data.Aeson.Types (toJSONKeyText)
 import Data.Map (Map)
+import Data.Text (Text)
+import Data.Time
+import Data.Word
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base58 as Base58
+import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 
 data JsonRpcVersion = JsonRpcVersion
 instance ToJSON JsonRpcVersion where toJSON _ = toJSON ("2.0" :: T.Text)
@@ -73,6 +74,17 @@ data SolanaEpochSchedule = SolanaEpochSchedule
   , _solanaEpochSchedule_slotsPerEpoch :: !Word64
   } deriving Show
 
+firstSlotInEpoch :: SolanaEpochSchedule -> Word64 -> Word64
+firstSlotInEpoch schedule =
+  let
+    warmup0 = (\x -> div (_solanaEpochSchedule_slotsPerEpoch schedule) $ 2 ^ x)
+      <$> reverse [1.._solanaEpochSchedule_firstNormalEpoch schedule]
+    warmup = Map.fromList $ zip [0..] $ scanl (+) 0 warmup0
+  in \epoch -> case Map.lookup epoch warmup of
+    Nothing -> _solanaEpochSchedule_firstNormalSlot schedule + (satsub epoch $ _solanaEpochSchedule_firstNormalEpoch schedule) * _solanaEpochSchedule_slotsPerEpoch schedule
+    Just slot -> slot
+
+
 epochFromSlot :: SolanaEpochSchedule -> Word64 -> SolanaEpochInfo
 epochFromSlot schedule =
   let
@@ -81,9 +93,9 @@ epochFromSlot schedule =
     warmup = zip [0..] $ zip warmup0 $ drop 1 $ scanl (+) 0 warmup0
   in \absoluteSlot ->
     let
-      (epoch, (slotsInEpoch, firstSlotInEpoch)) = if absoluteSlot >= _solanaEpochSchedule_firstNormalSlot schedule
+      (epoch, (slotsInEpoch, firstSlotInEpoch0)) = if absoluteSlot >= _solanaEpochSchedule_firstNormalSlot schedule
         then
-          ((absoluteSlot - _solanaEpochSchedule_firstNormalSlot schedule) `div` _solanaEpochSchedule_slotsPerEpoch schedule
+          (_solanaEpochSchedule_firstNormalEpoch schedule + (absoluteSlot - _solanaEpochSchedule_firstNormalSlot schedule) `div` _solanaEpochSchedule_slotsPerEpoch schedule
           , ( _solanaEpochSchedule_slotsPerEpoch schedule
             , _solanaEpochSchedule_firstNormalSlot schedule + (epoch - _solanaEpochSchedule_firstNormalEpoch schedule) * _solanaEpochSchedule_slotsPerEpoch schedule
             )
@@ -92,7 +104,7 @@ epochFromSlot schedule =
           head $ dropWhile (\(_, (_, firstSlotInEpoch')) -> firstSlotInEpoch' < absoluteSlot) warmup
     in SolanaEpochInfo
       { _solanaEpochInfo_slotsInEpoch = slotsInEpoch
-      , _solanaEpochInfo_slotIndex = absoluteSlot - (firstSlotInEpoch - slotsInEpoch)
+      , _solanaEpochInfo_slotIndex = absoluteSlot - firstSlotInEpoch0
       , _solanaEpochInfo_absoluteSlot = absoluteSlot
       , _solanaEpochInfo_blockHeight = 0 -- or maybe this should be undefined?
       , _solanaEpochInfo_epoch = epoch
@@ -163,6 +175,11 @@ data SolanaBlockCommitment = SolanaBlockCommitment
   { _solanaBlockCommitment_totalStake :: !Word64
   , _solanaBlockCommitment_commitment :: ![Word64]
   } deriving Show
+
+satsub :: Word64 -> Word64 -> Word64
+satsub x y
+  | x <= y = 0
+  | otherwise = x - y
 
 
 do

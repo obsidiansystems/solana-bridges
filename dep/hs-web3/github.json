@@ -1,8 +1,8 @@
 {
   "owner": "obsidiansystems",
   "repo": "hs-web3",
-  "branch": "geth-debug",
+  "branch": "sol",
   "private": false,
-  "rev": "dac02c09595c5aa47d3e124369d2006e41134b96",
-  "sha256": "0kwnx82nkhhkjwshywhjd5c0r8ilkzkb903xm3kz0xnaysgfl8vb"
+  "rev": "f048da76556ca73c79f16f43d2d6b173fb9a05c9",
+  "sha256": "10sc8d6inpjgls6ygjjhjz3an0ikmrgh6h2497j1gi1q8sgzqf4k"
 }

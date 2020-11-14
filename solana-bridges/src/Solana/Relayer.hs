@@ -1,14 +1,15 @@
-{-# LANGUAGE EmptyCase #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE PackageImports #-}
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE EmptyCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
 
@@ -16,26 +17,32 @@ module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
 import Control.Monad
 import Control.Monad.Catch (catch)
 import Control.Monad.Catch (finally)
-import Control.Monad.Except (runExceptT, throwError, ExceptT(..))
+import Control.Monad.Except (runExceptT, throwError, ExceptT(..), MonadError)
 import Control.Monad.Fix (fix)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (liftIO, MonadIO)
 import Control.Monad.Trans (lift)
+import Crypto.Hash (hashWith)
+import Crypto.Hash.Algorithms (SHA256(..), SHA512(..))
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.Aeson.Types (Parser, explicitParseField, listParser)
 import Data.Bits
 import Data.ByteArray.HexString
+import Data.Constraint
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
+import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
+import Data.Map (Map)
 import Data.Maybe(fromMaybe)
 import Data.Semigroup (stimesMonoid)
 import Data.Solidity.Prim.Address (Address)
@@ -57,40 +64,36 @@ import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
 import System.Process (CreateProcess(..), createProcess, proc, readProcess, readCreateProcessWithExitCode, spawnProcess, terminateProcess, waitForProcess)
 import System.Which (staticWhich)
+import Text.Read (readEither)
 import qualified Blockchain.Data.RLP as RLP
+import qualified Crypto.Error
+import qualified Crypto.PubKey.Ed25519
 import qualified Data.Binary.Get as Binary
+import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Char
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Network.Ethereum.Api.Debug as Eth
-import qualified Network.Ethereum.Api.Eth as Eth
-  ( getTransactionReceipt
-  , getBlockByNumber
-  , sendTransaction)
+import qualified Network.Ethereum.Api.Eth as Eth (getBlockByNumber)
+import qualified Network.Ethereum.Api.Eth as Eth (getTransactionReceipt)
+import qualified Network.Ethereum.Api.Eth as Eth (sendTransaction)
 import qualified Network.Ethereum.Api.Types as Eth
-  ( Block(..)
-  , Call(..)
-  , TxReceipt(..)
-  , Quantity (..)
-  )
 import qualified Network.Web3.Provider as Eth
 import qualified System.Process.ByteString.Lazy
 
 import Ethereum.Contracts as Contracts
+import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
-
-
-satsub :: Word64 -> Word64 -> Word64
-satsub x y
-  | x <= y = 0
-  | otherwise = x - y
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -107,18 +110,18 @@ mainRelayer = do
       progName <- getProgName
       hPutStrLn stderr $ "USAGE: " <> progName <> " CONFIGFILE.json"
 
-type SolanaToEthereumConfig = (Eth.Provider, Address)
+type SolanaToEthereumConfig = (Eth.Provider, Address, SolanaRpcConfig)
 
 mainRelayerEth :: IO ()
 mainRelayerEth = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile
-      (node, address) :: SolanaToEthereumConfig <- case eitherDecodeStrict' configData of
+      (node, address, solanaConfig) :: SolanaToEthereumConfig <- case eitherDecodeStrict' configData of
           Right c -> pure c
           Left e -> fail $ show e
 
-      relaySolanaToEthereum node address
+      relaySolanaToEthereum node solanaConfig address
 
     _ -> do
       progName <- getProgName
@@ -137,27 +140,35 @@ uriToProvider uri = case uriScheme uri of
 mainDeploySolanaClientContract :: IO ()
 mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
-    [] -> Right def
-    url:[] -> case parseURI url of
-      Just url' -> uriToProvider url'
-      Nothing -> Left "invalid uri"
+    [] -> Right (def, SolanaRpcConfig "127.0.0.1" 8899 8900)
+    ethUrl:solHost:solPort:solWs:[] -> do
+      ethProvider <- case parseURI ethUrl of
+        Just ethUrl' -> uriToProvider ethUrl'
+        Nothing -> Left "invalid uri"
+      solPort' <- first T.pack $ readEither solPort
+      solWs' <- first T.pack $ readEither solWs
+      pure $ (,) ethProvider $ SolanaRpcConfig (T.encodeUtf8 $ T.pack solHost) solPort' solWs'
     _ -> Left ""
-
-    -- url:[] -> do
 
   case mProvider of
     Left err -> do
       progName <- getProgName
       T.hPutStrLn stderr $ T.unlines
-        ["USAGE: " <> T.pack progName <> " [PROVIDER]"
-        , "\tPROVIDER\tethereum provider url"
+        ["USAGE: " <> T.pack progName <> " [ETH-PROVIDER SOLANA-RPC-HOST SOLANA-PORT SOLANA-WEBSOCKET]"
+        , "\tETH-PROVIDER\tethereum provider url"
         , "\t\thttp://host[:port]"
         -- , "\t\tws://host:port"
+        , "\tSOLANA-RPC-HOST\tsolana validator host"
+        , "\t\thost"
+        , "\tSOLANA-PORT\tsolana validator rpc port"
+        , "\t\tport"
+        , "\tSOLANA-WEBSOCKET\tsolana validator websocket port"
+        , "\t\tport"
         , err
         ]
-    Right provider -> do
-      ca <- deploySolanaClientContract provider
-      let config :: SolanaToEthereumConfig = (provider, ca)
+    Right (provider, solanaConfig) -> do
+      ca <- deploySolanaClientContract provider solanaConfig
+      let config :: SolanaToEthereumConfig = (provider, ca, solanaConfig)
 
       LBS.putStr $ encode config
       putStrLn ""
@@ -172,8 +183,9 @@ runEthereumTestnet = do
 
 deployAndRunSolanaRelayer :: IO ()
 deployAndRunSolanaRelayer = do
-  ca <- deploySolanaClientContract def
-  relaySolanaToEthereum def ca
+  let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900)
+  ca <- deploySolanaClientContract def solanaConfig
+  relaySolanaToEthereum def solanaConfig ca
 
 runSolanaTestnet :: IO ()
 runSolanaTestnet = do
@@ -322,7 +334,7 @@ createContract :: Address -> HexString -> Call
 createContract fromAddr hex = Eth.Call
     { callFrom = Just fromAddr
     , callTo = Nothing
-    , callGas = Just 1e6
+    , callGas = Just 25e6
     , callGasPrice = Just 1
     , callValue = Nothing
     , callData = Just hex
@@ -409,9 +421,158 @@ blockToHeader rlp = blockHeader
     RLP.RLPArray (blockHeader:_) = RLP.rlpDeserialize blockData
 
 
+testSolanaCrypto :: Eth.Provider -> Address -> IO ()
+testSolanaCrypto node ca = do
+  print ca
+  let
+    toShortHex :: BS.ByteString -> String
+    toShortHex = \msg ->
+        (show $ if BS.length msg > 16
+          then (B16.encode (BS.take 8 msg) <> "..." <> B16.encode (BS.drop (BS.length msg - 8) msg))
+          else (B16.encode msg)) <> show (BS.length msg) <> " bytes"
+    check_ed25519_testvector (HexString msg) pkHex@(HexString pk) sigHex@(HexString sig) = do
+      liftIO $ putStrLn $ "TEST ed25519: " <> toShortHex msg
+      liftIO $ putStrLn $ "\tpublic key:" <> show pkHex <> " signature: " <> show sigHex
+      testSig <- test_ed25519_verify node ca sig msg (Base58ByteString pk)
+      unless testSig $ error $ unlines
+        [ "ed25519_valid test vector failed:"
+        , "sig:" <> show (HexString sig)
+        , "msg:" <> show msg
+        , "pubkey" <> show (HexString pk)
+        ]
+      rcpt <- test_ed25519_verify_gas node ca sig msg (Base58ByteString pk)
+      liftIO $ putStrLn $ "\tGas used: " <> show (Eth.receiptCumulativeGasUsed rcpt)
 
-deploySolanaClientContract :: Eth.Provider -> IO Address
-deploySolanaClientContract node = do
+    check_sha512_testvector
+      :: (MonadIO m, MonadError String m)
+      => BS.ByteString -> HexString -> m ()
+    check_sha512_testvector msg (HexString expectedDigest) = do
+      liftIO $ putStrLn $ "TEST sha512: " <> toShortHex msg
+      testDigest <- test_sha512 node ca msg
+      unless (expectedDigest == testDigest) $ error $ unlines
+        [ "sha512 test vector failed:"
+        , "msg: " <> show msg
+        , "expected: " <> show (HexString expectedDigest)
+        , "got: " <> show (HexString testDigest)
+        ]
+      rcpt <- test_sha512_gas node ca msg
+      liftIO $ putStrLn $ "\tGas used: " <> show (Eth.receiptCumulativeGasUsed rcpt)
+
+    check_sha512_synthetic
+      :: (MonadIO m, MonadError String m)
+      => BS.ByteString -> m ()
+    check_sha512_synthetic msg = do
+      let expectedDigest = ByteArray.convert $ hashWith SHA512 msg
+      check_sha512_testvector msg (HexString expectedDigest)
+
+    check_value :: (Applicative m, Eq a, Show a) => String -> a -> a -> m ()
+    check_value hint expected actual = do
+      unless (expected == actual) $ error $ unlines
+        [ hint <> ": test failed"
+        , "expected: " <> show expected
+        , "got: " <> show actual
+        ]
+
+    check_ed25519_synthetic sk msg = do
+      let
+        pk = Crypto.PubKey.Ed25519.toPublic sk
+        pk' = ByteArray.convert $ pk
+        sig = ByteArray.convert $ Crypto.PubKey.Ed25519.sign sk pk msg
+      check_ed25519_testvector (HexString msg) (HexString pk') (HexString sig)
+
+
+  res <- runExceptT $ do
+    _ <- getInitialized node ca
+
+    do
+      implTestData <- liftIO $ LBS.readFile "test-extras/ed25519-low-level-tests.txt"
+      for_ (LBS.split (fromIntegral $ Data.Char.ord '\n') implTestData) $ \line -> do
+        case eitherDecode' line of
+          Left bad -> liftIO $ print (bad, line)
+          Right (TestCryptCase fn args expectedResult) -> do
+            Dict <- pure $ testCaseHasOut @Eq fn
+            Dict <- pure $ testCaseHasOut @Show fn
+            result <- test_impl node ca fn args
+            unless (result == expectedResult) $ error $ unlines
+              [ "ed25519 impl test vector failed:"
+              , "test:" <> show line
+              , "expected:" <> show expectedResult
+              , "actual:" <> show result
+              ]
+
+    check_ed25519_testvector "0x"
+      "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+      "0xe5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+    check_ed25519_testvector "0xa750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3"
+      "0xb49f3a78b1c6a7fca8f3466f33bc0e929f01fba04306c2a7465f46c3759316d9"
+      "0x04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b"
+
+    check_sha512_testvector "abc"
+      "0xDDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A2192992A274FC1A836BA3C23A3FEEBBD454D4423643CE80E2A9AC94FA54CA49F"
+
+    check_sha512_synthetic
+      "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
+
+    for_ [0, 1, 11, 110,111, 112, 113, 126, 127,128,129,130] $ \len -> do
+      let msg = BS.pack $ take len $ cycle [0..255]
+      liftIO $ putStrLn $ "sha512:" <> show len
+      check_sha512_synthetic msg
+
+    let
+      -- derive a key very insecurely
+      kdf :: BS.ByteString -> Crypto.PubKey.Ed25519.SecretKey
+      kdf x = Crypto.Error.throwCryptoError $ Crypto.PubKey.Ed25519.secretKey $ hashWith SHA256 x
+
+    check_ed25519_testvector "0xddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+      "0xec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf"
+      "0xdc2a4459e7369633a52b1bf277839a00201009a3efbf3ecb69bea2186c26b58909351fc9ac90b3ecfdfbc7c66431e0303dca179c138ac17ad9bef1177331a704"
+
+    check_ed25519_testvector "0x72"
+      "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
+      "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+
+    for_ [0..20] $ \len -> do
+      check_ed25519_synthetic
+        (kdf $ T.encodeUtf8 $ T.pack $ show len)
+        (BS.pack $ take len $ cycle [0..255])
+
+    check_sha512_synthetic "r"
+    for_ [0..257] $ \len -> do
+      let
+        a = BS.pack $ take 32 $ repeat 97
+        b = BS.pack $ take 32 $ repeat 98
+        msg = BS.pack $ take len $ cycle [0..255]
+      test_packMessage node ca (Base58ByteString a) (Base58ByteString b) msg >>= check_value "test_packMessage" (a <> b <> msg)
+
+
+    liftIO $ putStrLn "c25519-decodeint"
+    test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= check_value "c25519-decodeint" 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
+
+    liftIO $ putStrLn "c25519-curvedistance"
+    test_curvedistance node ca
+      ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
+      , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
+      >>= check_value "c25519-curvedistance" 0
+
+
+    liftIO $ putStrLn "c25519-xrecover"
+    test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
+    
+    liftIO $ putStrLn "c25519-decodepoint"
+    test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
+
+    liftIO $ putStrLn "c25519-scalarmult"
+    test_scalarmult node ca (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,0x6666666666666666666666666666666666666666666666666666666666666658) 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
+      >>= check_value "c25519-scalarmult"
+        (0x114237e016d3f2598171d4cc242eee95460ae1ed35857f80c2d214b7e9804938,0x2794ddddd6a5cf42e54475f290e8c5d92c9c6f36c5c16df1e5f992af998a6cfe)
+
+    liftIO $ putStrLn "OK"
+  case res of
+    Right () -> pure ()
+    Left bad -> error bad
+
+deploySolanaClientContractImpl :: Eth.Provider -> IO Address
+deploySolanaClientContractImpl node = do
   let
     runWeb3'' = runWeb3' node
 
@@ -439,60 +600,108 @@ deploySolanaClientContract node = do
 
   res <- runExceptT $ do
     tx <- deployContract
-
     receipt <- waitForTx tx
-    ca <- getContractAddress receipt
-    liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
-    pure ca
+    getContractAddress receipt
+
   case res of
     Left err -> error err
     Right ca -> pure ca
 
-solanaClientContractBin :: BS.ByteString
-solanaClientContractBin = $(embedFile "solana-client/dist/SolanaClient.bin")
 
-relaySolanaToEthereum :: Eth.Provider -> Address -> IO ()
-relaySolanaToEthereum node ca = do
+
+deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
+deploySolanaClientContract node solanaConfig = do
+  ca <- deploySolanaClientContractImpl node
+  res <- runExceptT $ do
+    liftIO $ hPutStrLn stderr $ "Initializing contract: " <> show ca
+
+    ExceptT $ withSolanaWebSocket solanaConfig $ do
+      liftIO $ putStrLn "Initializing contract"
+      -- get the latest confirmed block in
+      epochSchedule <- getEpochSchedule
+      bootEpochInfo <- getEpochInfo
+      let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
+      bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+
+      let
+        slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
+        epochInfo0 = epochFromSlot epochSchedule slot0
+
+      leaderSchedule <- getLeaderSchedule slot0
+      Right (Just block0) <- getConfirmedBlock slot0
+
+      let
+        slotLeader0 :: Base58ByteString
+        slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
+      runExceptT $ initialize node ca slot0 block0 slotLeader0 epochSchedule
+
+    liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
+
+  case res of
+    Left err -> error err
+    Right () -> do
+      let
+        loopUntilInitialized :: Int -> IO ()
+        loopUntilInitialized n = do
+          runExceptT (getInitialized node ca) >>= \case
+            Right True -> pure ()
+            bad -> if n <= 0
+              then error $ "contract not initialized" <> show bad
+              else do
+                threadDelay 1e6
+                loopUntilInitialized (pred n)
+      loopUntilInitialized 10
+      pure ca
+
+
+relaySolanaToEthereum :: Eth.Provider -> SolanaRpcConfig -> Address -> IO ()
+relaySolanaToEthereum node solanaConfig ca = do
+  -- map from epoch to schedule
+  leaderSchedulesRef :: MVar (Map Word64 SolanaLeaderSchedule) <- newMVar Map.empty
+
   res <- runExceptT $ do
 
     void $ getSeenBlocks node ca
 
-    Right _ <- ExceptT $ withSolanaWebSocket (SolanaRpcConfig "127.0.0.1" 8899 8900) $ do
+    Right _ <- ExceptT $ withSolanaWebSocket solanaConfig $ do
       liftIO $ T.putStrLn "Connected to solana node"
+
+      runExceptT (getInitialized node ca) >>= \case
+        Right True -> pure ()
+        bad -> error $ "contract not initialized" <> show bad
 
       epochSchedule <- getEpochSchedule
       let
         epochFromSlot' = epochFromSlot epochSchedule
+        firstSlotInEpoch' = firstSlotInEpoch epochSchedule
 
         loop :: SolanaRpcM IO ()
         loop = do
-          -- epochSchedule <- getEpochSchedule
-
-          Right initializedAtStartup <- lift $ runExceptT $ getInitialized node ca
-
           bootEpochInfo <- getEpochInfo
+          contractSlot <- do
+            Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
+            pure contractSlot
 
-          contractSlot <- if initializedAtStartup
-            then do
-              Right contractSlot <- lift $ runExceptT $ getLastSlot node ca
-              pure contractSlot
-            else do
-              liftIO $ putStrLn "Initializing contract"
-              -- get the latest confirmed block in
-              let bootSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
-              bootConfirmedBlock <- getConfirmedBlocks (satsub bootSlot 128) bootSlot
+          let
+            splitGE k xs =
+              let (myBelow, x, above) = Map.splitLookup k xs
+              in (,) myBelow $ case x of
+                Nothing -> above
+                Just x' -> Map.insert k x' above
 
-              let
-                slot0 = fromMaybe (error "no block found") $ lastOf traverse bootConfirmedBlock
-                epochInfo0 = epochFromSlot' slot0
-              Right (Just block0) <- getConfirmedBlock slot0
-              Right () <- lift $ runExceptT $ do
-                setEpoch node ca (_solanaEpochInfo_epoch epochInfo0) Map.empty
-                liftIO $ threadDelay 4e6
-                addBlocks node ca [(slot0, block0)]
-              pure slot0
+            neededSchedules = Set.fromList [_solanaEpochInfo_epoch (epochFromSlot' contractSlot).._solanaEpochInfo_epoch bootEpochInfo]
 
-          confirmedBlockSlots <- take 64 <$> getConfirmedBlocks (succ contractSlot) (_solanaEpochInfo_absoluteSlot bootEpochInfo)
+          restoreSolanaRpcM <- unliftSolanaRpcM
+
+          leaderSchedules <- liftIO $ modifyMVar leaderSchedulesRef $ \knownSchedules -> restoreSolanaRpcM $ do
+            let
+              haveSchedules = Map.keysSet knownSchedules
+            newSchedules <- itraverse (\epoch () -> getLeaderSchedule $ firstSlotInEpoch' epoch) $ Map.fromSet (const ()) $ neededSchedules `Set.difference` haveSchedules
+            let
+              allKnownSchedules = Map.union knownSchedules newSchedules
+              newKnownSchedules = snd $ splitGE (_solanaEpochInfo_epoch (epochFromSlot' contractSlot)) allKnownSchedules
+            pure (newKnownSchedules, Map.restrictKeys allKnownSchedules neededSchedules)
+          confirmedBlockSlots <- getConfirmedBlocksWithLimit (succ contractSlot) 64 -- (_solanaEpochInfo_absoluteSlot bootEpochInfo)
           confirmedBlocks' <- traverse getConfirmedBlock confirmedBlockSlots
           let Compose (Right (Just confirmedBlocks)) = traverse Compose confirmedBlocks'
               blocksAndSlots = zip confirmedBlockSlots confirmedBlocks
@@ -507,7 +716,9 @@ relaySolanaToEthereum node ca = do
               ]
           when (not $ null confirmedBlocks) $ do
             liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-            Right () <- lift $ runExceptT $ addBlocks node ca blocksAndSlots
+            lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
+              Right () -> pure ()
+              Left bad -> error $ show bad
             liftIO $ putStrLn "Submitted new slots to contract"
             runExceptT (getSeenBlocks node ca) >>= \case
               Left _ -> pure ()
@@ -630,6 +841,7 @@ runGeth runDir = do
     privateArgs = [ "--nodiscover" ]
     nodeArgs = [ "--identity", "Testnet ethereum node 0"]
     unlockArgs = [ "--allow-insecure-unlock", "--unlock", unlockedAddress, "--password", passFile ]
+    gascapArgs = ["--rpc.gascap", show @Integer 25e7]
 
   putStrLn $ "Creating genesis file: " <> genesisFile
   BS.writeFile (runDir <> "/Genesis.json") genesisBlock
@@ -640,7 +852,7 @@ runGeth runDir = do
   BS.writeFile (dataDir <> "/keystore/" <> ethereumAccountFile) ethereumAccount
   BS.writeFile passFile ethereumAccountPass
 
-  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs ]
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs, gascapArgs]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
