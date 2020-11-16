@@ -27,10 +27,11 @@ pub struct StorageT<X: ?Sized> {
     pub height: u64,
     pub offset: usize,
     pub full: bool,
-    /// Which elements to do we have:
-    /// None: ready for next block
-    /// Some(x): bitvector for which element-groups we have
-    pub ethash_elements: Option<u16>,
+    /// Which elements do we *not* have, specified as an (inverted) bitvector of which elements
+    /// chunks we've received.
+    /// 00..00: ready for next block
+    /// otherwise: ready for next chunk for current block
+    pub ethash_elements: u16,
     pub headers: X,
 }
 

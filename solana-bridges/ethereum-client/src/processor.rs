@@ -78,18 +78,17 @@ pub fn process_instruction<'a>(
             let ref mut data = *interp_mut(&mut *raw_data)?;
             println!("{} {:?}", ppe.chunk_offset, data.ethash_elements);
             data.ethash_elements = match data.ethash_elements {
-                None => panic!("Waiting for new block, cannot accept another PoW element."),
-                Some(bit_vec) => {
+                0 => panic!("Waiting for new block, cannot accept another PoW element."),
+                mut bit_vec => {
                     let block = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
                     for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
                         let offset = ppe.chunk_offset * ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION;
                         block.elements[offset + i].value = ppe.elements[i as usize];
                     }
-                    let new_bit_vec = bit_vec | (1 << ppe.chunk_offset);
-                    if new_bit_vec != !0 {
+                    bit_vec &= !(1 << ppe.chunk_offset);
+                    if bit_vec != 0 {
                         // keep waiting for elements
-                        Some(new_bit_vec)
                     } else {
                         // We have all the blocks now, verify PoW and write addresses
                         let pow_valid = verify_pow_indexes(block);
@@ -97,9 +96,8 @@ pub fn process_instruction<'a>(
                             return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
                                 .to_program_error());
                         }
-                        // indicate we are ready for new address
-                        None
                     }
+                    bit_vec
                 },
             }
         }
@@ -209,10 +207,10 @@ pub fn write_new_block(
     header: &BlockHeader,
     old_total_difficulty_opt: Option<&U256>,
 ) -> Result<(), ProgramError> {
-    if data.ethash_elements.is_some() {
+    if data.ethash_elements != 0 {
         panic!("expected PoW element for previous block, but we're trying to write a new block")
     }
     write_new_block_unvalidated(data, header, old_total_difficulty_opt)?;
-    data.ethash_elements = Some(0);
+    data.ethash_elements = !0;
     Ok(())
 }
