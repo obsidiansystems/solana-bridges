@@ -51,8 +51,18 @@ fn block_construction() -> Result<(), TestError> {
     Ok(())
 }
 
+#[test]
+fn test_instructions_0() -> Result<(), TestError> {
+    test_instructions(20, 30)
+}
+
+
 #[ignore]
 #[quickcheck]
+fn test_instructions_quickcheck(buf_len: usize, block_count: usize) -> Result<(), TestError> {
+    test_instructions(buf_len, block_count)
+}
+
 fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
     buf_len *= std::mem::size_of::<RingItem>() / 7;
     buf_len += MIN_BUF_SIZE;
