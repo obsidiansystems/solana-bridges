@@ -348,8 +348,8 @@ createContract fromAddr hex = Eth.Call
 data SolanaClientState = SolanaClientState
   { _solanaClientState_height :: Word64
   , _solanaClientState_offset :: Word64
-  , _solanaClientState_full :: Word8 --Bool
-  , _solanaClientState_ethashElementCount :: Maybe Word8
+  , _solanaClientState_full :: Bool
+  , _solanaClientState_missingElementsBitmask :: Word16
   } deriving (Eq, Ord, Show, Generic)
 
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
@@ -363,14 +363,11 @@ relayEthereumToSolana configFile config = do
       getSolanaClientState = SolanaClientState
         <$> Binary.getWord64le
         <*> Binary.getWord64le
-        <*> Binary.getWord8
-        <*> getElements
+        <*> getFull
+        <*> Binary.getWord16le
         where
-          getElements = do
-            tag <- Binary.getWord8
-            if tag == 1
-              then Just <$> Binary.getWord8
-              else pure Nothing
+          -- 'bool' is aligned to 16 bits for some reason, but only one bit can be non-zero so we don't care about endianness
+          getFull = fmap (== 0) Binary.getWord16le
 
       fetchClientState = System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
         (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
@@ -385,12 +382,15 @@ relayEthereumToSolana configFile config = do
 
   SolanaClientState highestBlock nextBlockOffset isFull _ethashElementCount <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
-        (0, 0, 0) -> Nothing
+        (0, 0, False) -> Nothing
         _ -> Just $ succ highestBlock
 
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop :: Word64 -> IO (Either Eth.Web3Error Void)
       loop n = do
+        client <- fetchClientState
+        print client
+
         let doEth :: forall resp. Eth.Web3 resp -> IO resp
             doEth m = do
               res :: Either Eth.Web3Error a <- catch (runWeb3 m)
@@ -411,38 +411,35 @@ relayEthereumToSolana configFile config = do
                  -- , "--payer", "/dev/null"
                  ] <> args
 
-            relayEthashElements :: Word8 -> [HexString] -> IO ()
-            relayEthashElements elementsSent elems = do
-              let sent = fromIntegral elementsSent
-                  chunkSize = ethashElementsPerInstruction
-                  chunks = chunksOf chunkSize $ drop sent elems
-              ifor_ chunks $ \idx chunk -> do
-                let
-                  offset = sent + chunkSize * idx;
-                  dataHex = T.concat $ T.decodeLatin1 . B16.encode . unHexString <$> chunk
-                  p = bridgeToolProc "provide-ethash-element"
-                    ["--element", dataHex]
+            relayEthashElements :: Word16 -> IO ()
+            relayEthashElements missingElementsBitmask = unless (missingElementsBitmask == zeroBits) $ do
+              let pendingBlock = n - 1
 
-                putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
-                putStrLn $ show chunk
-                hFlush stdout
-                readCreateProcessWithExitCode p "" >>= \case
-                  (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
-                  bad -> error $ show bad
+              elems <- getEthashElements pendingBlock >>= \case
+                Left err -> error (T.unpack err)
+                Right ee -> pure ee
 
+              let
+                chunkSize = ethashElementsPerInstruction
+                chunks = chunksOf chunkSize elems
 
-        client <- fetchClientState
-        print client
+              ifor_ chunks $ \idx chunk ->
+                when (testBit missingElementsBitmask idx) $ do
+                  let
+                    offset = chunkSize * idx;
+                    raw = BS.singleton (fromIntegral idx) : fmap unHexString chunk
+                    dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
+                    p = bridgeToolProc "provide-ethash-element"
+                      ["--element", dataHex]
 
-        for_ (_solanaClientState_ethashElementCount client) $ \elementsSent -> do
-          let pendingBlock = n - 1
-          putStrLn $ "Contract has seen " <> show elementsSent <> " ethash elements for block " <> show pendingBlock
+                  putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
+                  putStrLn $ show chunk
+                  hFlush stdout
+                  readCreateProcessWithExitCode p "" >>= \case
+                    (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
+                    bad -> error $ show bad
 
-          elems <- getEthashElements pendingBlock >>= \case
-            Left err -> error (T.unpack err)
-            Right ee -> pure ee
-
-          relayEthashElements elementsSent elems
+        relayEthashElements (_solanaClientState_missingElementsBitmask client)
 
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing

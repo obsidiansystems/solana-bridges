@@ -91,7 +91,7 @@ pub fn process_instruction<'a>(
                     if bit_vec != ElementChunkSet::READY_FOR_BLOCK {
                         // keep waiting for elements
                     } else {
-                        // We have all the blocks now, verify PoW and write addresses
+                        // We have all the elements now, verify PoW
                         let pow_valid = verify_pow_indexes(block);
                         if !pow_valid {
                             return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
