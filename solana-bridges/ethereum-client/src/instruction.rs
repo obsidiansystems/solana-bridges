@@ -3,6 +3,8 @@ use crate::{
     types::*,
     pow_proof::*,
 };
+use arrayref::array_ref;
+
 use rlp::{self, Rlp};
 use std::mem::size_of;
 
@@ -18,9 +20,18 @@ pub struct Initialize {
     pub header: Box<BlockHeader>,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ProvidePowElement {
-    pub element: Box<H512>,
+    pub elements: [H512; Self::ETHASH_ELEMENTS_PER_INSTRUCTION],
+}
+
+impl ProvidePowElement {
+    pub const ETHASH_ELEMENTS_PER_INSTRUCTION: usize = 8;
+
+    pub fn new () -> Self {
+        Self { elements: [H512::zero(); Self::ETHASH_ELEMENTS_PER_INSTRUCTION] }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
@@ -73,7 +84,9 @@ impl Instruction {
             }
             Self::ProvidePowElement(ref block) => {
                 buf.push(3);
-                buf.extend_from_slice(&rlp::encode(block));
+                for e in &block.elements {
+                    buf.extend_from_slice(&e.to_fixed_bytes());
+                }
             }
             Self::ProveInclusion(ref pi) => {
                 buf.push(4);
@@ -102,10 +115,14 @@ impl Instruction {
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Header, e))
                 .map(Self::NewBlock),
-            3 => rlp
-                .as_val()
-                .map_err(|e| CustomError::from_rlp(DecodeFrom::PowElement, e))
-                .map(Self::ProvidePowElement),
+            3 => {
+                let mut ppe = ProvidePowElement::new();
+                for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
+                    let bytes: &[u8; 64] = array_ref!(&rest, 64*i, 64);
+                    ppe.elements[i] = H512::from_slice(bytes);
+                }
+                Ok(Self::ProvidePowElement(Box::new(ppe)))
+            },
             4 => rlp
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))

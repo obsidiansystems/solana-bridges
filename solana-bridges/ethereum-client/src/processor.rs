@@ -79,20 +79,22 @@ pub fn process_instruction<'a>(
             data.ethash_elements = match data.ethash_elements {
                 None => panic!("Waiting for new block, cannot accept another PoW element."),
                 Some(n) => {
-                    let parent = read_prev_block_mut(data)?
+                    let block = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
-                    parent.elements[n].value = *ppe.element;
-                    if n < 127 {
-                        // do nothing but increment
-                        Some(n + 1)
+                    for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
+                        block.elements[n + (i as u8)].value = ppe.elements[i];
+                    }
+                    let new_count = n + (ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION as u8);
+                    if new_count < 128 {
+                        // keep waiting for elements
+                        Some(new_count)
                     } else {
                         // We have all the blocks now, verify PoW and write addresses
-                        let pow_valid = verify_pow_indexes(parent);
+                        let pow_valid = verify_pow_indexes(block);
                         if !pow_valid {
                             return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
                                 .to_program_error());
                         }
-
                         // indicate we are ready for new address
                         None
                     }

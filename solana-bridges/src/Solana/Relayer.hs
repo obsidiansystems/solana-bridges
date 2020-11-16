@@ -42,6 +42,7 @@ import Data.Foldable
 import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
+import Data.List.Split (chunksOf)
 import Data.Map (Map)
 import Data.Maybe(fromMaybe)
 import Data.Semigroup (stimesMonoid)
@@ -58,7 +59,7 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, copyFile, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
-import System.IO (stderr, hPutStrLn)
+import System.IO (stdout, stderr, hFlush, hPutStrLn)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
@@ -94,6 +95,9 @@ import Ethereum.Contracts as Contracts
 import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
+
+ethashElementsPerInstruction :: Int
+ethashElementsPerInstruction = 8
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -341,6 +345,13 @@ createContract fromAddr hex = Eth.Call
     , callNonce = Nothing
     }
 
+data SolanaClientState = SolanaClientState
+  { _solanaClientState_height :: Word64
+  , _solanaClientState_offset :: Word64
+  , _solanaClientState_full :: Word8 --Bool
+  , _solanaClientState_ethashElementCount :: Maybe Word8
+  } deriving (Eq, Ord, Show, Generic)
+
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
 relayEthereumToSolana configFile config = do
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
@@ -349,16 +360,30 @@ relayEthereumToSolana configFile config = do
         , "--output", "json"
         ]
 
-  (highestBlock, nextBlockOffset, isFull) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
-    (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
-      x :: Value <- eitherDecode' accountData
-      x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
-      () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
-      x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ Binary.runGetOrFail ((,,) <$> Binary.getWord64le <*> Binary.getWord64le <*> Binary.getWord8) $ LBS.fromStrict x2
+      getSolanaClientState = SolanaClientState
+        <$> Binary.getWord64le
+        <*> Binary.getWord64le
+        <*> Binary.getWord8
+        <*> getElements
+        where
+          getElements = do
+            tag <- Binary.getWord8
+            if tag == 1
+              then Just <$> Binary.getWord8
+              else pure Nothing
 
-    bad -> error $ show bad
+      fetchClientState = System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+        (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
+          x :: Value <- eitherDecode' accountData
+          x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
+          () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
+          x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
+          bimap (view _3) (view _3) $ Binary.runGetOrFail getSolanaClientState $ LBS.fromStrict x2
 
+        bad -> error $ show bad
+
+
+  SolanaClientState highestBlock nextBlockOffset isFull _ethashElementCount <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
         (0, 0, 0) -> Nothing
         _ -> Just $ succ highestBlock
@@ -378,6 +403,47 @@ relayEthereumToSolana configFile config = do
               case res of
                 Left e -> fail $ show e
                 Right res' -> pure res'
+
+            bridgeToolProc command args =
+              proc solanaBridgeToolPath $ fmap T.unpack $
+                 [ command
+                 , "--config", T.pack configFile
+                 -- , "--payer", "/dev/null"
+                 ] <> args
+
+            relayEthashElements :: Word8 -> [HexString] -> IO ()
+            relayEthashElements elementsSent elems = do
+              let sent = fromIntegral elementsSent
+                  chunkSize = ethashElementsPerInstruction
+                  chunks = chunksOf chunkSize $ drop sent elems
+              ifor_ chunks $ \idx chunk -> do
+                let
+                  offset = sent + chunkSize * idx;
+                  dataHex = T.concat $ T.decodeLatin1 . B16.encode . unHexString <$> chunk
+                  p = bridgeToolProc "provide-ethash-element"
+                    ["--element", dataHex]
+
+                putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
+                putStrLn $ show chunk
+                hFlush stdout
+                readCreateProcessWithExitCode p "" >>= \case
+                  (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
+                  bad -> error $ show bad
+
+
+        client <- fetchClientState
+        print client
+
+        for_ (_solanaClientState_ethashElementCount client) $ \elementsSent -> do
+          let pendingBlock = n - 1
+          putStrLn $ "Contract has seen " <> show elementsSent <> " ethash elements for block " <> show pendingBlock
+
+          elems <- getEthashElements pendingBlock >>= \case
+            Left err -> error (T.unpack err)
+            Right ee -> pure ee
+
+          relayEthashElements elementsSent elems
+
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing
           True -> fmap (Just . Eth.blockTotalDifficulty) $
@@ -393,12 +459,9 @@ relayEthereumToSolana configFile config = do
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
         T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
-        let p = (proc solanaBridgeToolPath $ T.unpack <$>
-                  [ (if n == loopStart then "initialize" else "new-block")
-                  , "--config", T.pack configFile
-                  -- , "--payer", "/dev/null"
-                  , "--instruction", instructionDataHex
-                  ])
+        let p = bridgeToolProc (if n == loopStart then "initialize" else "new-block")
+              ["--instruction", instructionDataHex]
+
         readCreateProcessWithExitCode p "" >>= \case
           (ExitSuccess, txn, _) -> putStrLn txn
           bad -> error $ show bad
@@ -557,7 +620,7 @@ testSolanaCrypto node ca = do
 
     liftIO $ putStrLn "c25519-xrecover"
     test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
-    
+
     liftIO $ putStrLn "c25519-decodepoint"
     test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
 

@@ -58,12 +58,7 @@ $(nix-build -A solana)/bin/solana airdrop 1000 --ws http://localhost:9900
 
 #### Deploy contract
 ```shell
-PROGRAM_ID=$($(nix-build -A solana)/bin/solana deploy solana-bridges/ethereum-client/target-bpf/bpfel-unknown-unknown/release/solana_ethereum_client.so --use-deprecated-loader | jq .programId -r)
-```
-
-#### Allocate storage for contract
-```shell
-$(nix-build -A solana-client-tool)/bin/solana-bridge-tool alloc --program-id $PROGRAM_ID --space 99999 > ethereum-to-solana-config.json
+./solana-bridges/ethereum-client/deploy.sh > ethereum-to-solana-config.json
 ```
 
 #### Start relayer
