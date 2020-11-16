@@ -63,6 +63,24 @@ fn test_instructions_quickcheck(buf_len: usize, block_count: usize) -> Result<()
     test_instructions(buf_len, block_count)
 }
 
+fn ethash_element_chunks (block: &ethash_proof::BlockWithProofs) -> Vec<ProvidePowElement> {
+    let mut elems = block.elements_512();
+    let mut out = Vec::new();
+
+    'outer: loop {
+        let mut prov = ProvidePowElement::new();
+
+        for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
+            match elems.next() {
+                None => break 'outer,
+                Some(h) => prov.elements[i] = h,
+            };
+        }
+        out.push(prov);
+    }
+    return out;
+}
+
 fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
     buf_len *= std::mem::size_of::<RingItem>() / 7;
     buf_len += MIN_BUF_SIZE;
@@ -103,11 +121,9 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 process_instruction(&program_id, &accounts, &instruction_init)
                     .map_err(TestError::ProgError)?;
             }
-            for h in block_with_proofs.elements_512() {
-                let instruction_pow: Vec<u8> =
-                    Instruction::ProvidePowElement(Box::new(ProvidePowElement {
-                        element: Box::new(h),
-                    }))
+
+            for ppe in ethash_element_chunks(&block_with_proofs) {
+                let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
                 process_instruction(&program_id, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;
@@ -139,11 +155,9 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 process_instruction(&program_id, &accounts, &instruction_new)
                     .map_err(TestError::ProgError)?;
             }
-            for h in block_with_proofs.elements_512() {
-                let instruction_pow: Vec<u8> =
-                    Instruction::ProvidePowElement(Box::new(ProvidePowElement {
-                        element: Box::new(h),
-                    }))
+
+            for ppe in ethash_element_chunks(&block_with_proofs) {
+                let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
                 process_instruction(&program_id, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;

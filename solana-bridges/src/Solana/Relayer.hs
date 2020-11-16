@@ -42,6 +42,7 @@ import Data.Foldable
 import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
+import Data.List.Split (chunksOf)
 import Data.Map (Map)
 import Data.Maybe(fromMaybe)
 import Data.Semigroup (stimesMonoid)
@@ -94,6 +95,9 @@ import Ethereum.Contracts as Contracts
 import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
+
+ethashElementsPerInstruction :: Int
+ethashElementsPerInstruction = 8
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -410,29 +414,29 @@ relayEthereumToSolana configFile config = do
             relayEthashElements :: Word8 -> [HexString] -> IO ()
             relayEthashElements elementsSent elems = do
               let sent = fromIntegral elementsSent
-              for_ (zip [0..] $ drop sent elems) $ \(idx, e) -> do
+                  chunkSize = ethashElementsPerInstruction
+                  chunks = chunksOf chunkSize $ drop sent elems
+              ifor_ chunks $ \idx chunk -> do
                 let
-                  d = unHexString e
-                  dataHex = T.decodeLatin1 $ B16.encode d
+                  offset = sent + chunkSize * idx;
+                  dataHex = T.concat $ T.decodeLatin1 . B16.encode . unHexString <$> chunk
                   p = bridgeToolProc "provide-ethash-element"
                     ["--element", dataHex]
 
-                putStrLn $ "Relaying ethashproof element #" <> show (sent + idx) <> ": " <> show e
+                putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
+                putStrLn $ show chunk
                 hFlush stdout
                 readCreateProcessWithExitCode p "" >>= \case
-                  (ExitSuccess, txn, _) -> putStrLn txn
+                  (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
                   bad -> error $ show bad
-                hFlush stdout
-                pure ()
 
-              pure ()
 
         client <- fetchClientState
         print client
 
         for_ (_solanaClientState_ethashElementCount client) $ \elementsSent -> do
           let pendingBlock = n - 1
-          putStrLn $ "Contract is expecting ethash elements for block " <> show pendingBlock
+          putStrLn $ "Contract has seen " <> show elementsSent <> " ethash elements for block " <> show pendingBlock
 
           elems <- getEthashElements pendingBlock >>= \case
             Left err -> error (T.unpack err)
