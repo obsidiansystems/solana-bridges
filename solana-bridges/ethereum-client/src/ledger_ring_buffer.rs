@@ -21,17 +21,29 @@ pub struct RingItem {
     pub elements: AccessedElements,
 }
 
+/// Which elements do we *not* have, specified as an (inverted) bitvector of which elements
+/// chunks we've received.
+/// 00..00: ready for next block
+/// otherwise: ready for next chunk for current block
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ElementChunkSet(pub u16);
+
+impl ElementChunkSet {
+    pub const READY_FOR_BLOCK: Self = ElementChunkSet(0);
+    pub const NEED_ALL_ELEMS: Self = ElementChunkSet(!0);
+
+    pub fn have_chunk(&mut self, i: u8) {
+        self.0 &= !(1 << i);
+    }
+}
+
 #[derive(Debug)]
 #[repr(C)]
 pub struct StorageT<X: ?Sized> {
     pub height: u64,
     pub offset: usize,
     pub full: bool,
-    /// Which elements do we *not* have, specified as an (inverted) bitvector of which elements
-    /// chunks we've received.
-    /// 00..00: ready for next block
-    /// otherwise: ready for next chunk for current block
-    pub ethash_elements: u16,
+    pub ethash_elements: ElementChunkSet,
     pub headers: X,
 }
 
