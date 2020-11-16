@@ -18,7 +18,7 @@ pub struct Initialize {
     pub header: Box<BlockHeader>,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, RlpEncodableDerive, RlpDecodableDerive)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ProvidePowElement {
     pub element: Box<H512>,
 }
@@ -73,7 +73,7 @@ impl Instruction {
             }
             Self::ProvidePowElement(ref block) => {
                 buf.push(3);
-                buf.extend_from_slice(&rlp::encode(block));
+                buf.extend_from_slice(&(*block.element).to_fixed_bytes());
             }
             Self::ProveInclusion(ref pi) => {
                 buf.push(4);
@@ -102,10 +102,10 @@ impl Instruction {
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Header, e))
                 .map(Self::NewBlock),
-            3 => rlp
-                .as_val()
-                .map_err(|e| CustomError::from_rlp(DecodeFrom::PowElement, e))
-                .map(Self::ProvidePowElement),
+            3 => {
+                let elem = Box::new(H512::from_slice(rest));
+                Ok(Self::ProvidePowElement(Box::new(ProvidePowElement { element: elem })))
+            },
             4 => rlp
                 .as_val()
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Inclusion, e))

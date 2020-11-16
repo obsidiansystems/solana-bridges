@@ -412,8 +412,8 @@ relayEthereumToSolana configFile config = do
               let sent = fromIntegral elementsSent
               for_ (zip [0..] $ drop sent elems) $ \(idx, e) -> do
                 let
-                  d = RLP.RLPArray [RLP.RLPString $ unHexString e]
-                  dataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize d
+                  d = unHexString e
+                  dataHex = T.decodeLatin1 $ B16.encode d
                   p = bridgeToolProc "provide-ethash-element"
                     ["--element", dataHex]
 
@@ -616,7 +616,7 @@ testSolanaCrypto node ca = do
 
     liftIO $ putStrLn "c25519-xrecover"
     test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
-    
+
     liftIO $ putStrLn "c25519-decodepoint"
     test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
 
