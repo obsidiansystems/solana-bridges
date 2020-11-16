@@ -67,13 +67,13 @@ fn ethash_element_chunks (block: &ethash_proof::BlockWithProofs) -> Vec<ProvideP
     let mut elems = block.elements_512();
     let mut out = Vec::new();
 
-    'outer: loop {
-        let mut prov = ProvidePowElement::new();
+    'outer: for i in 0.. {
+        let mut prov = ProvidePowElement::new(i);
 
-        for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
+        for j in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
             match elems.next() {
                 None => break 'outer,
-                Some(h) => prov.elements[i] = h,
+                Some(h) => prov.elements[j as usize] = h,
             };
         }
         out.push(prov);

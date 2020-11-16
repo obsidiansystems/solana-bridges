@@ -76,18 +76,20 @@ pub fn process_instruction<'a>(
         Instruction::ProvidePowElement(ppe) => {
             let mut raw_data = account.try_borrow_mut_data()?;
             let ref mut data = *interp_mut(&mut *raw_data)?;
+            println!("{} {:?}", ppe.chunk_offset, data.ethash_elements);
             data.ethash_elements = match data.ethash_elements {
                 None => panic!("Waiting for new block, cannot accept another PoW element."),
-                Some(n) => {
+                Some(bit_vec) => {
                     let block = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
                     for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
-                        block.elements[n + (i as u8)].value = ppe.elements[i];
+                        let offset = ppe.chunk_offset * ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION;
+                        block.elements[offset + i].value = ppe.elements[i as usize];
                     }
-                    let new_count = n + (ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION as u8);
-                    if new_count < 128 {
+                    let new_bit_vec = bit_vec | (1 << ppe.chunk_offset);
+                    if new_bit_vec != !0 {
                         // keep waiting for elements
-                        Some(new_count)
+                        Some(new_bit_vec)
                     } else {
                         // We have all the blocks now, verify PoW and write addresses
                         let pow_valid = verify_pow_indexes(block);

@@ -23,14 +23,19 @@ pub struct Initialize {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ProvidePowElement {
-    pub elements: [H512; Self::ETHASH_ELEMENTS_PER_INSTRUCTION],
+    pub elements: [H512; Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
+    /// offset of a chunk of 8 contiguous elements, in [0, 16) since 16 * 8 is 128.
+    pub chunk_offset: u8,
 }
 
 impl ProvidePowElement {
-    pub const ETHASH_ELEMENTS_PER_INSTRUCTION: usize = 8;
+    pub const ETHASH_ELEMENTS_PER_INSTRUCTION: u8 = 8;
 
-    pub fn new () -> Self {
-        Self { elements: [H512::zero(); Self::ETHASH_ELEMENTS_PER_INSTRUCTION] }
+    pub fn new (chunk_offset: u8) -> Self {
+        Self {
+            elements: [H512::zero(); Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
+            chunk_offset,
+        }
     }
 }
 
@@ -84,6 +89,7 @@ impl Instruction {
             }
             Self::ProvidePowElement(ref block) => {
                 buf.push(3);
+                buf.push(block.chunk_offset);
                 for e in &block.elements {
                     buf.extend_from_slice(&e.to_fixed_bytes());
                 }
@@ -101,10 +107,9 @@ impl Instruction {
     }
 
     pub fn unpack(input: &[u8]) -> Result<Self, ProgramError> {
-        let (&tag, rest) = input
-            .split_first()
-            .ok_or(CustomError::EmptyInstruction.to_program_error())?;
-        let rlp = Rlp::new(rest);
+        let mut rest = Parser(input);
+        let tag = rest.pop()?;
+        let rlp = Rlp::new(rest.peek());
         return match tag {
             0 => Ok(Self::Noop),
             1 => rlp
@@ -116,10 +121,11 @@ impl Instruction {
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Header, e))
                 .map(Self::NewBlock),
             3 => {
-                let mut ppe = ProvidePowElement::new();
+                let chunk_offset = rest.pop()?;
+                let mut ppe = ProvidePowElement::new(chunk_offset);
                 for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
-                    let bytes: &[u8; 64] = array_ref!(&rest, 64*i, 64);
-                    ppe.elements[i] = H512::from_slice(bytes);
+                    let bytes: &[u8; 64] = array_ref!(rest.peek(), 64 * (i as usize), 64);
+                    ppe.elements[i as usize] = H512::from_slice(bytes);
                 }
                 Ok(Self::ProvidePowElement(Box::new(ppe)))
             },
@@ -134,5 +140,21 @@ impl Instruction {
             _ => Err(CustomError::InvalidInstructionTag),
         }
         .map_err(CustomError::to_program_error);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Parser<'a>(&'a [u8]);
+
+impl<'a> Parser<'a> {
+    fn pop(&mut self) -> Result<u8, ProgramError> {
+        let (&v, new) = self.0
+            .split_first()
+            .ok_or(CustomError::EmptyInstruction.to_program_error())?;
+        self.0 = new;
+        Ok(v)
+    }
+    fn peek(self) -> &'a [u8] {
+        self.0
     }
 }
