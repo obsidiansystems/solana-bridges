@@ -712,6 +712,67 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
     })
 }
 
+
+#[test]
+pub fn test_challenge_before_elems() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let mut accounts = vec![account];
+
+        let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
+        {
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                header: Box::new(header_400000.clone()),
+                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_init)
+                .map_err(TestError::ProgError)?;
+        }
+
+        accounts[0].is_writable = false;
+
+        let res = {
+            let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
+                height: 400_000,
+                block_hash: Box::new(hash_header(&header_400000, false)),
+                element_index: 0,
+                merkle_spine: block_with_proofs.merkle_proofs[0].clone(),
+                element_pair: {
+                    let mut iter = block_with_proofs.elements_512();
+                    Box::new(ElementPair {
+                        e0: iter.next().unwrap(),
+                        e1: iter.next().unwrap(),
+                    })
+                },
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_chal)
+                .map_err(TestError::ProgError)
+        };
+
+        assert_eq!(
+            res.err().unwrap(),
+            TestError::ProgError(CustomError::BlockNotFound.to_program_error()),
+        );
+
+        Ok(())
+    })
+}
+
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
     let expected = BlockHeader {
         parent_hash: H256::from([

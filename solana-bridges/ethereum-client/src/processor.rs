@@ -179,7 +179,8 @@ pub fn process_instruction<'a>(
 pub fn find_block<'a>(data: &'a Storage, height: u64) -> Result<&'a RingItem, ProgramError> {
     let min_h = min_height(data);
     if min_h > height {
-        panic!("too old {} {}", min_h, height)
+        //panic!("too old {} {}", min_h, height)
+        return Err(CustomError::BlockNotFound.to_program_error());
     }
     let mut max_h = data.height;
     if data.ethash_elements != ElementChunkSet::READY_FOR_BLOCK {
@@ -187,7 +188,8 @@ pub fn find_block<'a>(data: &'a Storage, height: u64) -> Result<&'a RingItem, Pr
         max_h -= 1;
     }
     if max_h < height {
-        panic!("too new {} {}", max_h, height)
+        //panic!("too new {} {}", max_h, height);
+        return Err(CustomError::BlockNotFound.to_program_error());
     }
     let offset = lowest_offset(data) + (height - min_h) as usize % data.headers.len();
 
