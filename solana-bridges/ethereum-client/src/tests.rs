@@ -712,7 +712,6 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
     })
 }
 
-
 #[test]
 pub fn test_challenge_before_elems() -> Result<(), TestError> {
     let dir = Path::new(file!())
@@ -767,6 +766,94 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
         assert_eq!(
             res.err().unwrap(),
             TestError::ProgError(CustomError::BlockNotFound.to_program_error()),
+        );
+
+        Ok(())
+    })
+}
+
+#[test]
+pub fn test_challenge_bad_root() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let mut accounts = vec![account];
+
+        let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
+        {
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                header: Box::new(header_400000.clone()),
+                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_init)
+                .map_err(TestError::ProgError)?;
+        }
+
+        for ppe in ethash_element_chunks(&block_with_proofs) {
+            let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_pow)
+                .map_err(TestError::ProgError)?;
+        }
+
+        const FAKE_HEIGHT: u64 = 999_999;
+
+        let fake_hash = {
+            // Hack block hash so it's as if we did submit the pow
+            // elements and the POW passed, but challenges will get wrong epoch.
+            let mut raw_data = accounts[0]
+                .try_borrow_mut_data()
+                .map_err(TestError::ProgError)?;
+            let ref mut data = *interp_mut(&mut *raw_data).map_err(TestError::ProgError)?;
+            data.height = FAKE_HEIGHT;
+            let ri = read_prev_block_mut(data)
+                .map_err(TestError::ProgError)?
+                .unwrap();
+            ri.header.number = FAKE_HEIGHT;
+
+            // Also mess up an element
+            ri.elements[0].value = H512::zero();
+
+            hash_header(&ri.header, false)
+        };
+
+        accounts[0].is_writable = false;
+
+        let res = {
+            let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
+                height: FAKE_HEIGHT,
+                block_hash: Box::new(fake_hash),
+                element_index: 0,
+                merkle_spine: block_with_proofs.merkle_proofs[0].clone(),
+                element_pair: {
+                    let mut iter = block_with_proofs.elements_512();
+                    Box::new(ElementPair {
+                        e0: iter.next().unwrap(),
+                        e1: iter.next().unwrap(),
+                    })
+                },
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_chal)
+                .map_err(TestError::ProgError)
+        };
+
+        assert_eq!(
+            res.err().unwrap(),
+            TestError::ProgError(CustomError::InvalidChallenge_BadMerkleRoot.to_program_error()),
         );
 
         Ok(())
