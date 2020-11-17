@@ -441,6 +441,16 @@ where
         //}
 
         {
+            // Hack ethash_elements so it's as if we did submit the pow
+            // elements and the POW passed.
+            let mut raw_data = accounts[0]
+                .try_borrow_mut_data()
+                .map_err(TestError::ProgError)?;
+            let ref mut data = *interp_mut(&mut *raw_data).map_err(TestError::ProgError)?;
+            data.ethash_elements = ElementChunkSet::READY_FOR_BLOCK;
+        }
+
+        {
             accounts[0].is_writable = false;
 
             let instruction_proove_incl: Vec<u8> =

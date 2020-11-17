@@ -109,17 +109,7 @@ pub fn process_instruction<'a>(
             let raw_data = account.try_borrow_data()?;
             let data = interp(&*raw_data)?;
 
-            let min_h = min_height(data);
-            if min_h > pi.height {
-                panic!("too old {} {}", min_h, pi.height)
-            }
-            let max_h = min_h + data.headers.len() as u64;
-            if max_h <= pi.height {
-                panic!("too new {} {}", max_h, pi.height)
-            }
-            let offset = lowest_offset(data) + (pi.height - min_h) as usize % data.headers.len();
-            let block =
-                read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
+            let block = find_block(&data, pi.height)?;
             if &hash_header(&block.header, false) != &*pi.block_hash {
                 return Err(CustomError::InvalidProof_BadBlockHash.to_program_error());
             }
@@ -140,21 +130,8 @@ pub fn process_instruction<'a>(
             let raw_data = account.try_borrow_data()?;
             let data = interp(&*raw_data)?;
 
-            let min_h = min_height(data);
-            if min_h > challenge.height {
-                panic!("too old {} {}", min_h, challenge.height)
-            }
-            let max_h = min_h + data.headers.len() as u64;
-            if max_h <= challenge.height {
-                panic!("too new {} {}", max_h, challenge.height)
-            }
+            let block = find_block(&data, challenge.height)?;
 
-            // Check that we've actually run the PoW for this one
-
-            let offset =
-                lowest_offset(data) + (challenge.height - min_h) as usize % data.headers.len();
-            let block =
-                read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())?;
             if &hash_header(&block.header, false) != &*challenge.block_hash {
                 return Err(CustomError::InvalidChallenge_BadBlockHash.to_program_error());
             }
@@ -197,6 +174,26 @@ pub fn process_instruction<'a>(
             give_bounty_to_challenger()
         }
     })
+}
+
+pub fn find_block<'a>(data: &'a Storage, height: u64) -> Result<&'a RingItem, ProgramError> {
+    let min_h = min_height(data);
+    if min_h > height {
+        panic!("too old {} {}", min_h, height)
+    }
+    let mut max_h = data.height;
+    if data.ethash_elements != ElementChunkSet::READY_FOR_BLOCK {
+        // last block doesn't have all it's elements
+        max_h -= 1;
+    }
+    if max_h < height {
+        panic!("too new {} {}", max_h, height)
+    }
+    let offset = lowest_offset(data) + (height - min_h) as usize % data.headers.len();
+
+    // TODO: Check that we've actually run the PoW for this one
+
+    read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())
 }
 
 pub fn give_bounty_to_challenger() {
