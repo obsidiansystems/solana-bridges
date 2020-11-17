@@ -4,10 +4,10 @@ use ethereum_types::U256;
 
 use rlp::Rlp;
 
+use solana_program::info;
 use solana_sdk::{
     account_info::{next_account_info, AccountInfo},
     entrypoint_deprecated::ProgramResult,
-    info,
     program_error::ProgramError,
     pubkey::Pubkey,
 };

@@ -1,6 +1,7 @@
 use std::mem;
 
-use solana_sdk::{info, program_error::ProgramError};
+use solana_program::info;
+use solana_sdk::program_error::ProgramError;
 
 use ethereum_types::U256;
 
