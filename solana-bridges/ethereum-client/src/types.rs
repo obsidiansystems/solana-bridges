@@ -65,7 +65,9 @@ pub enum CustomError {
     #[allow(non_camel_case_types)]
     InvalidChallenge_InvalidIndex,
     #[allow(non_camel_case_types)]
-    InvalidChallenge_BadMerkle,
+    InvalidChallenge_BadMerkleProof,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadMerkleRoot,
     #[allow(non_camel_case_types)]
     InvalidChallenge_SameElement,
 }
@@ -144,8 +146,9 @@ impl CustomError {
 
             InvalidChallenge_BadBlockHash => 21,
             InvalidChallenge_InvalidIndex => 22,
-            InvalidChallenge_BadMerkle => 23,
-            InvalidChallenge_SameElement => 24,
+            InvalidChallenge_BadMerkleProof => 23,
+            InvalidChallenge_BadMerkleRoot => 24,
+            InvalidChallenge_SameElement => 25,
         })
     }
 }

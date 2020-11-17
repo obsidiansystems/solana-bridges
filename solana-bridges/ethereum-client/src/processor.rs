@@ -190,7 +190,7 @@ pub fn process_instruction<'a>(
             );
 
             if got_merkle_root != wanted_merkle_root {
-                panic!("roots don't match, challenge is invalid")
+                return Err(CustomError::InvalidChallenge_BadMerkleRoot.to_program_error());
             }
 
             // TODO self destruct and give funds to challenger.
