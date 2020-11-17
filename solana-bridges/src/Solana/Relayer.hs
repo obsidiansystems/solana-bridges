@@ -16,7 +16,7 @@
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (forConcurrently_, withAsync)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
@@ -59,7 +59,7 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, copyFile, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
-import System.IO (stdout, stderr, hFlush, hPutStrLn)
+import System.IO (BufferMode(LineBuffering), stdout, stderr, hFlush, hPutStrLn, hSetBuffering)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
@@ -354,6 +354,7 @@ data SolanaClientState = SolanaClientState
 
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
 relayEthereumToSolana configFile config = do
+  hSetBuffering stdout LineBuffering
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
@@ -423,7 +424,7 @@ relayEthereumToSolana configFile config = do
                 chunkSize = ethashElementsPerInstruction
                 chunks = chunksOf chunkSize elems
 
-              ifor_ chunks $ \idx chunk ->
+              forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) ->
                 when (testBit missingElementsBitmask idx) $ do
                   let
                     offset = chunkSize * idx;
@@ -433,8 +434,6 @@ relayEthereumToSolana configFile config = do
                       ["--element", dataHex]
 
                   putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
-                  putStrLn $ show chunk
-                  hFlush stdout
                   readCreateProcessWithExitCode p "" >>= \case
                     (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
                     bad -> error $ show bad
