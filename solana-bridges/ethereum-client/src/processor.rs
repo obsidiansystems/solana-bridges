@@ -200,21 +200,8 @@ pub fn find_block<'a>(data: &'a Storage, height: u64) -> Result<&'a RingItem, Pr
 }
 
 pub fn give_bounty_to_challenger(src_account: &AccountInfo, dst_account: &AccountInfo) -> ProgramResult {
-    info!("Transfer all th lamports to the successful challenger");
-    let instruction = solana_program::system_instruction::transfer(
-        src_account.key,
-        dst_account.key,
-        src_account.lamports(),
-    );
-    panic!("{:#?}", instruction);
-    //solana_program::program::invoke(
-    //    &instruction,
-    //    &[
-    //        funder_info.clone(),
-    //        associated_token_account_info.clone(),
-    //        system_program_info.clone(),
-    //    ],
-    //);
+    **dst_account.lamports.borrow_mut() += src_account.lamports();
+    **src_account.lamports.borrow_mut() = 0;
     Ok(())
 }
 

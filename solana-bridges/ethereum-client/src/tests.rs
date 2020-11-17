@@ -30,6 +30,20 @@ mod inclusion;
 #[cfg(not(target_arch = "bpf"))]
 solana_sdk::program_stubs!();
 
+const THIS_PROG_ID: Pubkey = Pubkey::new_from_array([
+    0x0B, 0xCE, 0xDE, 0xAF,
+    0xCE, 0xCD, 0xEF, 0xFF,
+
+    0x0B, 0xCE, 0xDE, 0xAF,
+    0xCE, 0xCD, 0xEF, 0xFF,
+
+    0x0B, 0xCE, 0xDE, 0xAF,
+    0xCE, 0xCD, 0xEF, 0xFF,
+
+    0x0B, 0xCE, 0xDE, 0xAF,
+    0xCE, 0xCD, 0xEF, 0xFF,
+]);
+
 #[test]
 fn headers_offset_correct() -> Result<(), TestError> {
     let p0 = 0 as *const StorageScrach;
@@ -90,15 +104,13 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
     block_count += 1;
     block_count = std::cmp::min(block_count, 5);
 
-    let program_id = Pubkey::default();
-
     let mut raw_data = vec![0; buf_len];
 
     with_account(&mut *raw_data, |account| {
         let accounts = vec![account];
 
         let instruction_noop: Vec<u8> = Instruction::Noop.pack();
-        process_instruction(&program_id, &accounts, &instruction_noop)
+        process_instruction(&THIS_PROG_ID, &accounts, &instruction_noop)
             .map_err(TestError::ProgError)?;
 
         let dir = Path::new(file!())
@@ -120,14 +132,14 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
                     total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for 1now
                 }))
                 .pack();
-                process_instruction(&program_id, &accounts, &instruction_init)
+                process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
                     .map_err(TestError::ProgError)?;
             }
 
             for ppe in ethash_element_chunks(&block_with_proofs) {
                 let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
-                process_instruction(&program_id, &accounts, &instruction_pow)
+                process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;
             }
         }
@@ -154,14 +166,14 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
                 let header_4000xx: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
                 let instruction_new: Vec<u8> = Instruction::NewBlock(Box::new(header_4000xx))
                     .pack();
-                process_instruction(&program_id, &accounts, &instruction_new)
+                process_instruction(&THIS_PROG_ID, &accounts, &instruction_new)
                     .map_err(TestError::ProgError)?;
             }
 
             for ppe in ethash_element_chunks(&block_with_proofs) {
                 let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
-                process_instruction(&program_id, &accounts, &instruction_pow)
+                process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
                     .map_err(TestError::ProgError)?;
             }
         }
@@ -356,7 +368,7 @@ where
     let key = Pubkey::default();
     let mut lamports = 0;
 
-    let owner = Pubkey::default();
+    let owner = THIS_PROG_ID;
 
     k(AccountInfo {
         key: &key,
@@ -375,11 +387,10 @@ where
 fn relayer_run_0() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let accounts = vec![account];
 
         for instr in &relayer_runs::RUN_0 {
-            process_instruction(&program_id, &accounts, instr).unwrap();
+            process_instruction(&THIS_PROG_ID, &accounts, instr).unwrap();
         }
 
         Ok(())
@@ -391,11 +402,10 @@ fn relayer_run_0() -> Result<(), TestError> {
 fn relayer_run_1() -> Result<(), TestError> {
     let mut raw_data = vec![0; 1 << 12];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let accounts = vec![account];
 
         for instr in &relayer_runs::RUN_1 {
-            process_instruction(&program_id, &accounts, instr).unwrap();
+            process_instruction(&THIS_PROG_ID, &accounts, instr).unwrap();
             //let r = accounts[0].data.try_borrow().unwrap();
             //let data = interp(&*r)?;
             //println!("{:#?}", data);
@@ -415,7 +425,6 @@ where
 {
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let mut accounts = vec![account];
 
         let header: BlockHeader = rlp::decode(header_data).unwrap();
@@ -426,7 +435,7 @@ where
                 header: Box::new(header.clone()),
             }))
             .pack();
-            process_instruction(&program_id, &accounts, &instruction_init).unwrap();
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_init).unwrap();
         }
 
         // Skipping because specific test block from rainbow bridge doesn't actually have valid nonce.
@@ -436,7 +445,7 @@ where
         //        element: Box::new(h),
         //    }))
         //        .pack();
-        //    process_instruction(&program_id, &accounts, &instruction_pow)
+        //    process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
         //        .map_err(TestError::ProgError)?;
         //}
 
@@ -456,7 +465,7 @@ where
             let instruction_proove_incl: Vec<u8> =
                 Instruction::ProveInclusion(Box::new(instruction_fun(header))).pack();
 
-            process_instruction(&program_id, &accounts, &instruction_proove_incl)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_proove_incl)
                 .map_err(TestError::ProgError)?;
         }
 
@@ -661,7 +670,6 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let mut accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
@@ -671,14 +679,14 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
                 total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_init)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
                 .map_err(TestError::ProgError)?;
         }
 
         for ppe in ethash_element_chunks(&block_with_proofs) {
             let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_pow)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
                 .map_err(TestError::ProgError)?;
         }
 
@@ -699,7 +707,7 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
                 },
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_chal)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_chal)
                 .map_err(TestError::ProgError)
         };
 
@@ -728,7 +736,6 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let mut accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
@@ -738,7 +745,7 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
                 total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_init)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
                 .map_err(TestError::ProgError)?;
         }
 
@@ -759,7 +766,7 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
                 },
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_chal)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_chal)
                 .map_err(TestError::ProgError)
         };
 
@@ -788,7 +795,6 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let program_id = Pubkey::default();
         let mut accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
@@ -798,14 +804,14 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
                 total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_init)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
                 .map_err(TestError::ProgError)?;
         }
 
         for ppe in ethash_element_chunks(&block_with_proofs) {
             let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_pow)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
                 .map_err(TestError::ProgError)?;
         }
 
@@ -847,7 +853,7 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
                 },
             }))
                 .pack();
-            process_instruction(&program_id, &accounts, &instruction_chal)
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_chal)
                 .map_err(TestError::ProgError)
         };
 
@@ -860,7 +866,6 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
     })
 }
 
-#[ignore]
 #[test]
 pub fn test_successful_challenge() -> Result<(), TestError> {
     let dir = Path::new(file!())
@@ -878,7 +883,7 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
     let mut src_raw_data = vec![0; 1 << 16];
     let mut src_lamports = 50_000;
     let src_key = Pubkey::default();
-    let src_owner = Pubkey::default();
+    let src_owner = THIS_PROG_ID;
 
     let src_account = AccountInfo {
         key: &src_key,
@@ -907,7 +912,6 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
         rent_epoch: Epoch::default(),
     };
 
-    let program_id = Pubkey::default();
     let mut accounts = vec![src_account, dst_account];
 
     let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
@@ -917,14 +921,14 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
             total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
         }))
             .pack();
-        process_instruction(&program_id, &accounts, &instruction_init)
+        process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
             .map_err(TestError::ProgError)?;
     }
 
     for ppe in ethash_element_chunks(&block_with_proofs) {
         let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
             .pack();
-        process_instruction(&program_id, &accounts, &instruction_pow)
+        process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
             .map_err(TestError::ProgError)?;
     }
 
@@ -942,7 +946,7 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
 
     accounts[0].is_writable = false;
 
-    let res = {
+    {
         let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
             height: header_400000.number,
             block_hash: Box::new(hash_header(&header_400000, false)),
@@ -957,14 +961,9 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
             },
         }))
             .pack();
-        process_instruction(&program_id, &accounts, &instruction_chal)
-            .map_err(TestError::ProgError)
+        process_instruction(&THIS_PROG_ID, &accounts, &instruction_chal)
+            .map_err(TestError::ProgError)?;
     };
-
-    assert_eq!(
-        res.err().unwrap(),
-        TestError::ProgError(CustomError::InvalidChallenge_BadMerkleRoot.to_program_error()),
-    );
 
     Ok(())
 }
