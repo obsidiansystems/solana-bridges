@@ -670,7 +670,7 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let mut accounts = vec![account];
+        let accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
         {
@@ -689,8 +689,6 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
             process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
                 .map_err(TestError::ProgError)?;
         }
-
-        accounts[0].is_writable = false;
 
         let res = {
             let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
@@ -736,7 +734,7 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let mut accounts = vec![account];
+        let accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
         {
@@ -748,8 +746,6 @@ pub fn test_challenge_before_elems() -> Result<(), TestError> {
             process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
                 .map_err(TestError::ProgError)?;
         }
-
-        accounts[0].is_writable = false;
 
         let res = {
             let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
@@ -795,7 +791,7 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
 
     let mut raw_data = vec![0; 1 << 16];
     with_account(&mut *raw_data, |account| {
-        let mut accounts = vec![account];
+        let accounts = vec![account];
 
         let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
         {
@@ -835,8 +831,6 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
 
             hash_header(&ri.header, false)
         };
-
-        accounts[0].is_writable = false;
 
         let res = {
             let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
@@ -912,7 +906,7 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
         rent_epoch: Epoch::default(),
     };
 
-    let mut accounts = vec![src_account, dst_account];
+    let accounts = vec![src_account, dst_account];
 
     let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
     {
@@ -943,8 +937,6 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
             .unwrap();
         ri.elements[0].value = H512::zero();
     }
-
-    accounts[0].is_writable = false;
 
     {
         let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
