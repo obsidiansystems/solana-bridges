@@ -45,6 +45,7 @@ pub struct StorageT<X: ?Sized> {
     pub offset: usize,
     pub full: bool,
     pub ethash_elements: ElementChunkSet,
+    pub dead: bool,
     pub headers: X,
 }
 

@@ -36,6 +36,15 @@ pub fn process_instruction<'a>(
         return Err(ProgramError::IncorrectProgramId);
     }
 
+    {
+        let raw_data = account.try_borrow_data()?;
+        let data = interp(&*raw_data)?;
+        if data.dead {
+            return Err(CustomError::ContractIsDead.to_program_error());
+        }
+    }
+
+
     let instr = Instruction::unpack(instruction_data)?;
     //println!("{:#?}", instr);
 
@@ -124,11 +133,8 @@ pub fn process_instruction<'a>(
                 .map_err(|_| CustomError::InvalidProof_BadMerkle.to_program_error())?;
         }
         Instruction::Challenge(challenge) => {
-            if account.is_writable {
-                return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());
-            }
-            let raw_data = account.try_borrow_data()?;
-            let data = interp(&*raw_data)?;
+            let mut raw_data = account.try_borrow_mut_data()?;
+            let data = interp_mut(&mut *raw_data)?;
 
             let block = find_block(&data, challenge.height)?;
 
@@ -173,6 +179,8 @@ pub fn process_instruction<'a>(
             let dst_account = next_account_info(accounts_iter)?;
 
             give_bounty_to_challenger(account, dst_account)?;
+
+            data.dead = true;
         }
     })
 }

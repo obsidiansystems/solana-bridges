@@ -70,6 +70,10 @@ pub enum CustomError {
     InvalidChallenge_BadMerkleRoot,
     #[allow(non_camel_case_types)]
     InvalidChallenge_SameElement,
+
+    /// This contract has been successfully challenged. It won't do anything
+    /// anymore.
+    ContractIsDead,
 }
 
 pub enum DecodeFrom {
@@ -149,6 +153,8 @@ impl CustomError {
             InvalidChallenge_BadMerkleProof => 23,
             InvalidChallenge_BadMerkleRoot => 24,
             InvalidChallenge_SameElement => 25,
+
+            ContractIsDead => 26,
         })
     }
 }
