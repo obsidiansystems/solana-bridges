@@ -368,7 +368,7 @@ relayEthereumToSolana configFile config = do
         <*> Binary.getWord16le
         where
           -- 'bool' is aligned to 16 bits for some reason, but only one bit can be non-zero so we don't care about endianness
-          getFull = fmap (== 0) Binary.getWord16le
+          getFull = fmap (/= 0) Binary.getWord16le
 
       fetchClientState = System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
         (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
