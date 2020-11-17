@@ -76,7 +76,7 @@ pub fn process_instruction<'a>(
         Instruction::ProvidePowElement(ppe) => {
             let mut raw_data = account.try_borrow_mut_data()?;
             let ref mut data = *interp_mut(&mut *raw_data)?;
-            println!("{} {:?}", ppe.chunk_offset, data.ethash_elements);
+            //println!("{} {:?}", ppe.chunk_offset, data.ethash_elements);
             data.ethash_elements = match data.ethash_elements {
                 ElementChunkSet::READY_FOR_BLOCK =>
                     panic!("Waiting for new block, cannot accept another PoW element."),
@@ -178,7 +178,7 @@ pub fn process_instruction<'a>(
             });
 
             if challenge.element_pair == found {
-                panic!("challenger is trying to confirm not refute validity");
+                return Err(CustomError::InvalidChallenge_SameElement.to_program_error());
             }
 
             let wanted_merkle_root = get_wanted_merkle_root(challenge.height);

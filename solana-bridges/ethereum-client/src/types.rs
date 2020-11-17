@@ -66,6 +66,8 @@ pub enum CustomError {
     InvalidChallenge_InvalidIndex,
     #[allow(non_camel_case_types)]
     InvalidChallenge_BadMerkle,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_SameElement,
 }
 
 pub enum DecodeFrom {
@@ -143,6 +145,7 @@ impl CustomError {
             InvalidChallenge_BadBlockHash => 21,
             InvalidChallenge_InvalidIndex => 22,
             InvalidChallenge_BadMerkle => 23,
+            InvalidChallenge_SameElement => 24,
         })
     }
 }

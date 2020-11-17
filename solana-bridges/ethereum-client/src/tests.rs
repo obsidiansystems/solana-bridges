@@ -53,17 +53,19 @@ fn block_construction() -> Result<(), TestError> {
 
 #[test]
 fn test_instructions_0() -> Result<(), TestError> {
-    test_instructions(20, 30)
+    test_instructions(20, 30)?;
+    Ok(())
 }
 
 
 #[ignore]
 #[quickcheck]
 fn test_instructions_quickcheck(buf_len: usize, block_count: usize) -> Result<(), TestError> {
-    test_instructions(buf_len, block_count)
+    test_instructions(buf_len, block_count)?;
+    Ok(())
 }
 
-fn ethash_element_chunks (block: &ethash_proof::BlockWithProofs) -> Vec<ProvidePowElement> {
+fn ethash_element_chunks(block: &ethash_proof::BlockWithProofs) -> Vec<ProvidePowElement> {
     let mut elems = block.elements_512();
     let mut out = Vec::new();
 
@@ -81,7 +83,7 @@ fn ethash_element_chunks (block: &ethash_proof::BlockWithProofs) -> Vec<ProvideP
     return out;
 }
 
-fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), TestError> {
+fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u8>, TestError> {
     buf_len *= std::mem::size_of::<RingItem>() / 7;
     buf_len += MIN_BUF_SIZE;
 
@@ -115,7 +117,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
                 let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
                 let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
                     header: Box::new(header_400000),
-                    total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+                    total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for 1now
                 }))
                 .pack();
                 process_instruction(&program_id, &accounts, &instruction_init)
@@ -174,7 +176,9 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<(), T
         assert_eq!(block_count >= data.headers.len(), data.full);
 
         Ok(())
-    })
+    })?;
+
+    Ok(raw_data)
 }
 
 pub fn verify_pow_from_scratch(header: &BlockHeader) -> (bool, Vec<(u32, H512)>) {
@@ -629,6 +633,73 @@ pub fn test_pow_element_proof() -> Result<(), TestError> {
     assert_eq!(got_merkle_root, wanted_merkle_root);
 
     Ok(())
+}
+
+#[test]
+pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let program_id = Pubkey::default();
+        let mut accounts = vec![account];
+
+        let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
+        {
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                header: Box::new(header_400000.clone()),
+                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_init)
+                .map_err(TestError::ProgError)?;
+        }
+
+        for ppe in ethash_element_chunks(&block_with_proofs) {
+            let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_pow)
+                .map_err(TestError::ProgError)?;
+        }
+
+        accounts[0].is_writable = false;
+
+        let res = {
+            let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
+                height: 400_000,
+                block_hash: Box::new(hash_header(&header_400000, false)),
+                element_index: 0,
+                merkle_spine: block_with_proofs.merkle_proofs[0].clone(),
+                element_pair: {
+                    let mut iter = block_with_proofs.elements_512();
+                    Box::new(ElementPair {
+                        e0: iter.next().unwrap(),
+                        e1: iter.next().unwrap(),
+                    })
+                },
+            }))
+                .pack();
+            process_instruction(&program_id, &accounts, &instruction_chal)
+                .map_err(TestError::ProgError)
+        };
+
+        assert_eq!(
+            res.err().unwrap(),
+            TestError::ProgError(CustomError::InvalidChallenge_SameElement.to_program_error()),
+        );
+
+        Ok(())
+    })
 }
 
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
