@@ -655,6 +655,57 @@ pub fn test_pow_element_proof() -> Result<(), TestError> {
 }
 
 #[test]
+pub fn test_bad_block_caught_with_pow() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut raw_data = vec![0; 1 << 16];
+    with_account(&mut *raw_data, |account| {
+        let accounts = vec![account];
+
+        let mut header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
+
+        // corrupt block, so it will fail PoW later.
+        header_400000.number += 5;
+
+        {
+            let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+                header: Box::new(header_400000.clone()),
+                total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+            }))
+                .pack();
+            process_instruction(&THIS_PROG_ID, &accounts, &instruction_init)
+                .map_err(TestError::ProgError)?;
+        }
+
+        let mut res = Ok(());
+        for ppe in ethash_element_chunks(&block_with_proofs) {
+            let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
+                .pack();
+            res?;
+            res = process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
+                .map_err(TestError::ProgError);
+        }
+
+        assert_eq!(
+            res.err().unwrap(),
+            TestError::ProgError(CustomError::VerifyHeaderFailed_InvalidProofOfWork.to_program_error()),
+        );
+
+        Ok(())
+    })
+}
+
+#[test]
 pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
     let dir = Path::new(file!())
         .parent()
