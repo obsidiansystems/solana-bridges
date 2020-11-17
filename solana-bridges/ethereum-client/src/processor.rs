@@ -170,8 +170,9 @@ pub fn process_instruction<'a>(
                 return Err(CustomError::InvalidChallenge_BadMerkleRoot.to_program_error());
             }
 
-            // TODO self destruct and give funds to challenger.
-            give_bounty_to_challenger()
+            let dst_account = next_account_info(accounts_iter)?;
+
+            give_bounty_to_challenger(account, dst_account)?;
         }
     })
 }
@@ -198,8 +199,23 @@ pub fn find_block<'a>(data: &'a Storage, height: u64) -> Result<&'a RingItem, Pr
     read_block(data, offset)?.ok_or(CustomError::BlockNotFound.to_program_error())
 }
 
-pub fn give_bounty_to_challenger() {
-    unimplemented!()
+pub fn give_bounty_to_challenger(src_account: &AccountInfo, dst_account: &AccountInfo) -> ProgramResult {
+    info!("Transfer all th lamports to the successful challenger");
+    let instruction = solana_program::system_instruction::transfer(
+        src_account.key,
+        dst_account.key,
+        src_account.lamports(),
+    );
+    panic!("{:#?}", instruction);
+    //solana_program::program::invoke(
+    //    &instruction,
+    //    &[
+    //        funder_info.clone(),
+    //        associated_token_account_info.clone(),
+    //        system_program_info.clone(),
+    //    ],
+    //);
+    Ok(())
 }
 
 pub fn write_new_block(

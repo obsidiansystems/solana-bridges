@@ -860,6 +860,115 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
     })
 }
 
+#[ignore]
+#[test]
+pub fn test_successful_challenge() -> Result<(), TestError> {
+    let dir = Path::new(file!())
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("data/ethash-proof");
+    let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
+        let mut data = dir.clone();
+        data.push("mainnet-400000.json");
+        data
+    });
+
+    let mut src_raw_data = vec![0; 1 << 16];
+    let mut src_lamports = 50_000;
+    let src_key = Pubkey::default();
+    let src_owner = Pubkey::default();
+
+    let src_account = AccountInfo {
+        key: &src_key,
+        is_signer: true,
+        is_writable: true,
+        lamports: Rc::new(RefCell::new(&mut src_lamports)),
+        data: Rc::new(RefCell::new(&mut *src_raw_data)),
+        owner: &src_owner,
+        executable: false,
+        rent_epoch: Epoch::default(),
+    };
+
+    let mut dst_raw_data = vec![];
+    let mut dst_lamports = 0;
+    let dst_key = Pubkey::default();
+    let dst_owner = Pubkey::default();
+
+    let dst_account = AccountInfo {
+        key: &dst_key,
+        is_signer: true,
+        is_writable: true,
+        lamports: Rc::new(RefCell::new(&mut dst_lamports)),
+        data: Rc::new(RefCell::new(&mut *dst_raw_data)),
+        owner: &dst_owner,
+        executable: false,
+        rent_epoch: Epoch::default(),
+    };
+
+    let program_id = Pubkey::default();
+    let mut accounts = vec![src_account, dst_account];
+
+    let header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
+    {
+        let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
+            header: Box::new(header_400000.clone()),
+            total_difficulty: Box::new(U256([0, 1, 1, 1])), // arbitrarily chosen number for now
+        }))
+            .pack();
+        process_instruction(&program_id, &accounts, &instruction_init)
+            .map_err(TestError::ProgError)?;
+    }
+
+    for ppe in ethash_element_chunks(&block_with_proofs) {
+        let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
+            .pack();
+        process_instruction(&program_id, &accounts, &instruction_pow)
+            .map_err(TestError::ProgError)?;
+    }
+
+    {
+        // mess up an element so challenge will succeed
+        let mut raw_data = accounts[0]
+            .try_borrow_mut_data()
+            .map_err(TestError::ProgError)?;
+        let ref mut data = *interp_mut(&mut *raw_data).map_err(TestError::ProgError)?;
+        let ri = read_prev_block_mut(data)
+            .map_err(TestError::ProgError)?
+            .unwrap();
+        ri.elements[0].value = H512::zero();
+    }
+
+    accounts[0].is_writable = false;
+
+    let res = {
+        let instruction_chal: Vec<u8> = Instruction::Challenge(Box::new(Challenge {
+            height: header_400000.number,
+            block_hash: Box::new(hash_header(&header_400000, false)),
+            element_index: 0,
+            merkle_spine: block_with_proofs.merkle_proofs[0].clone(),
+            element_pair: {
+                let mut iter = block_with_proofs.elements_512();
+                Box::new(ElementPair {
+                    e0: iter.next().unwrap(),
+                    e1: iter.next().unwrap(),
+                })
+            },
+        }))
+            .pack();
+        process_instruction(&program_id, &accounts, &instruction_chal)
+            .map_err(TestError::ProgError)
+    };
+
+    assert_eq!(
+        res.err().unwrap(),
+        TestError::ProgError(CustomError::InvalidChallenge_BadMerkleRoot.to_program_error()),
+    );
+
+    Ok(())
+}
+
 fn decoded_header_0() -> Result<BlockHeader, TestError> {
     let expected = BlockHeader {
         parent_hash: H256::from([
