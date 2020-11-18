@@ -44,7 +44,7 @@ import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
 import Data.List.Split (chunksOf)
 import Data.Map (Map)
-import Data.Maybe(fromMaybe)
+import Data.Maybe(fromMaybe, isJust)
 import Data.Semigroup (stimesMonoid)
 import Data.Solidity.Prim.Address (Address)
 import Data.String (IsString)
@@ -382,7 +382,7 @@ relayEthereumToSolana configFile config = do
         bad -> error $ show bad
 
 
-  SolanaClientState highestBlock nextBlockOffset isFull _elementsBitmask <- fetchClientState
+  SolanaClientState highestBlock nextBlockOffset isFull missingElementsBitmask <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
         (0, 0, False) -> Nothing
         _ -> Just $ succ highestBlock
@@ -397,9 +397,7 @@ relayEthereumToSolana configFile config = do
 
     relayEthashElements :: Word64 -> IO ()
     relayEthashElements height = do
-      let pendingBlock = height - 1
-
-      elems <- getEthashElements pendingBlock >>= \case
+      elems <- getEthashElements height >>= \case
         Left err -> error (T.unpack err)
         Right ee -> pure ee
 
@@ -410,7 +408,7 @@ relayEthereumToSolana configFile config = do
       forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) -> do
           let
             offset = chunkSize * idx;
-            raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le pendingBlock)
+            raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le height)
               : BS.singleton (fromIntegral idx)
               : fmap unHexString chunk
             dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
@@ -422,7 +420,7 @@ relayEthereumToSolana configFile config = do
             (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
             bad -> error $ show bad
 
-  let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
+  let relayingStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop :: Word64 -> IO (Either Eth.Web3Error Void)
       loop n = do
         client <- fetchClientState
@@ -442,9 +440,7 @@ relayEthereumToSolana configFile config = do
                 Right res' -> pure res'
 
 
-        relayEthashElements n
-
-        mTotalDifficulty <- case n == loopStart of
+        mTotalDifficulty <- case n == relayingStart of
           False -> pure Nothing
           True -> fmap (Just . Eth.blockTotalDifficulty) $
             doEth $ Eth.getBlockByNumber $ Eth.Quantity $ toInteger n
@@ -459,16 +455,23 @@ relayEthereumToSolana configFile config = do
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
         T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
-        let p = bridgeToolProc (if n == loopStart then "initialize" else "new-block")
+        let p = bridgeToolProc (if n == relayingStart then "initialize" else "new-block")
               ["--instruction", instructionDataHex]
 
         readCreateProcessWithExitCode p "" >>= \case
           (ExitSuccess, txn, _) -> putStrLn txn
           bad -> error $ show bad
 
+        relayEthashElements n
+
         loop $ n + 1
 
-  loop (fromMaybe loopStart contractState) >>= \case
+  let loopStart = fromMaybe relayingStart contractState
+
+  when (isJust contractState && zeroBits /= missingElementsBitmask) $
+    relayEthashElements (loopStart - 1)
+
+  loop loopStart >>= \case
     Right x -> pure $ case x of {}
     Left bad -> error $ show bad
 
