@@ -387,6 +387,41 @@ relayEthereumToSolana configFile config = do
         (0, 0, False) -> Nothing
         _ -> Just $ succ highestBlock
 
+  let
+    bridgeToolProc command args =
+      proc solanaBridgeToolPath $ fmap T.unpack $
+           [ command
+           , "--config", T.pack configFile
+           -- , "--payer", "/dev/null"
+           ] <> args
+
+    relayEthashElements :: Word64 -> IO ()
+    relayEthashElements height = do
+      let pendingBlock = height - 1
+
+      elems <- getEthashElements pendingBlock >>= \case
+        Left err -> error (T.unpack err)
+        Right ee -> pure ee
+
+      let
+        chunkSize = ethashElementsPerInstruction
+        chunks = chunksOf chunkSize elems
+
+      forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) -> do
+          let
+            offset = chunkSize * idx;
+            raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le pendingBlock)
+              : BS.singleton (fromIntegral idx)
+              : fmap unHexString chunk
+            dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
+            p = bridgeToolProc "provide-ethash-element"
+              ["--element", dataHex]
+
+          putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
+          readCreateProcessWithExitCode p "" >>= \case
+            (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
+            bad -> error $ show bad
+
   let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop :: Word64 -> IO (Either Eth.Web3Error Void)
       loop n = do
@@ -406,41 +441,8 @@ relayEthereumToSolana configFile config = do
                 Left e -> fail $ show e
                 Right res' -> pure res'
 
-            bridgeToolProc command args =
-              proc solanaBridgeToolPath $ fmap T.unpack $
-                 [ command
-                 , "--config", T.pack configFile
-                 -- , "--payer", "/dev/null"
-                 ] <> args
 
-            relayEthashElements :: IO ()
-            relayEthashElements = do
-              let pendingBlock = n - 1
-
-              elems <- getEthashElements pendingBlock >>= \case
-                Left err -> error (T.unpack err)
-                Right ee -> pure ee
-
-              let
-                chunkSize = ethashElementsPerInstruction
-                chunks = chunksOf chunkSize elems
-
-              forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) -> do
-                  let
-                    offset = chunkSize * idx;
-                    raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le pendingBlock)
-                      : BS.singleton (fromIntegral idx)
-                      : fmap unHexString chunk
-                    dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
-                    p = bridgeToolProc "provide-ethash-element"
-                      ["--element", dataHex]
-
-                  putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
-                  readCreateProcessWithExitCode p "" >>= \case
-                    (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
-                    bad -> error $ show bad
-
-        relayEthashElements
+        relayEthashElements n
 
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing
