@@ -89,31 +89,33 @@ pub fn process_instruction<'a>(
             if ppe.height != data.height {
                 return Err(CustomError::EthashElementsForWrongBlock.to_program_error())
             }
-            data.ethash_elements = match data.ethash_elements {
-                ElementChunkSet::READY_FOR_BLOCK =>
-                    return Ok(()), // Already received these elements - nothing to do
-                mut bit_vec => {
-                    let block = read_prev_block_mut(data)?
-                        .ok_or(CustomError::BlockNotFound.to_program_error())?;
-                    for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
-                        let offset = ppe.chunk_offset * ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION;
-                        block.elements[offset + i].value = ppe.elements[i as usize];
-                    }
-                    bit_vec.have_chunk(ppe.chunk_offset);
-                    if bit_vec != ElementChunkSet::READY_FOR_BLOCK {
-                        // keep waiting for elements
-                    } else {
-                        // We have all the elements now, verify PoW
-                        let pow_valid = verify_pow_indexes(block);
-                        if !pow_valid {
-                            return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
-                                .to_program_error());
-                        }
-                    }
-                    bit_vec
-                },
+            let mut bit_vec = data.ethash_elements;
+            let block = read_prev_block_mut(data)?
+                .ok_or(CustomError::BlockNotFound.to_program_error())?;
+            for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
+                let offset = ppe.chunk_offset * ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION;
+                let new_value = ppe.elements[i as usize];
+
+                match block.elements[offset + i].value {
+                    _ if bit_vec.get_has_chunk(ppe.chunk_offset) => block.elements[offset + i].value = new_value,
+                    h if h == new_value => (),
+                    _ => panic!(),
+                }
             }
+            bit_vec.set_has_chunk(ppe.chunk_offset);
+            if bit_vec != ElementChunkSet::READY_FOR_BLOCK {
+                // keep waiting for elements
+            } else {
+                // We have all the elements now, verify PoW
+                let pow_valid = verify_pow_indexes(block);
+                if !pow_valid {
+                    return Err(CustomError::VerifyHeaderFailed_InvalidProofOfWork
+                               .to_program_error());
+                }
+            }
+            data.ethash_elements = bit_vec;
         }
+
         Instruction::ProveInclusion(pi) => {
             if account.is_writable {
                 return Err(CustomError::WritableHistoryDuringProofCheck.to_program_error());

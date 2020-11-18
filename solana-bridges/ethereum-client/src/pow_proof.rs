@@ -114,6 +114,6 @@ pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
 
 //TODO: remove once SHA syscalls are added - currently runs into instruction limit
 #[cfg(target_arch = "bpf")]
-pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
+pub fn verify_pow_indexes(_ri: &mut RingItem) -> bool {
     return true;
 }

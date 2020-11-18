@@ -75,6 +75,7 @@ pub enum CustomError {
     /// anymore.
     ContractIsDead,
     EthashElementsForWrongBlock,
+    EthashElementRewriting,
 
 }
 
@@ -158,6 +159,7 @@ impl CustomError {
 
             ContractIsDead => 26,
             EthashElementsForWrongBlock => 27,
+            EthashElementRewriting => 28,
         })
     }
 }

@@ -33,8 +33,11 @@ impl ElementChunkSet {
     pub const READY_FOR_BLOCK: Self = ElementChunkSet(0);
     pub const NEED_ALL_ELEMS: Self = ElementChunkSet(!0);
 
-    pub fn have_chunk(&mut self, i: u8) {
+    pub fn set_has_chunk(&mut self, i: u8) {
         self.0 &= !(1 << i);
+    }
+    pub fn get_has_chunk(&mut self, i: u8) -> bool {
+        return (self.0 & (1 << i)) != 0
     }
 }
 
