@@ -8,19 +8,8 @@ contract SolanaClient {
         return ( (x>>y) | uint64(x<<(64 - y)));
     }
 
-    struct workvars {
-        uint64 a;
-        uint64 b;
-        uint64 c;
-        uint64 d;
-        uint64 e;
-        uint64 f;
-        uint64 g;
-        uint64 h;
-    }
-
     function Sha512_hash(bytes memory message) internal pure returns (bytes memory) {
-        uint64[8] memory h = [
+        uint64[8] memory H = [
             0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
             0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179];
         uint64[80] memory k = [
@@ -42,8 +31,6 @@ contract SolanaClient {
             0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817];
 
         uint64[80] memory w;
-        workvars memory v;
-
         uint num_chunks = ((message.length + 16) >> 7) + 1;
         uint messageLength = message.length;
         for (uint chunk = 0; chunk < num_chunks; ++chunk) {
@@ -82,49 +69,47 @@ contract SolanaClient {
             }
 
             // Initialize working variables to current hash value:
-            v.a = h[0];
-            v.b = h[1];
-            v.c = h[2];
-            v.d = h[3];
-            v.e = h[4];
-            v.f = h[5];
-            v.g = h[6];
-            v.h = h[7];
+            uint64 a = H[0];
+            uint64 b = H[1];
+            uint64 c = H[2];
+            uint64 d = H[3];
+            uint64 e = H[4];
+            uint64 f = H[5];
+            uint64 g = H[6];
+            uint64 h = H[7];
 
             // Compression function main loop:
             for (uint i = 0; i <= 79 ; ++i) {
-                uint64 S0 = rightrotate(v.a, 28) ^ rightrotate(v.a, 34) ^ rightrotate(v.a, 39);
-                uint64 S1 = rightrotate(v.e, 14) ^ rightrotate(v.e, 18) ^ rightrotate(v.e, 41);
+                uint64 temp1 = h
+                    + (rightrotate(e, 14) ^ rightrotate(e, 18) ^ rightrotate(e, 41)) // S1
+                    + ((e & f) ^ ((~e) & g)) // ch
+                    + k[i] + w[i];
+                uint64 temp2 = (rightrotate(a, 28) ^ rightrotate(a, 34) ^ rightrotate(a, 39)) + ((a & b) ^ (a & c) ^ (b & c));
 
-                uint64 ch = (v.e & v.f) ^ ((~v.e) & v.g);
-                uint64 temp1 = v.h + S1 + ch + k[i] + w[i];
-                uint64 maj = (v.a & v.b) ^ (v.a & v.c) ^ (v.b & v.c);
-                uint64 temp2 = S0 + maj;
-
-                v.h = v.g;
-                v.g = v.f;
-                v.f = v.e;
-                v.e = v.d + temp1;
-                v.d = v.c;
-                v.c = v.b;
-                v.b = v.a;
-                v.a = temp1 + temp2;
+                h = g;
+                g = f;
+                f = e;
+                e = d + temp1;
+                d = c;
+                c = b;
+                b = a;
+                a = temp1 + temp2;
             }
 
             // Add the compressed chunk to the current hash value:
-            h[0] = h[0] + v.a;
-            h[1] = h[1] + v.b;
-            h[2] = h[2] + v.c;
-            h[3] = h[3] + v.d;
-            h[4] = h[4] + v.e;
-            h[5] = h[5] + v.f;
-            h[6] = h[6] + v.g;
-            h[7] = h[7] + v.h;
+            H[0] = H[0] + a;
+            H[1] = H[1] + b;
+            H[2] = H[2] + c;
+            H[3] = H[3] + d;
+            H[4] = H[4] + e;
+            H[5] = H[5] + f;
+            H[6] = H[6] + g;
+            H[7] = H[7] + h;
 
         }
         uint256[2] memory result =
-            [ uint256(h[0]) << 192 | uint256(h[1]) << 128 | uint256(h[2]) << 64 | uint256(h[3])
-            , uint256(h[4]) << 192 | uint256(h[5]) << 128 | uint256(h[6]) << 64 | uint256(h[7])
+            [ uint256(H[0]) << 192 | uint256(H[1]) << 128 | uint256(H[2]) << 64 | uint256(H[3])
+            , uint256(H[4]) << 192 | uint256(H[5]) << 128 | uint256(H[6]) << 64 | uint256(H[7])
             ];
 
         return abi.encodePacked(result);
@@ -134,7 +119,8 @@ contract SolanaClient {
     uint256 constant q = 2**255 - 19;
     uint256 constant l = 2**252 + 27742317777372353535851937790883648493;
 
-    uint256 constant d = 37095705934669439343138083508754565189542113879843219016388785533085940283555; // -121665 * inv(121666)
+    uint256 constant EDWARDS_D = 37095705934669439343138083508754565189542113879843219016388785533085940283555; // -121665 * inv(121666)
+    uint256 constant EDWARDS_D2 = EDWARDS_D*2 % q;
     uint256 constant I = 19681161376707505956807079304988542015446066515923890162744021073123829784752; // expmod(2,(q-1)/4,q);
 
 
@@ -144,98 +130,505 @@ contract SolanaClient {
 
     uint256 constant minus_one = q - 1;
 
-    // from: https://github.com/androlo/standard-contracts/blob/master/contracts/src/crypto/ECCMath.sol
-    /// @dev Modular inverse of a (mod p) using euclid.
-    /// 'a' and 'p' must be co-prime.
-    /// @param a The number.
-    /// @param p The mmodulus.
-    /// @return x such that ax = 1 (mod p)
-    function invmod(uint a, uint p) internal pure returns (uint) {
-        // if (a == 0 || a == p || p == 0) {revert("inv range");}
-        // if (a > p)
-        //     a = a % p;
-        int t1;
-        int t2 = 1;
-        uint r1 = p;
-        uint r2 = a;
-        uint qq;
-        while (r2 != 0) {
-            qq = r1 / r2;
-            (t1, t2, r1, r2) = (t2, t1 - int(qq) * t2, r2, r1 - qq * r2);
-        }
-        if (t1 < 0)
-            return (p - uint(-t1));
-        return uint(t1);
+
+
+
+    /// Field % q
+    /// type Fq = uint256
+
+    function Fq_add(uint256 self, uint256 other) private pure returns (uint256) {
+        return addmod(self, other, q);
     }
 
-    /// @dev Modular exponentiation, base^e % m
-    /// Basically the same as can be found here:
-    /// https://github.com/ethereum/serpent/blob/develop/examples/ecc/modexp.se
-    /// @param base The base.
-    /// @param e The exponent.
-    /// @param m The modulus.
-    /// @return r such that r = base**e (mod m)
-    function expmod(uint base, uint e, uint m) public pure returns (uint r) {
-        if (base == 0)
-            return 0;
-        if (e == 0)
-            return 1;
-        // if (m == 0) {revert("expmond range");}
-        r = 1;
-        for (uint bit = 2 ** 255; bit != 0; bit /= 16) {
-            assembly {
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e,        bit )))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(1, bit))))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(2, bit))))), m)
-                r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(3, bit))))), m)
+    function Fq_sub(uint256 self, uint256 other) private pure returns (uint256) {
+        return addmod(self, q - other, q);
+    }
+
+    function Fq_mul(uint256 self, uint256 other) private pure returns (uint256) {
+        return mulmod(self, other, q);
+    }
+
+    function Fq_neg(uint256 self) private pure returns (uint256) {
+        return self != 0
+            ? q - self
+            : self;
+    }
+
+    function Fq_pow2k(uint256 s, uint k) private pure returns (uint256) {
+        while (k > 0) {
+            s = mulmod(s, s, q);
+            k = k - 1;
+        }
+        return s;
+    }
+
+    function Fq_square(uint256 self) private pure returns (uint256) {
+        return Fq_pow2k(self, 1);
+    }
+
+    function Fq_square2(uint256 self) private pure returns (uint256) {
+      uint256 self_self = Fq_pow2k(self, 1);
+      return Fq_add(self_self, self_self);
+    }
+
+    function Fq_is_negative(uint256 self) private pure returns (bool) {
+      return self & 1 != 0;
+    }
+
+    function Fq_invert(uint256 self) private pure returns (uint256) {
+        uint256 t19; uint256 t3;
+        (t19, t3) = Fq_pow22501(self);
+        uint256 t20 = Fq_pow2k(t19, 5);
+        uint256 t21 = Fq_mul(t20, t3);
+        return t21;
+    }
+
+    function Fq_sqrt_ratio_i(uint256 u, uint256 v) private pure returns (bool, uint256) {
+
+        uint256 v3 = Fq_mul(Fq_square(v), v);
+        uint256 v7 = Fq_mul(Fq_square(v3), v);
+        uint256 r = Fq_mul(Fq_mul(u, v3), Fq_pow_p58(Fq_mul(u, v7)));
+        uint256 check = Fq_mul(v, Fq_square(r));
+
+        bool correct_sign_sqrt   = check ==               u    ;
+        bool flipped_sign_sqrt   = check ==        Fq_neg(u)   ;
+        bool flipped_sign_sqrt_i = check == Fq_mul(Fq_neg(u),I);
+
+        uint256 r_prime = Fq_mul(I, r);
+        r = (flipped_sign_sqrt || flipped_sign_sqrt_i)
+            ? r_prime
+            : r;
+
+        // Choose the nonnegative square root.
+        bool r_is_negative = Fq_is_negative(r);
+        r = r_is_negative
+            ? Fq_neg(r)
+            : r;
+
+        bool was_nonzero_square = correct_sign_sqrt || flipped_sign_sqrt;
+
+        return (was_nonzero_square, r);
+    }
+
+    function Fq_pow22501(uint256 self) private pure returns (uint256, uint256) {
+        uint256 t0  = Fq_square(self);
+        uint256 t2  = Fq_mul(self, Fq_square(Fq_square(t0)));
+        uint256 t3  = Fq_mul(t0, t2);
+        uint256 t5  = Fq_mul(t2,  Fq_square(t3));
+        uint256 t7  = Fq_mul(Fq_pow2k(t5, 5),  t5);
+        uint256 t9  = Fq_mul(Fq_pow2k(t7, 10),  t7);
+        uint256 t13 = Fq_mul(Fq_pow2k(Fq_mul( Fq_pow2k(t9, 20),  t9), 10),  t7);
+        uint256 t15 = Fq_mul(Fq_pow2k(t13, 50),  t13);
+        uint256 t19 = Fq_mul(Fq_pow2k(Fq_mul( Fq_pow2k(t15, 100),  t15), 50), t13);
+
+        return (t19, t3);
+    }
+
+    function Fq_pow_p58(uint256 self) private pure returns (uint256) {
+        uint256 t19;
+        uint256 _t3;
+        (t19, _t3) = Fq_pow22501(self);
+        uint256 t20 = Fq_pow2k(t19, 2);
+        uint256 t21 = Fq_mul(self, t20);
+
+        return t21;
+    }
+
+    /// Scalar field % l
+    /// type Scalar = uint256
+
+    function Scalar_from_bytes(bytes32 s) private pure returns (uint256) {
+        uint256 ss = decodeint(s);
+        if (ss >= l) {
+            revert("scalar not reduced mod l");
+        }
+        return ss;
+    }
+
+    function Scalar_from_bytes_mod_order(bytes memory s) public pure returns (uint256) {
+        uint256 ss = 0;
+        for (int i = int(s.length) - 1; i >= 0 ; --i) {
+            ss = uint256(uint8(s[uint(i)])) + mulmod(ss, 0x100, l);
+        }
+        ss = ss % l;
+        return ss;
+    }
+
+    // function Scalar_from_bytes_mod_order(b) {
+    //     return Scalar(decodeint_mod(b, l));
+    // }
+
+    function Scalar_add(uint256 self, uint256 other) private pure returns (uint256) {
+        return addmod(self, other, l);
+    }
+
+    function Scalar_sub(uint256 self, uint256 other) private pure returns (uint256) {
+        return addmod(self, l - other, l);
+    }
+
+    function Scalar_mul_scalar(uint256 self, uint256 other) private pure returns (uint256) {
+        return mulmod(self, other, l);
+    }
+
+    function Scalar_non_adjacent_form(uint256 self, uint w) private pure returns (int8[256] memory naf) {
+        assert (2 <= w && w <= 8);
+        // naf = [0] * 256;
+
+        uint width = 1 << w;
+        uint window_mask = width - 1;
+
+        uint pos = 0;
+        uint carry = 0;
+        while (pos < 256) {
+            // Construct a buffer of bits of the scalar, starting at bit `pos`
+            uint256 bit_buf = self >> pos;
+
+            // Add the carry into the current window
+            uint window = carry + (bit_buf & window_mask);
+
+            if (window & 1 == 0) {
+                pos += 1;
+                continue;
+            }
+
+            if (window < width/2 ) {
+                carry = 0;
+                naf[pos] = int8(window);
+            } else {
+                carry = 1;
+                naf[pos] = int8(window - width); // (window as i8).wrapping_sub(width as i8);
+            }
+
+            pos += w;
+        }
+        return naf;
+    }
+
+    struct ProjectivePoint { uint256 X; uint256 Y; uint256 Z; }
+    struct CompletedPoint { uint256 X; uint256 Y; uint256 Z; uint256 T; }
+    struct ProjectiveNielsPoint { uint256 Y_plus_X; uint256 Y_minus_X; uint256 Z; uint256 T2d; }
+
+    /// type NafLookupTable5 = ProjectiveNielsPoint[8]
+    function NafLookupTable5_select(ProjectiveNielsPoint[8] memory self, uint8 x) private pure returns (ProjectiveNielsPoint memory) {
+        return self[x / 2];
+    }
+
+    /// EdwardsPoint
+    struct EdwardsPoint { uint256 X; uint256 Y; uint256 Z; uint256 T; }
+    function EdwardsPoint_identity() private pure returns (EdwardsPoint memory) {
+        return EdwardsPoint( 0, 1, 1, 0);
+    }
+
+    function EdwardsPoint_is_small_order(EdwardsPoint memory self) private pure returns (bool) {
+        CompletedPoint memory x = ProjectivePoint_double(EdwardsPoint_to_projective(self));
+        x = ProjectivePoint_double(CompletedPoint_to_projective(x));
+        x = ProjectivePoint_double(CompletedPoint_to_projective(x));
+        return EdwardsPoint_eq(CompletedPoint_to_extended(x), EdwardsPoint_identity());
+    }
+
+    function EdwardsPoint_add_projective_niels_point(EdwardsPoint memory self, ProjectiveNielsPoint memory other) private pure returns (CompletedPoint memory) {
+        uint256 Y_plus_X  = Fq_add(self.Y, self.X);
+        uint256 Y_minus_X = Fq_sub(self.Y, self.X);
+        uint256 PP = Fq_mul(Y_plus_X , other.Y_plus_X);
+        uint256 MM = Fq_mul(Y_minus_X, other.Y_minus_X);
+        uint256 TT2d = Fq_mul(self.T, other.T2d);
+        uint256 ZZ   = Fq_mul(self.Z, other.Z);
+        uint256 ZZ2  = Fq_add(ZZ, ZZ);
+
+        return CompletedPoint(
+            Fq_sub(PP, MM),
+            Fq_add(PP, MM),
+            Fq_add(ZZ2, TT2d),
+            Fq_sub(ZZ2, TT2d));
+    }
+
+    function EdwardsPoint_sub_projective_niels_point(EdwardsPoint memory self, ProjectiveNielsPoint memory other) private pure returns (CompletedPoint memory) {
+        uint256 Y_plus_X  = Fq_add(self.Y, self.X);
+        uint256 Y_minus_X = Fq_sub(self.Y, self.X);
+        uint256 PM = Fq_mul(Y_plus_X, other.Y_minus_X);
+        uint256 MP = Fq_mul(Y_minus_X, other.Y_plus_X);
+        uint256 TT2d = Fq_mul(self.T, other.T2d);
+        uint256 ZZ   = Fq_mul(self.Z, other.Z);
+        uint256 ZZ2  = Fq_add(ZZ, ZZ);
+
+        return CompletedPoint(
+            Fq_sub(PM, MP),
+            Fq_add(PM, MP),
+            Fq_sub(ZZ2, TT2d),
+            Fq_add(ZZ2, TT2d));
+    }
+
+    function EdwardsPoint_neg(EdwardsPoint memory self) private pure returns (EdwardsPoint memory) {
+      return EdwardsPoint(
+          Fq_neg(self.X),
+                 self.Y,
+                 self.Z,
+          Fq_neg(self.T));
+    }
+
+
+    function EdwardsPoint_eq(EdwardsPoint memory self, EdwardsPoint memory other) private pure returns (bool) {
+      return (Fq_mul(self.X, other.Z) == Fq_mul(other.X, self.Z)
+           && Fq_mul(self.Y, other.Z) == Fq_mul(other.Y, self.Z));
+    }
+
+    function EdwardsPoint_double(EdwardsPoint memory self) private pure returns (EdwardsPoint memory) {
+        return CompletedPoint_to_extended(ProjectivePoint_double(EdwardsPoint_to_projective(self)));
+    }
+
+    function EdwardsPoint_compress(EdwardsPoint memory self) internal pure returns (bytes32) {
+    // function EdwardsPoint_compress(EdwardsPoint self) {
+        uint256 recip = Fq_invert(self.Z);
+        uint256 x = Fq_mul(self.X, recip);
+        uint256 y = Fq_mul(self.Y, recip);
+
+        bytes32 s = encodeint(y ^ (Fq_is_negative(x) ? 1 << 255 : 0));
+        return s;
+    }
+
+    function EdwardsPoint_decompress(bytes32 bBytes) public pure returns (EdwardsPoint memory) {
+    // function EdwardsPoint_decompress(bBytes) {
+        uint256 Y = (decodeint(bBytes) & ((1<<255) - 1));
+        uint256 Z = (1);
+        uint256 YY = Fq_square(Y);
+        uint256 u = Fq_sub(YY, Z);
+        uint256 v = Fq_add(Fq_mul(YY, EDWARDS_D), Z);
+        uint256 X; bool is_valid_y_coord;
+        (is_valid_y_coord, X) = Fq_sqrt_ratio_i(u, v);
+
+        if (!is_valid_y_coord) {
+            revert("not on curve");
+        }
+        bool compressed_sign_bit = bBytes[31] >> 7 != 0;
+        X = compressed_sign_bit ? Fq_neg(X) : X;
+        return EdwardsPoint(X, Y, Z, Fq_mul(X, Y));
+    }
+
+    function EdwardsPoint_to_projective(EdwardsPoint memory self) private pure returns (ProjectivePoint memory) {
+        return ProjectivePoint(self.X, self.Y, self.Z);
+    }
+
+    function EdwardsPoint_to_projective_niels(EdwardsPoint memory self) private pure returns (ProjectiveNielsPoint memory) {
+        return ProjectiveNielsPoint(
+            Fq_add(self.Y, self.X),
+            Fq_sub(self.Y, self.X),
+            self.Z,
+            Fq_mul(self.T, EDWARDS_D2));
+    }
+
+    function EdwardsPoint_to_projective_niels_table(EdwardsPoint memory A) private pure returns (ProjectiveNielsPoint[8] memory Ai) {
+        // Ai = [EdwardsPoint_to_projective_niels(A)] * 8;
+        Ai[0] = EdwardsPoint_to_projective_niels(A);
+        EdwardsPoint memory A2 = EdwardsPoint_double(A);
+        for (uint i = 0; i < 7; ++i) {
+            Ai[i + 1] = EdwardsPoint_to_projective_niels(CompletedPoint_to_extended(EdwardsPoint_add_projective_niels_point(A2, Ai[i])));
+        }
+        // return Ai;
+    }
+
+    function EdwardsPoint_mul(EdwardsPoint memory A, uint256 a) private pure returns (EdwardsPoint memory) {
+        int8[256] memory a_naf = Scalar_non_adjacent_form(a, 5);
+
+        // Find starting index
+        uint i = 255;
+        for (int j = 255; j >= 0; --j) {
+            i = uint(j);
+            if (a_naf[i] != 0) {
+                break;
             }
         }
+
+        ProjectiveNielsPoint[8] memory table_A = EdwardsPoint_to_projective_niels_table(A);
+
+        ProjectivePoint memory r = ProjectivePoint_identity();
+        for(;;) {
+            CompletedPoint memory t = ProjectivePoint_double(r);
+
+            if (a_naf[i] > 0) {
+                t = EdwardsPoint_add_projective_niels_point(CompletedPoint_to_extended(t), NafLookupTable5_select(table_A, uint8( a_naf[i])));
+            } else if (a_naf[i] < 0) {
+                t = EdwardsPoint_sub_projective_niels_point(CompletedPoint_to_extended(t), NafLookupTable5_select(table_A, uint8(-a_naf[i])));
+            }
+
+            r = CompletedPoint_to_projective(t);
+
+            if (i == 0) {
+                break;
+            }
+            i -= 1;
+
+        }
+        return ProjectivePoint_to_extended(r);
     }
 
-    function inv(uint256 x) public pure returns (uint256) { return invmod(x, q); }
-    function neg(uint256 x) public pure returns (uint256) { return q - x; }
+    /// ProjectivePoint
 
-    function xrecover(uint256 y) public pure returns (uint256) {
-        // xx = (y*y-1) * inv(d*y*y+1)
-        uint256 yy = mulmod(y, y, q);
-        uint256 xx = mulmod(addmod(yy, minus_one, q), inv(addmod(mulmod(d, yy, q), 1, q)), q);
-
-        uint256 x = expmod(xx, ((q + 3) >> 3), q);
-
-        if (mulmod(x, x, q) != xx) { x = mulmod(x, I, q); }
-        if (x & 1 != 0) { x = q - x; }
-
-        return x;
-    }
-    struct edwards_point {
-        uint256 x;
-        uint256 y;
+    function ProjectivePoint_identity() private pure returns (ProjectivePoint memory) {
+        return ProjectivePoint(0, 1, 1);
     }
 
-    function test_edwards(uint256[2] memory P, uint256[2] memory Q) public pure returns (uint256[2] memory PQ) {
-        edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
-        edwards_point memory Qx; Qx.x = Q[0]; Qx.y = Q[1];
-        edwards_point memory PQx = edwards(Px, Qx);
-        PQ[0] = PQx.x;
-        PQ[1] = PQx.y;
+    function ProjectivePoint_double(ProjectivePoint memory self) private pure returns (CompletedPoint memory) {
+        uint256 XX          = Fq_square(self.X);
+        uint256 YY          = Fq_square(self.Y);
+        uint256 ZZ2         = Fq_square2(self.Z);
+        uint256 X_plus_Y    = Fq_add(self.X, self.Y);
+        uint256 X_plus_Y_sq = Fq_square(X_plus_Y);
+        uint256 YY_plus_XX  = Fq_add(YY, XX);
+        uint256 YY_minus_XX = Fq_sub(YY, XX);
+
+        return CompletedPoint(
+            Fq_sub(X_plus_Y_sq, YY_plus_XX),
+            YY_plus_XX,
+            YY_minus_XX,
+            Fq_sub(ZZ2, YY_minus_XX));
     }
 
-    function edwards(edwards_point memory P, edwards_point memory Q) internal pure returns (edwards_point memory PQ) {
-        uint256 x1 = P.x;
-        uint256 y1 = P.y;
-        uint256 x2 = Q.x;
-        uint256 y2 = Q.y;
-
-        uint256 x1y2 = mulmod(x1, y2, q);
-        uint256 x2y1 = mulmod(x2, y1, q);
-        uint256 dxy = mulmod(d,mulmod(x2y1,x1y2,q),q);
-        uint256 y1y2 = mulmod(y1, y2, q);
-        uint256 x1x2 = mulmod(x1, x2, q);
-
-
-        PQ.x = mulmod(addmod(x1y2, x2y1, q), inv(addmod(1,     dxy , q)), q);
-        PQ.y = mulmod(addmod(y1y2, x1x2, q), inv(addmod(1, neg(dxy), q)), q);
+    function ProjectivePoint_to_extended(ProjectivePoint memory self) private pure returns (EdwardsPoint memory) {
+        return EdwardsPoint(
+            Fq_mul(self.X, self.Z),
+            Fq_mul(self.Y, self.Z),
+            Fq_square(self.Z),
+            Fq_mul(self.X, self.Y));
     }
+
+    /// CompletedPoint
+    function CompletedPoint_to_projective(CompletedPoint memory self) private pure returns (ProjectivePoint memory) {
+        return ProjectivePoint(
+            Fq_mul(self.X, self.T),
+            Fq_mul(self.Y, self.Z),
+            Fq_mul(self.Z, self.T));
+    }
+
+    function CompletedPoint_to_extended(CompletedPoint memory self) private pure returns (EdwardsPoint memory) {
+        return EdwardsPoint (
+            Fq_mul(self.X, self.T),
+            Fq_mul(self.Y, self.Z),
+            Fq_mul(self.Z, self.T),
+            Fq_mul(self.X, self.Y));
+    }
+
+    /// ProjectiveNielsPoint
+    function ProjectiveNielsPoint_identity() private pure returns (ProjectiveNielsPoint memory) {
+        return ProjectiveNielsPoint(1, 1, 1, 0);
+    }
+
+    function ProjectiveNielsPoint_neg(ProjectiveNielsPoint memory self) private pure returns (ProjectiveNielsPoint memory) {
+        return ProjectiveNielsPoint(
+            self.Y_minus_X,
+            self.Y_plus_X,
+            self.Z,
+            -(self.T2d));
+    }
+
+    function ED25519_BASEPOINT_POINT() private pure returns (EdwardsPoint memory) {
+        return EdwardsPoint(
+            15112221349535400772501151409588531511454012693041857206046113283949847762202,
+            46316835694926478169428394003475163141307993866256225615783033603165251855960,
+            1,
+            46827403850823179245072216630277197565144205554125654976674165829533817101731);
+    }
+
+
+
+
+
+
+
+
+
+
+    // // from: https://github.com/androlo/standard-contracts/blob/master/contracts/src/crypto/ECCMath.sol
+    // /// @dev Modular inverse of a (mod p) using euclid.
+    // /// 'a' and 'p' must be co-prime.
+    // /// @param a The number.
+    // /// @param p The mmodulus.
+    // /// @return x such that ax = 1 (mod p)
+    // function invmod(uint a, uint p) internal pure returns (uint) {
+    //     // if (a == 0 || a == p || p == 0) {revert("inv range");}
+    //     // if (a > p)
+    //     //     a = a % p;
+    //     int t1;
+    //     int t2 = 1;
+    //     uint r1 = p;
+    //     uint r2 = a;
+    //     uint qq;
+    //     while (r2 != 0) {
+    //         qq = r1 / r2;
+    //         (t1, t2, r1, r2) = (t2, t1 - int(qq) * t2, r2, r1 - qq * r2);
+    //     }
+    //     if (t1 < 0)
+    //         return (p - uint(-t1));
+    //     return uint(t1);
+    // }
+
+    // /// @dev Modular exponentiation, base^e % m
+    // /// Basically the same as can be found here:
+    // /// https://github.com/ethereum/serpent/blob/develop/examples/ecc/modexp.se
+    // /// @param base The base.
+    // /// @param e The exponent.
+    // /// @param m The modulus.
+    // /// @return r such that r = base**e (mod m)
+    // function expmod(uint base, uint e, uint m) public pure returns (uint r) {
+    //     if (base == 0)
+    //         return 0;
+    //     if (e == 0)
+    //         return 1;
+    //     // if (m == 0) {revert("expmond range");}
+    //     r = 1;
+    //     for (uint bit = 2 ** 255; bit != 0; bit /= 16) {
+    //         assembly {
+    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e,        bit )))), m)
+    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(1, bit))))), m)
+    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(2, bit))))), m)
+    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(3, bit))))), m)
+    //         }
+    //     }
+    // }
+
+    // function inv(uint256 x) public pure returns (uint256) { return invmod(x, q); }
+    // function neg(uint256 x) public pure returns (uint256) { return q - x; }
+
+    // function xrecover(uint256 y) public pure returns (uint256) {
+    //     // xx = (y*y-1) * inv(d*y*y+1)
+    //     uint256 yy = mulmod(y, y, q);
+    //     uint256 xx = mulmod(addmod(yy, minus_one, q), inv(addmod(mulmod(EDWARDS_D, yy, q), 1, q)), q);
+
+    //     uint256 x = expmod(xx, ((q + 3) >> 3), q);
+
+    //     if (mulmod(x, x, q) != xx) { x = mulmod(x, I, q); }
+    //     if (x & 1 != 0) { x = q - x; }
+
+    //     return x;
+    // }
+    // struct edwards_point {
+    //     uint256 x;
+    //     uint256 y;
+    // }
+
+    // function test_edwards(uint256[2] memory P, uint256[2] memory Q) public pure returns (uint256[2] memory PQ) {
+    //     edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
+    //     edwards_point memory Qx; Qx.x = Q[0]; Qx.y = Q[1];
+    //     edwards_point memory PQx = edwards(Px, Qx);
+    //     PQ[0] = PQx.x;
+    //     PQ[1] = PQx.y;
+    // }
+
+    // function edwards(edwards_point memory P, edwards_point memory Q) internal pure returns (edwards_point memory PQ) {
+    //     uint256 x1 = P.x;
+    //     uint256 y1 = P.y;
+    //     uint256 x2 = Q.x;
+    //     uint256 y2 = Q.y;
+
+    //     uint256 x1y2 = mulmod(x1, y2, q);
+    //     uint256 x2y1 = mulmod(x2, y1, q);
+    //     uint256 dxy = mulmod(EDWARDS_D,mulmod(x2y1,x1y2,q),q);
+    //     uint256 y1y2 = mulmod(y1, y2, q);
+    //     uint256 x1x2 = mulmod(x1, x2, q);
+
+
+    //     PQ.x = mulmod(addmod(x1y2, x2y1, q), inv(addmod(1,     dxy , q)), q);
+    //     PQ.y = mulmod(addmod(y1y2, x1x2, q), inv(addmod(1, neg(dxy), q)), q);
+    // }
 
     function swap_bytes32(bytes32 x) public pure returns (bytes32) {
         uint256 y;
@@ -245,86 +638,77 @@ contract SolanaClient {
         return bytes32(y);
     }
 
-    function decodeint_mod(bytes memory s, uint256 m) public pure returns (uint256) {
-        uint256 ss = 0;
-        for (int i = int(s.length) - 1; i >= 0 ; --i) {
-            ss = uint256(uint8(s[uint(i)])) + mulmod(ss, 0x100, m);
-        }
-        ss = ss % m;
-        return ss;
-    }
+    // function scalarmult(edwards_point memory P0, uint256 e) public pure returns (edwards_point memory Q) {
+    //     edwards_point memory P;
+    //     Q.x = 0; Q.y = 1;
+    //     P.x = P0.x;
+    //     P.y = P0.y;
+    //     e = e % l;
 
-    function scalarmult(edwards_point memory P0, uint256 e) public pure returns (edwards_point memory Q) {
-        edwards_point memory P;
-        Q.x = 0; Q.y = 1;
-        P.x = P0.x;
-        P.y = P0.y;
-        e = e % l;
-
-        while (e != 0) {
-            if (e & 1 != 0) {
-                Q = edwards(Q, P);
-            }
-            e = e >> 1;
-            P = edwards(P, P);
-        }
-    }
+    //     while (e != 0) {
+    //         if (e & 1 != 0) {
+    //             Q = edwards(Q, P);
+    //         }
+    //         e = e >> 1;
+    //         P = edwards(P, P);
+    //     }
+    // }
 
     function encodeint(uint256 x) internal pure returns (bytes32) {
         return swap_bytes32(bytes32(x));
     }
 
-    function test_encodepoint(uint256[2] memory P) public pure returns (bytes32) {
-        edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
-        return encodepoint(Px);
-    }
+    // function test_encodepoint(uint256[2] memory P) public pure returns (bytes32) {
+    //     edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
+    //     return encodepoint(Px);
+    // }
 
-    function encodepoint(edwards_point memory P) internal pure returns (bytes32) {
-        uint256 y = P.y;
-        if (P.x & 1 != 0) {
-            y |= (uint256(1) << 255);
-        }
-        return swap_bytes32(bytes32(y));
-    }
+    // function encodepoint(edwards_point memory P) internal pure returns (bytes32) {
+    //     uint256 y = P.y;
+    //     if (P.x & 1 != 0) {
+    //         y |= (uint256(1) << 255);
+    //     }
+    //     return swap_bytes32(bytes32(y));
+    // }
 
-    function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
-        edwards_point memory P;
-        P.x = x;
-        P.y = y;
-        return curvedistance(P);
-    }
+    // function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
+    //     edwards_point memory P;
+    //     P.x = x;
+    //     P.y = y;
+    //     return curvedistance(P);
+    // }
 
-    function curvedistance(edwards_point memory P) public pure returns (uint256) {
-        uint256 x = P.x;
-        uint256 y = P.y;
-        uint256 minux_xx = q - (mulmod(x, x, q));
-        uint256 yy = mulmod(y, y, q);
-        uint256 dxxyy = mulmod(d, mulmod(minux_xx, yy, q), q);
-        return addmod(minux_xx, addmod(yy, addmod(minus_one, dxxyy, q), q), q);
-    }
+    // function curvedistance(edwards_point memory P) public pure returns (uint256) {
+    //     uint256 x = P.x;
+    //     uint256 y = P.y;
+    //     uint256 minux_xx = q - (mulmod(x, x, q));
+    //     uint256 yy = mulmod(y, y, q);
+    //     uint256 dxxyy = mulmod(EDWARDS_D, mulmod(minux_xx, yy, q), q);
+    //     return addmod(minux_xx, addmod(yy, addmod(minus_one, dxxyy, q), q), q);
+    // }
 
-    function isoncurve(edwards_point memory P) internal pure returns (bool) {
-        // return (-x*x + y*y - 1 - d*x*x*y*y) % q == 0
-        return curvedistance(P) == 0;
-    }
+    // function isoncurve(edwards_point memory P) internal pure returns (bool) {
+    //     // return (-x*x + y*y - 1 - d*x*x*y*y) % q == 0
+    //     return curvedistance(P) == 0;
+    // }
 
     function decodeint(bytes32 x) public pure returns (uint256) {
         return uint256(swap_bytes32(x));
     }
 
-    function decodepoint(bytes32 s) public pure returns (edwards_point memory P) {
-        uint256 dec_s = decodeint(s);
-        uint256 y = dec_s & ((1 << 255) - 1);
-        uint256 x = xrecover(y);
-        if (x & 1 != (dec_s >> 255)) {
-            x = q-x;
-        }
-        P.x = x;
-        P.y = y;
-        if (!isoncurve(P)) {
-            revert("decoding point that is not on curve");
-        }
-    }
+    // function EdwardsPoint_decompress(bytes32 s) public pure returns (edwards_point memory P) {
+    //     uint256 dec_s = decodeint(s);
+    //     uint256 y = dec_s & ((1 << 255) - 1);
+    //     uint256 x = xrecover(y);
+    //     if (x & 1 != (dec_s >> 255)) {
+    //         x = q-x;
+    //     }
+    //     P.x = x;
+    //     P.y = y;
+    //     if (!isoncurve(P)) {
+    //         revert("decoding point that is not on curve");
+    //     }
+    // }
 
     function packMessage(bytes32 encodeR, bytes32 pk, bytes memory message) public pure returns (bytes memory packedMessage) {
         packedMessage = abi.encodePacked(encodeR, pk, message);
@@ -333,27 +717,50 @@ contract SolanaClient {
     function ed25519_valid(bytes memory signature, bytes memory message, bytes32 pk) internal pure returns (bool) {
         if (signature.length != b/4) { revert("signature length is wrong"); }
         if (pk.length != b/8) { revert("public-key length is wrong"); }
+
         bytes32 s_R_bytes;
-        bytes memory S = new bytes(32);
+        bytes32 S;
         assembly {
             s_R_bytes := mload(add(0x20, signature))
-            mstore(add(0x20, S), mload(add(0x40, signature)))
+            S := mload(add(0x40, signature))
         }
-        edwards_point memory R = decodepoint(s_R_bytes);
-        edwards_point memory A = decodepoint(pk);
 
-        bytes memory packedMessage = packMessage(encodepoint(R), pk, message);
+        EdwardsPoint memory A = EdwardsPoint_decompress(pk);
+        EdwardsPoint memory minus_A = EdwardsPoint_neg(A);
+        EdwardsPoint memory signature_R = EdwardsPoint_decompress(s_R_bytes);
+        if (EdwardsPoint_is_small_order(signature_R) || EdwardsPoint_is_small_order(A)) {
+            revert("malleable_signature");
+        }
+        bytes memory packedMessage = packMessage(s_R_bytes, pk, message);
         bytes memory h = Sha512_hash(packedMessage);
-        edwards_point memory Ah = scalarmult(A, decodeint_mod(h, l));
+        uint256 k = Scalar_from_bytes_mod_order(h);
+        uint256 signature_S = Scalar_from_bytes(S);
+        EdwardsPoint memory minus_Ak = EdwardsPoint_mul(minus_A, k);
+        ProjectiveNielsPoint memory BS = EdwardsPoint_to_projective_niels(EdwardsPoint_mul(ED25519_BASEPOINT_POINT(), signature_S));
+        EdwardsPoint memory R = CompletedPoint_to_extended(EdwardsPoint_add_projective_niels_point(minus_Ak, BS));
 
-        edwards_point memory B;
-        B.x = Bx;
-        B.y = By;
+        return EdwardsPoint_eq(R, signature_R);
+          // raise Exception("signature does not pass verification")
 
-        edwards_point memory BS = scalarmult(B, decodeint_mod(S, l));
-        edwards_point memory RAh = edwards(R, Ah);
 
-        return (BS.x == RAh.x && BS.y == RAh.y); // else { revert("signature does not pass verification"); }
+
+
+
+        // edwards_point memory signature_R = EdwardsPoint_decompress(s_R_bytes);
+        // edwards_point memory A = EdwardsPoint_decompress(pk);
+
+        // bytes memory h = Sha512_hash(packedMessage);
+        // uint256 k = Scalar_from_bytes_mod_order(h);
+        // edwards_point memory Ah = scalarmult(A, k);
+
+        // edwards_point memory B;
+        // B.x = Bx;
+        // B.y = By;
+
+        // edwards_point memory BS = scalarmult(B, Scalar_from_bytes_mod_order(S));
+        // edwards_point memory RAh = edwards(signature_R, Ah);
+
+        // return (BS.x == RAh.x && BS.y == RAh.y); // else { revert("signature does not pass verification"); }
     }
 
 
