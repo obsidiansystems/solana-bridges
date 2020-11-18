@@ -101,6 +101,7 @@ pub fn get_wanted_merkle_root(height: u64) -> H128 {
     EPOCH_ROOTS[height_to_epoch(height) as usize]
 }
 
+#[cfg(not(target_arch = "bpf"))]
 pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
     let mut iter = ri.elements.0.iter_mut().flat_map(|x| x.iter_mut());
     verify_pow(&ri.header, |wanted_addr| {
@@ -109,4 +110,10 @@ pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
         a.address = wanted_addr;
         a.value
     })
+}
+
+//TODO: remove once SHA syscalls are added - currently runs into instruction limit
+#[cfg(target_arch = "bpf")]
+pub fn verify_pow_indexes(ri: &mut RingItem) -> bool {
+    return true;
 }
