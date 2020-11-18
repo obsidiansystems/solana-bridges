@@ -150,13 +150,18 @@ function doCall(fn) {
 
         var v = await connection.simulateTransaction(
             txn,
-            signers0
+            signers0,
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var txId = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(
+            connection,
             txn,
-            signers0
+            signers0,
+            {
+                commitment: 'singleGossip',
+                skipPreflight: true,
+            },
             );
         return {"sig": txId};
     };

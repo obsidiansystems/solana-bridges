@@ -382,7 +382,7 @@ relayEthereumToSolana configFile config = do
         bad -> error $ show bad
 
 
-  SolanaClientState highestBlock nextBlockOffset isFull _ethashElementCount <- fetchClientState
+  SolanaClientState highestBlock nextBlockOffset isFull _elementsBitmask <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
         (0, 0, False) -> Nothing
         _ -> Just $ succ highestBlock
@@ -413,8 +413,8 @@ relayEthereumToSolana configFile config = do
                  -- , "--payer", "/dev/null"
                  ] <> args
 
-            relayEthashElements :: Word16 -> IO ()
-            relayEthashElements missingElementsBitmask = unless (missingElementsBitmask == zeroBits) $ do
+            relayEthashElements :: IO ()
+            relayEthashElements = do
               let pendingBlock = n - 1
 
               elems <- getEthashElements pendingBlock >>= \case
@@ -425,8 +425,7 @@ relayEthereumToSolana configFile config = do
                 chunkSize = ethashElementsPerInstruction
                 chunks = chunksOf chunkSize elems
 
-              forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) ->
-                when (testBit missingElementsBitmask idx) $ do
+              forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) -> do
                   let
                     offset = chunkSize * idx;
                     raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le pendingBlock)
@@ -441,7 +440,7 @@ relayEthereumToSolana configFile config = do
                     (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
                     bad -> error $ show bad
 
-        relayEthashElements (_solanaClientState_missingElementsBitmask client)
+        relayEthashElements
 
         mTotalDifficulty <- case n == loopStart of
           False -> pure Nothing
@@ -464,6 +463,7 @@ relayEthereumToSolana configFile config = do
         readCreateProcessWithExitCode p "" >>= \case
           (ExitSuccess, txn, _) -> putStrLn txn
           bad -> error $ show bad
+
         loop $ n + 1
 
   loop (fromMaybe loopStart contractState) >>= \case
