@@ -23,18 +23,21 @@ pub struct Initialize {
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct ProvidePowElement {
-    pub elements: [H512; Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
+    /// Height of block for which the elements are used
+    pub height: u64,
     /// offset of a chunk of 8 contiguous elements, in [0, 16) since 16 * 8 is 128.
     pub chunk_offset: u8,
+    pub elements: [H512; Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
 }
 
 impl ProvidePowElement {
     pub const ETHASH_ELEMENTS_PER_INSTRUCTION: u8 = 8;
 
-    pub fn new (chunk_offset: u8) -> Self {
+    pub fn new (height: u64, chunk_offset: u8) -> Self {
         Self {
-            elements: [H512::zero(); Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
+            height,
             chunk_offset,
+            elements: [H512::zero(); Self::ETHASH_ELEMENTS_PER_INSTRUCTION as usize],
         }
     }
 }
@@ -89,6 +92,7 @@ impl Instruction {
             }
             Self::ProvidePowElement(ref block) => {
                 buf.push(3);
+                buf.extend_from_slice(&block.height.to_le_bytes());
                 buf.push(block.chunk_offset);
                 for e in &block.elements {
                     buf.extend_from_slice(&e.to_fixed_bytes());
@@ -121,8 +125,12 @@ impl Instruction {
                 .map_err(|e| CustomError::from_rlp(DecodeFrom::Header, e))
                 .map(Self::NewBlock),
             3 => {
+                let height_bytes = rest.pop_many(8)?;
                 let chunk_offset = rest.pop()?;
-                let mut ppe = ProvidePowElement::new(chunk_offset);
+                let mut ppe = ProvidePowElement::new(
+                    u64::from_le_bytes(*array_ref!(height_bytes, 0, 8)),
+                    chunk_offset
+                );
                 for i in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
                     let bytes: &[u8; 64] = array_ref!(rest.peek(), 64 * (i as usize), 64);
                     ppe.elements[i as usize] = H512::from_slice(bytes);
@@ -150,7 +158,16 @@ impl<'a> Parser<'a> {
     fn pop(&mut self) -> Result<u8, ProgramError> {
         let (&v, new) = self.0
             .split_first()
-            .ok_or(CustomError::EmptyInstruction.to_program_error())?;
+            .ok_or(CustomError::IncompleteInstruction.to_program_error())?;
+        self.0 = new;
+        Ok(v)
+    }
+    fn pop_many(&mut self, n: usize) -> Result<&'a [u8], ProgramError> {
+        if n > self.0.len() {
+            return Err(CustomError::IncompleteInstruction.to_program_error());
+        }
+        let (v, new) = self.0
+            .split_at(n);
         self.0 = new;
         Ok(v)
     }

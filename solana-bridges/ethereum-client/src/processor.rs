@@ -86,6 +86,9 @@ pub fn process_instruction<'a>(
             let mut raw_data = account.try_borrow_mut_data()?;
             let ref mut data = *interp_mut(&mut *raw_data)?;
             //println!("{} {:?}", ppe.chunk_offset, data.ethash_elements);
+            if ppe.height != data.height {
+                return Err(CustomError::EthashElementsForWrongBlock.to_program_error())
+            }
             data.ethash_elements = match data.ethash_elements {
                 ElementChunkSet::READY_FOR_BLOCK =>
                     panic!("Waiting for new block, cannot accept another PoW element."),

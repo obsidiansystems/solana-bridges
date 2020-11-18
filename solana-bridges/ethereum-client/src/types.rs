@@ -6,7 +6,7 @@ use rlp;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(test), derive(Copy))]
 pub enum CustomError {
-    EmptyInstruction,
+    IncompleteInstruction,
     InvalidInstructionTag,
 
     #[cfg(not(test))]
@@ -74,6 +74,8 @@ pub enum CustomError {
     /// This contract has been successfully challenged. It won't do anything
     /// anymore.
     ContractIsDead,
+    EthashElementsForWrongBlock,
+
 }
 
 pub enum DecodeFrom {
@@ -121,7 +123,7 @@ impl CustomError {
     pub fn to_program_error(self) -> ProgramError {
         use CustomError::*;
         ProgramError::Custom(match self {
-            EmptyInstruction => 0,
+            IncompleteInstruction => 0,
             InvalidInstructionTag => 1,
 
             DecodeBlockFailed(_) => 2,
@@ -155,6 +157,7 @@ impl CustomError {
             InvalidChallenge_SameElement => 25,
 
             ContractIsDead => 26,
+            EthashElementsForWrongBlock => 27,
         })
     }
 }

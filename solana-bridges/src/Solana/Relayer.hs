@@ -70,6 +70,7 @@ import qualified Blockchain.Data.RLP as RLP
 import qualified Crypto.Error
 import qualified Crypto.PubKey.Ed25519
 import qualified Data.Binary.Get as Binary
+import qualified Data.Binary.Put as Binary
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
@@ -428,7 +429,9 @@ relayEthereumToSolana configFile config = do
                 when (testBit missingElementsBitmask idx) $ do
                   let
                     offset = chunkSize * idx;
-                    raw = BS.singleton (fromIntegral idx) : fmap unHexString chunk
+                    raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le pendingBlock)
+                      : BS.singleton (fromIntegral idx)
+                      : fmap unHexString chunk
                     dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
                     p = bridgeToolProc "provide-ethash-element"
                       ["--element", dataHex]

@@ -79,12 +79,12 @@ fn test_instructions_quickcheck(buf_len: usize, block_count: usize) -> Result<()
     Ok(())
 }
 
-fn ethash_element_chunks(block: &ethash_proof::BlockWithProofs) -> Vec<ProvidePowElement> {
+fn ethash_element_chunks(height: u64, block: &ethash_proof::BlockWithProofs) -> Vec<ProvidePowElement> {
     let mut elems = block.elements_512();
     let mut out = Vec::new();
 
     'outer: for i in 0.. {
-        let mut prov = ProvidePowElement::new(i);
+        let mut prov = ProvidePowElement::new(height, i);
 
         for j in 0..ProvidePowElement::ETHASH_ELEMENTS_PER_INSTRUCTION {
             match elems.next() {
@@ -136,7 +136,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
                     .map_err(TestError::ProgError)?;
             }
 
-            for ppe in ethash_element_chunks(&block_with_proofs) {
+            for ppe in ethash_element_chunks(400_000, &block_with_proofs) {
                 let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
                 process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
@@ -145,6 +145,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
         }
 
         for n in 1..block_count {
+            let height = 400_000 + n as u64;
             let block_with_proofs: ethash_proof::BlockWithProofs = ethash_proof::read_block(&*{
                 let mut data = dir.clone();
                 data.push(&*format!("mainnet-400{:03}.json", n));
@@ -170,7 +171,7 @@ fn test_instructions(mut buf_len: usize, mut block_count: usize) -> Result<Vec<u
                     .map_err(TestError::ProgError)?;
             }
 
-            for ppe in ethash_element_chunks(&block_with_proofs) {
+            for ppe in ethash_element_chunks(height, &block_with_proofs) {
                 let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                     .pack();
                 process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
@@ -675,7 +676,7 @@ pub fn test_bad_block_caught_with_pow() -> Result<(), TestError> {
         let mut header_400000: BlockHeader = decode_rlp(&*block_with_proofs.header_rlp)?;
 
         // corrupt block, so it will fail PoW later.
-        header_400000.number += 5;
+        header_400000.timestamp += 5;
 
         {
             let instruction_init: Vec<u8> = Instruction::Initialize(Box::new(Initialize {
@@ -688,7 +689,7 @@ pub fn test_bad_block_caught_with_pow() -> Result<(), TestError> {
         }
 
         let mut res = Ok(());
-        for ppe in ethash_element_chunks(&block_with_proofs) {
+        for ppe in ethash_element_chunks(400_000, &block_with_proofs) {
             let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                 .pack();
             res?;
@@ -734,7 +735,7 @@ pub fn test_bad_challenge_same_elem() -> Result<(), TestError> {
                 .map_err(TestError::ProgError)?;
         }
 
-        for ppe in ethash_element_chunks(&block_with_proofs) {
+        for ppe in ethash_element_chunks(400_000, &block_with_proofs) {
             let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                 .pack();
             process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
@@ -855,7 +856,7 @@ pub fn test_challenge_bad_root() -> Result<(), TestError> {
                 .map_err(TestError::ProgError)?;
         }
 
-        for ppe in ethash_element_chunks(&block_with_proofs) {
+        for ppe in ethash_element_chunks(400_000, &block_with_proofs) {
             let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
                 .pack();
             process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
@@ -970,7 +971,7 @@ pub fn test_successful_challenge() -> Result<(), TestError> {
             .map_err(TestError::ProgError)?;
     }
 
-    for ppe in ethash_element_chunks(&block_with_proofs) {
+    for ppe in ethash_element_chunks(400_000, &block_with_proofs) {
         let instruction_pow: Vec<u8> = Instruction::ProvidePowElement(Box::new(ppe))
             .pack();
         process_instruction(&THIS_PROG_ID, &accounts, &instruction_pow)
