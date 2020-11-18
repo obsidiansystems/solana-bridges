@@ -91,7 +91,7 @@ pub fn process_instruction<'a>(
             }
             data.ethash_elements = match data.ethash_elements {
                 ElementChunkSet::READY_FOR_BLOCK =>
-                    panic!("Waiting for new block, cannot accept another PoW element."),
+                    return Ok(()), // Already received these elements - nothing to do
                 mut bit_vec => {
                     let block = read_prev_block_mut(data)?
                         .ok_or(CustomError::BlockNotFound.to_program_error())?;
