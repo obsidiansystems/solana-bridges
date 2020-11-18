@@ -27,17 +27,18 @@ let
 
   solana = with nixpkgs; rustPlatform.buildRustPackage rec {
     pname = "solana";
-    version = "v1.3.9";
+    version = "1.3.21";
 
-    # TODO: upstream
-    src = fetchFromGitHub {
+    # Make thunks work with tags
+    src = fetchFromGitHub rec {
       owner = "obsidiansystems";
       repo = pname;
-      rev = "db2f8ec4fc7b9ccbfdc68ace67d767dbac9330dd"; # branch: debug-elf
-      sha256 = "0ffih3armr6fdys40dzdc913rkpaxrgyfiw7030kp0nqbarhr0d4";
+      #ref = "v${version}";
+      rev = "5a61827702bf64d7bbcb50a5a6e2b699fb646f61";
+      sha256 = "11q3s588lxc9hjphqaqbxc98d0vq6h4vd8zifflcdrd7im3am41g";
     };
 
-    cargoSha256 = "1hdphhl6acj48z11ciznisb826yk8njv79ri46yzznybx6bqybrh";
+    cargoSha256 = "10vk5ycikdc1g3ah4ms5y2j5rl6s12qy43nxsizyaj2lrf8ldlqp";
     verifyCargoDeps = true;
 
     LIBCLANG_PATH="${llvmPackages.libclang}/lib";
