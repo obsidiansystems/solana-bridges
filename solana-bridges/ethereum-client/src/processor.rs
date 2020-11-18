@@ -99,7 +99,7 @@ pub fn process_instruction<'a>(
                 match block.elements[offset + i].value {
                     _ if bit_vec.get_has_chunk(ppe.chunk_offset) => block.elements[offset + i].value = new_value,
                     h if h == new_value => (),
-                    _ => panic!(),
+                    _ => return Err(CustomError::EthashElementRewriting.to_program_error()),
                 }
             }
             bit_vec.set_has_chunk(ppe.chunk_offset);
