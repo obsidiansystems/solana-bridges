@@ -629,7 +629,7 @@ deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
 deploySolanaClientContract node solanaConfig = do
   ca <- deploySolanaClientContractImpl node
   res <- runExceptT $ do
-    liftIO $ hPutStrLn stderr $ "Initializing contract: " <> show ca
+    liftIO $ hPutStrLn stderr $ "Deployed contract at address: " <> show ca
 
     ExceptT $ withSolanaWebSocket solanaConfig $ do
       liftIO $ putStrLn "Initializing contract"

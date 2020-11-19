@@ -33,21 +33,24 @@ testMerkle16 node contract = hspec $ describe "16-ary merkle proof of inclusions
       res <- runExceptT (verifyMerkleProof node contract proof root leaf offset)
       res `shouldBe` Right expected
 
-    height1, height2 :: [Digest SHA256]
-    height1 = fmap (sha256 . BS.singleton) [0..15]
-    height2 = merkleParent height1 : fmap (sha256 . BS.singleton) [1..15]
-
   it "does not access offset when proof is empty " $ do
-    verify True  [] (sha256 $ BS.singleton 0) (BS.singleton 0) 99999
-  it "verifies proof with length 1 " $ do
-    verify True [height1] (merkleParent height1) (BS.singleton 1) 1
-  it "verifies proof with length 2 " $ do
-    verify True [height1, height2] (merkleParent height2) (BS.singleton 2) 2
+    verify True [] (sha256 $ BS.singleton 0) (BS.singleton 0) 99999
+
+  it "accepts valid proofs" $ do
+    verify True [leaves "a"] (merkleParent $ leaves "a") "aa" 0x0
+
+    verify True [leaves "a", branches] (merkleParent branches) "aa" 0x00
+    verify True [leaves "a", branches] (merkleParent branches) "ap" 0x0f
+    verify True [leaves "b", branches] (merkleParent branches) "bc" 0x12
+    verify True [leaves "p", branches] (merkleParent branches) "pa" 0xf0
+    verify True [leaves "p", branches] (merkleParent branches) "pp" 0xff
 
   it "rejects invalid proofs" $ do
-    verify False [height1] (merkleParent height1) (BS.singleton 0) 1
-    verify False [height1, height2] (merkleParent height2) (BS.singleton 1) 2
-    verify False [height1, height1] (merkleParent height2) (BS.singleton 2) 2
+    verify False [leaves "a"] (merkleParent $ leaves "a") "aa" 0x1
+
+    verify False [leaves "a", branches] (merkleParent branches) "aa" 0x01
+    verify False [leaves "a", branches] (merkleParent branches) "ap" 0x00
+    verify False [leaves "a", branches] (merkleParent branches) "pp" 0xff
 
 sha256 :: ByteString -> Digest SHA256
 sha256 = hash
