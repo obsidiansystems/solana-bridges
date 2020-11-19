@@ -849,7 +849,6 @@ runGeth runDir = do
     genesisFile = runDir <> "/Genesis.json"
     passFile = dataDir <> "/pass.txt"
 
-    cacheArgs = ["--ethash.dagdir", ".ethash"]
     dataDirArgs = [ "--datadir", dataDir ]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--miner.etherbase=" <> unlockedAddress ]
@@ -868,7 +867,7 @@ runGeth runDir = do
   BS.writeFile (dataDir <> "/keystore/" <> ethereumAccountFile) ethereumAccount
   BS.writeFile passFile ethereumAccountPass
 
-  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs, gascapArgs]
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs, gascapArgs]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()
