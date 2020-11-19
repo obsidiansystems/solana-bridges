@@ -115,23 +115,12 @@ contract SolanaClient {
         return abi.encodePacked(result);
     }
 
-    uint256 constant b = 256;
     uint256 constant q = 2**255 - 19;
-    uint256 constant l = 2**252 + 27742317777372353535851937790883648493;
+    uint256 constant EDWARDS_BASEPOINT_ORDER = 2**252 + 27742317777372353535851937790883648493;
 
     uint256 constant EDWARDS_D = 37095705934669439343138083508754565189542113879843219016388785533085940283555; // -121665 * inv(121666)
     uint256 constant EDWARDS_D2 = EDWARDS_D*2 % q;
     uint256 constant I = 19681161376707505956807079304988542015446066515923890162744021073123829784752; // expmod(2,(q-1)/4,q);
-
-
-    uint256 constant By = 46316835694926478169428394003475163141307993866256225615783033603165251855960; // 4 * inv(5)
-    uint256 constant Bx = 15112221349535400772501151409588531511454012693041857206046113283949847762202; // xrecover(By)
-
-
-    uint256 constant minus_one = q - 1;
-
-
-
 
     /// Field % q
     /// type Fq = uint256
@@ -163,11 +152,11 @@ contract SolanaClient {
     }
 
     function Fq_square(uint256 self) private pure returns (uint256) {
-        return Fq_pow2k(self, 1);
+        return mulmod(self, self, q);
     }
 
     function Fq_square2(uint256 self) private pure returns (uint256) {
-      uint256 self_self = Fq_pow2k(self, 1);
+      uint256 self_self = mulmod(self, self, q);
       return Fq_add(self_self, self_self);
     }
 
@@ -234,45 +223,28 @@ contract SolanaClient {
         return t21;
     }
 
-    /// Scalar field % l
+    /// Scalar field % l (EDWARDS_BASEPOINT_ORDER)
     /// type Scalar = uint256
 
     function Scalar_from_bytes(bytes32 s) private pure returns (uint256) {
         uint256 ss = decodeint(s);
-        if (ss >= l) {
+        if (ss >= EDWARDS_BASEPOINT_ORDER) {
             revert("scalar not reduced mod l");
         }
         return ss;
     }
 
-    function Scalar_from_bytes_mod_order(bytes memory s) public pure returns (uint256) {
+    function Scalar_from_bytes_mod_order(bytes memory s) private pure returns (uint256) {
         uint256 ss = 0;
         for (int i = int(s.length) - 1; i >= 0 ; --i) {
-            ss = uint256(uint8(s[uint(i)])) + mulmod(ss, 0x100, l);
+            ss = uint256(uint8(s[uint(i)])) + mulmod(ss, 0x100, EDWARDS_BASEPOINT_ORDER);
         }
-        ss = ss % l;
+        ss = ss % EDWARDS_BASEPOINT_ORDER;
         return ss;
-    }
-
-    // function Scalar_from_bytes_mod_order(b) {
-    //     return Scalar(decodeint_mod(b, l));
-    // }
-
-    function Scalar_add(uint256 self, uint256 other) private pure returns (uint256) {
-        return addmod(self, other, l);
-    }
-
-    function Scalar_sub(uint256 self, uint256 other) private pure returns (uint256) {
-        return addmod(self, l - other, l);
-    }
-
-    function Scalar_mul_scalar(uint256 self, uint256 other) private pure returns (uint256) {
-        return mulmod(self, other, l);
     }
 
     function Scalar_non_adjacent_form(uint256 self, uint w) private pure returns (int8[256] memory naf) {
         assert (2 <= w && w <= 8);
-        // naf = [0] * 256;
 
         uint width = 1 << w;
         uint window_mask = width - 1;
@@ -377,7 +349,6 @@ contract SolanaClient {
     }
 
     function EdwardsPoint_compress(EdwardsPoint memory self) internal pure returns (bytes32) {
-    // function EdwardsPoint_compress(EdwardsPoint self) {
         uint256 recip = Fq_invert(self.Z);
         uint256 x = Fq_mul(self.X, recip);
         uint256 y = Fq_mul(self.Y, recip);
@@ -386,10 +357,9 @@ contract SolanaClient {
         return s;
     }
 
-    function EdwardsPoint_decompress(bytes32 bBytes) public pure returns (EdwardsPoint memory) {
-    // function EdwardsPoint_decompress(bBytes) {
-        uint256 Y = (decodeint(bBytes) & ((1<<255) - 1));
-        uint256 Z = (1);
+    function EdwardsPoint_decompress(bytes32 bBytes) private pure returns (EdwardsPoint memory) {
+        uint256 Y = decodeint(bBytes) & ((1<<255) - 1);
+        uint256 Z = 1;
         uint256 YY = Fq_square(Y);
         uint256 u = Fq_sub(YY, Z);
         uint256 v = Fq_add(Fq_mul(YY, EDWARDS_D), Z);
@@ -417,13 +387,11 @@ contract SolanaClient {
     }
 
     function EdwardsPoint_to_projective_niels_table(EdwardsPoint memory A) private pure returns (ProjectiveNielsPoint[8] memory Ai) {
-        // Ai = [EdwardsPoint_to_projective_niels(A)] * 8;
         Ai[0] = EdwardsPoint_to_projective_niels(A);
         EdwardsPoint memory A2 = EdwardsPoint_double(A);
         for (uint i = 0; i < 7; ++i) {
             Ai[i + 1] = EdwardsPoint_to_projective_niels(CompletedPoint_to_extended(EdwardsPoint_add_projective_niels_point(A2, Ai[i])));
         }
-        // return Ai;
     }
 
     function EdwardsPoint_mul(EdwardsPoint memory A, uint256 a) private pure returns (EdwardsPoint memory) {
@@ -528,109 +496,7 @@ contract SolanaClient {
             46827403850823179245072216630277197565144205554125654976674165829533817101731);
     }
 
-
-
-
-
-
-
-
-
-
-    // // from: https://github.com/androlo/standard-contracts/blob/master/contracts/src/crypto/ECCMath.sol
-    // /// @dev Modular inverse of a (mod p) using euclid.
-    // /// 'a' and 'p' must be co-prime.
-    // /// @param a The number.
-    // /// @param p The mmodulus.
-    // /// @return x such that ax = 1 (mod p)
-    // function invmod(uint a, uint p) internal pure returns (uint) {
-    //     // if (a == 0 || a == p || p == 0) {revert("inv range");}
-    //     // if (a > p)
-    //     //     a = a % p;
-    //     int t1;
-    //     int t2 = 1;
-    //     uint r1 = p;
-    //     uint r2 = a;
-    //     uint qq;
-    //     while (r2 != 0) {
-    //         qq = r1 / r2;
-    //         (t1, t2, r1, r2) = (t2, t1 - int(qq) * t2, r2, r1 - qq * r2);
-    //     }
-    //     if (t1 < 0)
-    //         return (p - uint(-t1));
-    //     return uint(t1);
-    // }
-
-    // /// @dev Modular exponentiation, base^e % m
-    // /// Basically the same as can be found here:
-    // /// https://github.com/ethereum/serpent/blob/develop/examples/ecc/modexp.se
-    // /// @param base The base.
-    // /// @param e The exponent.
-    // /// @param m The modulus.
-    // /// @return r such that r = base**e (mod m)
-    // function expmod(uint base, uint e, uint m) public pure returns (uint r) {
-    //     if (base == 0)
-    //         return 0;
-    //     if (e == 0)
-    //         return 1;
-    //     // if (m == 0) {revert("expmond range");}
-    //     r = 1;
-    //     for (uint bit = 2 ** 255; bit != 0; bit /= 16) {
-    //         assembly {
-    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e,        bit )))), m)
-    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(1, bit))))), m)
-    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(2, bit))))), m)
-    //             r := mulmod(mulmod(r, r, m), exp(base, iszero(iszero(and(e, shr(3, bit))))), m)
-    //         }
-    //     }
-    // }
-
-    // function inv(uint256 x) public pure returns (uint256) { return invmod(x, q); }
-    // function neg(uint256 x) public pure returns (uint256) { return q - x; }
-
-    // function xrecover(uint256 y) public pure returns (uint256) {
-    //     // xx = (y*y-1) * inv(d*y*y+1)
-    //     uint256 yy = mulmod(y, y, q);
-    //     uint256 xx = mulmod(addmod(yy, minus_one, q), inv(addmod(mulmod(EDWARDS_D, yy, q), 1, q)), q);
-
-    //     uint256 x = expmod(xx, ((q + 3) >> 3), q);
-
-    //     if (mulmod(x, x, q) != xx) { x = mulmod(x, I, q); }
-    //     if (x & 1 != 0) { x = q - x; }
-
-    //     return x;
-    // }
-    // struct edwards_point {
-    //     uint256 x;
-    //     uint256 y;
-    // }
-
-    // function test_edwards(uint256[2] memory P, uint256[2] memory Q) public pure returns (uint256[2] memory PQ) {
-    //     edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
-    //     edwards_point memory Qx; Qx.x = Q[0]; Qx.y = Q[1];
-    //     edwards_point memory PQx = edwards(Px, Qx);
-    //     PQ[0] = PQx.x;
-    //     PQ[1] = PQx.y;
-    // }
-
-    // function edwards(edwards_point memory P, edwards_point memory Q) internal pure returns (edwards_point memory PQ) {
-    //     uint256 x1 = P.x;
-    //     uint256 y1 = P.y;
-    //     uint256 x2 = Q.x;
-    //     uint256 y2 = Q.y;
-
-    //     uint256 x1y2 = mulmod(x1, y2, q);
-    //     uint256 x2y1 = mulmod(x2, y1, q);
-    //     uint256 dxy = mulmod(EDWARDS_D,mulmod(x2y1,x1y2,q),q);
-    //     uint256 y1y2 = mulmod(y1, y2, q);
-    //     uint256 x1x2 = mulmod(x1, x2, q);
-
-
-    //     PQ.x = mulmod(addmod(x1y2, x2y1, q), inv(addmod(1,     dxy , q)), q);
-    //     PQ.y = mulmod(addmod(y1y2, x1x2, q), inv(addmod(1, neg(dxy), q)), q);
-    // }
-
-    function swap_bytes32(bytes32 x) public pure returns (bytes32) {
+    function swap_bytes32(bytes32 x) private pure returns (bytes32) {
         uint256 y;
         for (uint i = 0; i < 32; ++i) {
             y = y | (uint256(uint8(x[i])) << (i * 8));
@@ -638,85 +504,35 @@ contract SolanaClient {
         return bytes32(y);
     }
 
-    // function scalarmult(edwards_point memory P0, uint256 e) public pure returns (edwards_point memory Q) {
-    //     edwards_point memory P;
-    //     Q.x = 0; Q.y = 1;
-    //     P.x = P0.x;
-    //     P.y = P0.y;
-    //     e = e % l;
-
-    //     while (e != 0) {
-    //         if (e & 1 != 0) {
-    //             Q = edwards(Q, P);
-    //         }
-    //         e = e >> 1;
-    //         P = edwards(P, P);
-    //     }
-    // }
-
     function encodeint(uint256 x) internal pure returns (bytes32) {
         return swap_bytes32(bytes32(x));
     }
 
-    // function test_encodepoint(uint256[2] memory P) public pure returns (bytes32) {
-    //     edwards_point memory Px; Px.x = P[0]; Px.y = P[1];
-    //     return encodepoint(Px);
-    // }
-
-    // function encodepoint(edwards_point memory P) internal pure returns (bytes32) {
-    //     uint256 y = P.y;
-    //     if (P.x & 1 != 0) {
-    //         y |= (uint256(1) << 255);
-    //     }
-    //     return swap_bytes32(bytes32(y));
-    // }
-
-    // function test_curvedistance(uint256 x, uint256 y) public pure returns (uint256) {
-    //     edwards_point memory P;
-    //     P.x = x;
-    //     P.y = y;
-    //     return curvedistance(P);
-    // }
-
-    // function curvedistance(edwards_point memory P) public pure returns (uint256) {
-    //     uint256 x = P.x;
-    //     uint256 y = P.y;
-    //     uint256 minux_xx = q - (mulmod(x, x, q));
-    //     uint256 yy = mulmod(y, y, q);
-    //     uint256 dxxyy = mulmod(EDWARDS_D, mulmod(minux_xx, yy, q), q);
-    //     return addmod(minux_xx, addmod(yy, addmod(minus_one, dxxyy, q), q), q);
-    // }
-
-    // function isoncurve(edwards_point memory P) internal pure returns (bool) {
-    //     // return (-x*x + y*y - 1 - d*x*x*y*y) % q == 0
-    //     return curvedistance(P) == 0;
-    // }
-
-    function decodeint(bytes32 x) public pure returns (uint256) {
+    function decodeint(bytes32 x) private pure returns (uint256) {
         return uint256(swap_bytes32(x));
     }
 
-    // function EdwardsPoint_decompress(bytes32 s) public pure returns (edwards_point memory P) {
-    //     uint256 dec_s = decodeint(s);
-    //     uint256 y = dec_s & ((1 << 255) - 1);
-    //     uint256 x = xrecover(y);
-    //     if (x & 1 != (dec_s >> 255)) {
-    //         x = q-x;
-    //     }
-    //     P.x = x;
-    //     P.y = y;
-    //     if (!isoncurve(P)) {
-    //         revert("decoding point that is not on curve");
-    //     }
-    // }
-
-    function packMessage(bytes32 encodeR, bytes32 pk, bytes memory message) public pure returns (bytes memory packedMessage) {
+    function packMessage(bytes32 encodeR, bytes32 pk, bytes memory message) private pure returns (bytes memory packedMessage) {
         packedMessage = abi.encodePacked(encodeR, pk, message);
     }
 
-    function ed25519_valid(bytes memory signature, bytes memory message, bytes32 pk) internal pure returns (bool) {
-        if (signature.length != b/4) { revert("signature length is wrong"); }
-        if (pk.length != b/8) { revert("public-key length is wrong"); }
+    struct Signature {
+        EdwardsPoint R;
+        uint256 S; // Scalar | EDWARDS_BASEPOINT_ORDER
+    }
+
+    function ed25519_valid(bytes memory signature, bytes memory message, bytes32 pk) public pure returns (bool) {
+        Signature memory s;
+        bytes memory packedMessage;
+        EdwardsPoint memory A;
+        (s, packedMessage, A) = ed25519_parse(signature, message, pk);
+        return ed25519_verify(s, packedMessage, A);
+    }
+
+    /// signature to internal form suited to storage.
+    function ed25519_parse (bytes memory signature, bytes memory message, bytes32 pk) internal pure returns (Signature memory, bytes memory , EdwardsPoint memory) {
+        if (signature.length != 64) { revert("signature length is wrong"); }
+        if (pk.length != 32) { revert("public-key length is wrong"); }
 
         bytes32 s_R_bytes;
         bytes32 S;
@@ -724,43 +540,29 @@ contract SolanaClient {
             s_R_bytes := mload(add(0x20, signature))
             S := mload(add(0x40, signature))
         }
-
-        EdwardsPoint memory A = EdwardsPoint_decompress(pk);
-        EdwardsPoint memory minus_A = EdwardsPoint_neg(A);
         EdwardsPoint memory signature_R = EdwardsPoint_decompress(s_R_bytes);
+
+        uint256 signature_S = Scalar_from_bytes(S);
+        EdwardsPoint memory A = EdwardsPoint_decompress(pk);
         if (EdwardsPoint_is_small_order(signature_R) || EdwardsPoint_is_small_order(A)) {
             revert("malleable_signature");
         }
         bytes memory packedMessage = packMessage(s_R_bytes, pk, message);
+        return (Signature(signature_R, signature_S), packedMessage, A);
+    }
+
+
+    /// perform full signature checks
+    function ed25519_verify (Signature memory signature, bytes memory packedMessage, EdwardsPoint memory pk) internal pure returns (bool) {
         bytes memory h = Sha512_hash(packedMessage);
         uint256 k = Scalar_from_bytes_mod_order(h);
-        uint256 signature_S = Scalar_from_bytes(S);
+
+        EdwardsPoint memory minus_A = EdwardsPoint_neg(pk);
         EdwardsPoint memory minus_Ak = EdwardsPoint_mul(minus_A, k);
-        ProjectiveNielsPoint memory BS = EdwardsPoint_to_projective_niels(EdwardsPoint_mul(ED25519_BASEPOINT_POINT(), signature_S));
+        ProjectiveNielsPoint memory BS = EdwardsPoint_to_projective_niels(EdwardsPoint_mul(ED25519_BASEPOINT_POINT(), signature.S));
         EdwardsPoint memory R = CompletedPoint_to_extended(EdwardsPoint_add_projective_niels_point(minus_Ak, BS));
 
-        return EdwardsPoint_eq(R, signature_R);
-          // raise Exception("signature does not pass verification")
-
-
-
-
-
-        // edwards_point memory signature_R = EdwardsPoint_decompress(s_R_bytes);
-        // edwards_point memory A = EdwardsPoint_decompress(pk);
-
-        // bytes memory h = Sha512_hash(packedMessage);
-        // uint256 k = Scalar_from_bytes_mod_order(h);
-        // edwards_point memory Ah = scalarmult(A, k);
-
-        // edwards_point memory B;
-        // B.x = Bx;
-        // B.y = By;
-
-        // edwards_point memory BS = scalarmult(B, Scalar_from_bytes_mod_order(S));
-        // edwards_point memory RAh = edwards(signature_R, Ah);
-
-        // return (BS.x == RAh.x && BS.y == RAh.y); // else { revert("signature does not pass verification"); }
+        return EdwardsPoint_eq(R, signature.R);
     }
 
 
