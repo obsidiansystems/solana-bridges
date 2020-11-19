@@ -140,10 +140,16 @@ uriToProvider uri = case uriScheme uri of
   where
     httpProvider = Right $ Eth.HttpProvider $ uriToString id uri ""
 
+defaultEthereumRPCConfig :: Eth.Provider
+defaultEthereumRPCConfig = def
+
+defaultSolanaRPCConfig :: SolanaRpcConfig
+defaultSolanaRPCConfig = SolanaRpcConfig "127.0.0.1" 8899 8900
+
 mainDeploySolanaClientContract :: IO ()
 mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
-    [] -> Right (def, SolanaRpcConfig "127.0.0.1" 8899 8900)
+    [] -> Right (defaultEthereumRPCConfig, defaultSolanaRPCConfig)
     ethUrl:solHost:solPort:solWs:[] -> do
       ethProvider <- case parseURI ethUrl of
         Just ethUrl' -> uriToProvider ethUrl'

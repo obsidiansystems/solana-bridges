@@ -23,7 +23,7 @@ main = pure ()
 
 testWithRunningNode :: Provider -> IO ()
 testWithRunningNode node = do
-  contract <- deploySolanaClientContract node
+  contract <- deploySolanaClientContract node defaultSolanaRPCConfig
   testMerkle16 node contract
 
 testMerkle16 :: Provider -> Address -> IO ()
