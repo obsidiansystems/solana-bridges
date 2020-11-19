@@ -1,5 +1,3 @@
-//use rlp::DecodeError;
-
 use solana_sdk::program_error::ProgramError;
 
 use rlp;
@@ -8,7 +6,7 @@ use rlp;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(test), derive(Copy))]
 pub enum CustomError {
-    EmptyInstruction,
+    IncompleteInstruction,
     InvalidInstructionTag,
 
     #[cfg(not(test))]
@@ -18,7 +16,11 @@ pub enum CustomError {
     #[cfg(not(test))]
     DecodeDifficultyAndHeaderFailed,
     #[cfg(not(test))]
+    DecodePowElementFailed,
+    #[cfg(not(test))]
     DecodeInclusionInstructionFailed,
+    #[cfg(not(test))]
+    DecodeChallengeInstructionFailed,
 
     #[cfg(test)]
     DecodeBlockFailed(rlp::DecoderError),
@@ -27,7 +29,11 @@ pub enum CustomError {
     #[cfg(test)]
     DecodeDifficultyAndHeaderFailed(rlp::DecoderError),
     #[cfg(test)]
+    DecodePowElementFailed(rlp::DecoderError),
+    #[cfg(test)]
     DecodeInclusionInstructionFailed(rlp::DecoderError),
+    #[cfg(test)]
+    DecodeChallengeInstructionFailed(rlp::DecoderError),
 
     #[allow(non_camel_case_types)]
     VerifyHeaderFailed_NonConsecutiveHeight,
@@ -37,6 +43,8 @@ pub enum CustomError {
     VerifyHeaderFailed_InvalidParentHash,
     #[allow(non_camel_case_types)]
     VerifyHeaderFailed_TooMuchExtraData,
+    #[allow(non_camel_case_types)]
+    VerifyHeaderFailed_InvalidProofOfWork,
 
     BlockNotFound,
     UnpackExtraDataFailed,
@@ -51,6 +59,24 @@ pub enum CustomError {
     InvalidProof_TooEasy,
     #[allow(non_camel_case_types)]
     InvalidProof_BadMerkle,
+
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadBlockHash,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_InvalidIndex,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadMerkleProof,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_BadMerkleRoot,
+    #[allow(non_camel_case_types)]
+    InvalidChallenge_SameElement,
+
+    /// This contract has been successfully challenged. It won't do anything
+    /// anymore.
+    ContractIsDead,
+    EthashElementsForWrongBlock,
+    EthashElementRewriting,
+
 }
 
 pub enum DecodeFrom {
@@ -58,6 +84,8 @@ pub enum DecodeFrom {
     Header,
     DifficultyAndHeader,
     Inclusion,
+    Challenge,
+    PowElement,
 }
 
 impl CustomError {
@@ -69,7 +97,9 @@ impl CustomError {
             Block => DecodeBlockFailed,
             Header => DecodeHeaderFailed,
             DifficultyAndHeader => DecodeDifficultyAndHeaderFailed,
+            PowElement => DecodePowElementFailed,
             Inclusion => DecodeInclusionInstructionFailed,
+            Challenge => DecodeChallengeInstructionFailed,
         }
     }
     #[cfg(test)]
@@ -80,7 +110,9 @@ impl CustomError {
             Block => DecodeBlockFailed(e),
             Header => DecodeHeaderFailed(e),
             DifficultyAndHeader => DecodeDifficultyAndHeaderFailed(e),
+            PowElement => DecodePowElementFailed(e),
             Inclusion => DecodeInclusionInstructionFailed(e),
+            Challenge => DecodeChallengeInstructionFailed(e),
         }
     }
 
@@ -92,29 +124,42 @@ impl CustomError {
     pub fn to_program_error(self) -> ProgramError {
         use CustomError::*;
         ProgramError::Custom(match self {
-            EmptyInstruction => 0,
+            IncompleteInstruction => 0,
             InvalidInstructionTag => 1,
 
             DecodeBlockFailed(_) => 2,
             DecodeHeaderFailed(_) => 3,
             DecodeDifficultyAndHeaderFailed(_) => 4,
-            DecodeInclusionInstructionFailed(_) => 5,
+            DecodePowElementFailed(_) => 5,
+            DecodeInclusionInstructionFailed(_) => 6,
+            DecodeChallengeInstructionFailed(_) => 7,
 
-            VerifyHeaderFailed_NonConsecutiveHeight => 6,
-            VerifyHeaderFailed_NonMonotonicTimestamp => 7,
-            VerifyHeaderFailed_InvalidParentHash => 8,
-            VerifyHeaderFailed_TooMuchExtraData => 9,
+            VerifyHeaderFailed_NonConsecutiveHeight => 8,
+            VerifyHeaderFailed_NonMonotonicTimestamp => 9,
+            VerifyHeaderFailed_InvalidParentHash => 10,
+            VerifyHeaderFailed_TooMuchExtraData => 11,
+            VerifyHeaderFailed_InvalidProofOfWork => 12,
 
-            BlockNotFound => 10,
-            UnpackExtraDataFailed => 11,
-            InvalidAccountOwner => 12,
-            DeserializeStorageFailed => 13,
-            AlreadyInitialized => 14,
-            WritableHistoryDuringProofCheck => 15,
+            BlockNotFound => 13,
+            UnpackExtraDataFailed => 14,
+            InvalidAccountOwner => 14,
+            DeserializeStorageFailed => 15,
+            AlreadyInitialized => 16,
+            WritableHistoryDuringProofCheck => 17,
 
-            InvalidProof_BadBlockHash => 16,
-            InvalidProof_TooEasy => 17,
-            InvalidProof_BadMerkle => 18,
+            InvalidProof_BadBlockHash => 18,
+            InvalidProof_TooEasy => 19,
+            InvalidProof_BadMerkle => 20,
+
+            InvalidChallenge_BadBlockHash => 21,
+            InvalidChallenge_InvalidIndex => 22,
+            InvalidChallenge_BadMerkleProof => 23,
+            InvalidChallenge_BadMerkleRoot => 24,
+            InvalidChallenge_SameElement => 25,
+
+            ContractIsDead => 26,
+            EthashElementsForWrongBlock => 27,
+            EthashElementRewriting => 28,
         })
     }
 }

@@ -20,9 +20,14 @@ while 1:
   if not line: break
   x = line.split(':')
   sk = binascii.unhexlify(x[0][0:64])
-  pk = ed25519.publickey(sk)
   m = binascii.unhexlify(x[2])
-  s = ed25519.signature(m,sk,pk)
+  if hasattr(ed25519, "publickey") or hasattr(ed25519, "signature"):
+    pk = ed25519.publickey(sk)
+    s = ed25519.signature(m,sk,pk)
+  else:
+    pk = binascii.unhexlify(x[1])
+    s = binascii.unhexlify(x[3][0:128])
+
   ed25519.checkvalid(binascii.unhexlify(x[3][0:128]), m, pk)
   ed25519.checkvalid(s,m,pk)
   forgedsuccess = 0

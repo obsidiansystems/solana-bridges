@@ -1,7 +1,9 @@
 #![cfg(feature = "program")]
+pub mod epoch_roots;
 pub mod eth;
 pub mod instruction;
-pub mod parameters;
+pub mod ledger_ring_buffer;
+pub mod pow_proof;
 pub mod processor;
 pub mod prove;
 pub mod types;

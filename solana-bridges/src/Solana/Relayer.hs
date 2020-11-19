@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE EmptyCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -15,7 +16,7 @@
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (forConcurrently_, withAsync)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
@@ -31,22 +32,25 @@ import Crypto.Hash.Algorithms (SHA256(..), SHA512(..))
 import Data.Aeson
 import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
+import Data.Aeson.Types (Parser, explicitParseField, listParser)
 import Data.Bits
 import Data.ByteArray.HexString
-import Data.Constraint
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
 import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
+import Data.List.Split (chunksOf)
 import Data.Map (Map)
-import Data.Maybe(fromMaybe)
+import Data.Maybe(fromMaybe, isJust)
+import Data.Semigroup (stimesMonoid)
 import Data.Solidity.Prim.Address (Address)
 import Data.String (IsString)
 import Data.Text (Text)
 import Data.Void (Void)
 import Data.Word
+import GHC.Generics (Generic)
 import Network.Ethereum.Api.Types (Call(..))
 import Network.JsonRpc.TinyClient as Eth
 import Network.URI (URI(..), uriToString, parseURI)
@@ -54,7 +58,7 @@ import Network.Web3.Provider (runWeb3, runWeb3')
 import System.Directory (canonicalizePath, copyFile, createDirectory, createDirectoryIfMissing, getCurrentDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment
 import System.Exit
-import System.IO (stderr, hPutStrLn)
+import System.IO (BufferMode(LineBuffering), stdout, stderr, hFlush, hPutStrLn, hSetBuffering)
 import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO.Temp (createTempDirectory, getCanonicalTemporaryDirectory)
 import System.Posix.Files (createSymbolicLink)
@@ -65,12 +69,13 @@ import qualified Blockchain.Data.RLP as RLP
 import qualified Crypto.Error
 import qualified Crypto.PubKey.Ed25519
 import qualified Data.Binary.Get as Binary
+import qualified Data.Binary.Put as Binary
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Char
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -89,6 +94,9 @@ import Ethereum.Contracts as Contracts
 import Ethereum.Contracts.Dist (solanaClientContractBin)
 import Solana.RPC
 import Solana.Types
+
+ethashElementsPerInstruction :: Int
+ethashElementsPerInstruction = 8
 
 mainRelayer :: IO ()
 mainRelayer = do
@@ -336,31 +344,86 @@ createContract fromAddr hex = Eth.Call
     , callNonce = Nothing
     }
 
+data SolanaClientState = SolanaClientState
+  { _solanaClientState_height :: Word64
+  , _solanaClientState_offset :: Word64
+  , _solanaClientState_full :: Bool
+  , _solanaClientState_missingElementsBitmask :: Word16
+  } deriving (Eq, Ord, Show, Generic)
+
 relayEthereumToSolana :: FilePath -> ContractConfig -> IO ()
 relayEthereumToSolana configFile config = do
+  hSetBuffering stdout LineBuffering
   let solanaAccountLookupArgs = proc solanaPath $ T.unpack <$>
         [ "account"
         , _contractConfig_accountId config
         , "--output", "json"
         ]
 
-  (highestBlock, nextBlockOffset, isFull) <- System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
-    (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
-      x :: Value <- eitherDecode' accountData
-      x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
-      () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
-      x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
-      bimap (view _3) (view _3) $ Binary.runGetOrFail ((,,) <$> Binary.getWord64le <*> Binary.getWord64le <*> Binary.getWord8) $ LBS.fromStrict x2
+      getSolanaClientState = SolanaClientState
+        <$> Binary.getWord64le
+        <*> Binary.getWord64le
+        <*> getFull
+        <*> Binary.getWord16le
+        where
+          -- 'bool' is aligned to 16 bits for some reason, but only one bit can be non-zero so we don't care about endianness
+          getFull = fmap (/= 0) Binary.getWord16le
 
-    bad -> error $ show bad
+      fetchClientState = System.Process.ByteString.Lazy.readCreateProcessWithExitCode solanaAccountLookupArgs "" >>= \case
+        (ExitSuccess, accountData, _) -> either (error . ("bad: " <>) ) pure $ do
+          x :: Value <- eitherDecode' accountData
+          x1 <- maybe (Left "missing account data") pure $ preview (key "account" . key "data" . nth 0 . _String) x
+          () <- maybe (Left "invalid encoding") pure $ preview (key "account" . key "data" . nth 1 . _String . only "base64") x
+          x2 <- maybe (Left "failed to decode") pure $ preview _Right $ Base64.decode $ T.encodeUtf8 x1
+          bimap (view _3) (view _3) $ Binary.runGetOrFail getSolanaClientState $ LBS.fromStrict x2
 
+        bad -> error $ show bad
+
+
+  SolanaClientState highestBlock nextBlockOffset isFull missingElementsBitmask <- fetchClientState
   let contractState = case (highestBlock, nextBlockOffset, isFull) of
-        (0, 0, 0) -> Nothing
+        (0, 0, False) -> Nothing
         _ -> Just $ succ highestBlock
 
-  let loopStart = fromMaybe 1 $ _contractConfig_loopStart config
+  let
+    bridgeToolProc command args =
+      proc solanaBridgeToolPath $ fmap T.unpack $
+           [ command
+           , "--config", T.pack configFile
+           -- , "--payer", "/dev/null"
+           ] <> args
+
+    relayEthashElements :: Word64 -> IO ()
+    relayEthashElements height = do
+      elems <- getEthashElements height >>= \case
+        Left err -> error (T.unpack err)
+        Right ee -> pure ee
+
+      let
+        chunkSize = ethashElementsPerInstruction
+        chunks = chunksOf chunkSize elems
+
+      forConcurrently_ (zip [0..] chunks) $ \(idx, chunk) -> do
+          let
+            offset = chunkSize * idx;
+            raw = LBS.toStrict (Binary.runPut $ Binary.putWord64le height)
+              : BS.singleton (fromIntegral idx)
+              : fmap unHexString chunk
+            dataHex = T.concat $ T.decodeLatin1 . B16.encode <$> raw
+            p = bridgeToolProc "provide-ethash-element"
+              ["--element", dataHex]
+
+          putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
+          readCreateProcessWithExitCode p "" >>= \case
+            (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
+            bad -> error $ show bad
+
+  let relayingStart = fromMaybe 1 $ _contractConfig_loopStart config
   let loop :: Word64 -> IO (Either Eth.Web3Error Void)
       loop n = do
+        client <- fetchClientState
+        print client
+
         let doEth :: forall resp. Eth.Web3 resp -> IO resp
             doEth m = do
               res :: Either Eth.Web3Error a <- catch (runWeb3 m)
@@ -373,7 +436,9 @@ relayEthereumToSolana configFile config = do
               case res of
                 Left e -> fail $ show e
                 Right res' -> pure res'
-        mTotalDifficulty <- case n == loopStart of
+
+
+        mTotalDifficulty <- case n == relayingStart of
           False -> pure Nothing
           True -> fmap (Just . Eth.blockTotalDifficulty) $
             doEth $ Eth.getBlockByNumber $ Eth.Quantity $ toInteger n
@@ -388,18 +453,23 @@ relayEthereumToSolana configFile config = do
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
         T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
-        let p = (proc solanaBridgeToolPath $ T.unpack <$>
-                  [ (if n == loopStart then "initialize" else "new-block")
-                  , "--config", T.pack configFile
-                  -- , "--payer", "/dev/null"
-                  , "--instruction", instructionDataHex
-                  ])
+        let p = bridgeToolProc (if n == relayingStart then "initialize" else "new-block")
+              ["--instruction", instructionDataHex]
+
         readCreateProcessWithExitCode p "" >>= \case
           (ExitSuccess, txn, _) -> putStrLn txn
           bad -> error $ show bad
+
+        relayEthashElements n
+
         loop $ n + 1
 
-  loop (fromMaybe loopStart contractState) >>= \case
+  let loopStart = fromMaybe relayingStart contractState
+
+  when (isJust contractState && zeroBits /= missingElementsBitmask) $
+    relayEthashElements (loopStart - 1)
+
+  loop loopStart >>= \case
     Right x -> pure $ case x of {}
     Left bad -> error $ show bad
 
@@ -460,14 +530,6 @@ testSolanaCrypto node ca = do
       let expectedDigest = ByteArray.convert $ hashWith SHA512 msg
       check_sha512_testvector msg (HexString expectedDigest)
 
-    check_value :: (Applicative m, Eq a, Show a) => String -> a -> a -> m ()
-    check_value hint expected actual = do
-      unless (expected == actual) $ error $ unlines
-        [ hint <> ": test failed"
-        , "expected: " <> show expected
-        , "got: " <> show actual
-        ]
-
     check_ed25519_synthetic sk msg = do
       let
         pk = Crypto.PubKey.Ed25519.toPublic sk
@@ -479,39 +541,20 @@ testSolanaCrypto node ca = do
   res <- runExceptT $ do
     _ <- getInitialized node ca
 
-    do
-      implTestData <- liftIO $ LBS.readFile "test-extras/ed25519-low-level-tests.txt"
-      for_ (LBS.split (fromIntegral $ Data.Char.ord '\n') implTestData) $ \line -> do
-        case eitherDecode' line of
-          Left bad -> liftIO $ print (bad, line)
-          Right (TestCryptCase fn args expectedResult) -> do
-            Dict <- pure $ testCaseHasOut @Eq fn
-            Dict <- pure $ testCaseHasOut @Show fn
-            result <- test_impl node ca fn args
-            unless (result == expectedResult) $ error $ unlines
-              [ "ed25519 impl test vector failed:"
-              , "test:" <> show line
-              , "expected:" <> show expectedResult
-              , "actual:" <> show result
-              ]
-
     check_ed25519_testvector "0x"
       "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
       "0xe5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
-    check_ed25519_testvector "0xa750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3"
-      "0xb49f3a78b1c6a7fca8f3466f33bc0e929f01fba04306c2a7465f46c3759316d9"
-      "0x04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b"
 
     check_sha512_testvector "abc"
       "0xDDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A2192992A274FC1A836BA3C23A3FEEBBD454D4423643CE80E2A9AC94FA54CA49F"
 
+    check_ed25519_testvector "0xa750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3"
+      "0xb49f3a78b1c6a7fca8f3466f33bc0e929f01fba04306c2a7465f46c3759316d9"
+      "0x04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b"
+
+
     check_sha512_synthetic
       "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
-
-    for_ [0, 1, 11, 110,111, 112, 113, 126, 127,128,129,130] $ \len -> do
-      let msg = BS.pack $ take len $ cycle [0..255]
-      liftIO $ putStrLn $ "sha512:" <> show len
-      check_sha512_synthetic msg
 
     let
       -- derive a key very insecurely
@@ -526,40 +569,12 @@ testSolanaCrypto node ca = do
       "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
       "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
 
-    for_ [0..20] $ \len -> do
+    for_ [0, 1, 11, 110,111, 112, 113, 126, 127,128,129,130] $ \len -> do
+      let msg = BS.pack $ take len $ cycle [0..255]
+      check_sha512_synthetic msg
       check_ed25519_synthetic
         (kdf $ T.encodeUtf8 $ T.pack $ show len)
-        (BS.pack $ take len $ cycle [0..255])
-
-    check_sha512_synthetic "r"
-    for_ [0..257] $ \len -> do
-      let
-        a = BS.pack $ take 32 $ repeat 97
-        b = BS.pack $ take 32 $ repeat 98
-        msg = BS.pack $ take len $ cycle [0..255]
-      test_packMessage node ca (Base58ByteString a) (Base58ByteString b) msg >>= check_value "test_packMessage" (a <> b <> msg)
-
-
-    liftIO $ putStrLn "c25519-decodeint"
-    test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= check_value "c25519-decodeint" 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
-
-    liftIO $ putStrLn "c25519-curvedistance"
-    test_curvedistance node ca
-      ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
-      , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
-      >>= check_value "c25519-curvedistance" 0
-
-
-    liftIO $ putStrLn "c25519-xrecover"
-    test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
-
-    liftIO $ putStrLn "c25519-decodepoint"
-    test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
-
-    liftIO $ putStrLn "c25519-scalarmult"
-    test_scalarmult node ca (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,0x6666666666666666666666666666666666666666666666666666666666666658) 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
-      >>= check_value "c25519-scalarmult"
-        (0x114237e016d3f2598171d4cc242eee95460ae1ed35857f80c2d214b7e9804938,0x2794ddddd6a5cf42e54475f290e8c5d92c9c6f36c5c16df1e5f992af998a6cfe)
+        msg
 
     liftIO $ putStrLn "OK"
   case res of
@@ -738,6 +753,55 @@ data ContractConfig = ContractConfig
  , _contractConfig_accountId :: Text
  , _contractConfig_loopStart :: Maybe Word64
  } deriving (Show, Eq, Ord)
+
+data EthashData = EthashData
+  { _ethashData_header :: HexString
+  , _ethashData_merkleRoot :: HexString
+  , _ethashData_proofLength :: Word
+  , _ethashData_elements :: [HexString]
+  , _ethashData_merkleProofs :: [HexString]
+  } deriving (Show, Eq, Ord, Generic)
+
+instance FromJSON EthashData where
+    parseJSON = withObject "EthashData" $ \v -> EthashData
+        <$> explicitParseField parseHex v "header_rlp"
+        <*> explicitParseField parseHex v "merkle_root"
+        <*> v .: "proof_length"
+        <*> explicitParseField (listParser parseHex) v "elements"
+        <*> explicitParseField (listParser parseHex) v "merkle_proofs"
+      where
+        parseHex :: Value -> Parser HexString
+        parseHex = withText "hex" $ fmap reverseEndianness . parseJSON . String . pad . T.drop 2
+
+        reverseEndianness :: HexString -> HexString
+        reverseEndianness = HexString . BS.reverse . unHexString
+
+        pad :: Text -> Text
+        pad x =
+          let size = max 0 (64 - T.length x)
+          in stimesMonoid size "0" <> x
+
+getEthashElements :: Word64 -> IO (Either Text [HexString])
+getEthashElements blockHeight = runExceptT $ do
+  liftIO $ putStrLn $ "Getting ethash proof data for block " <> show blockHeight
+  output <- liftIO $ readProcess ethashproofRelayerPath [show blockHeight] ""
+  ethashData <- case eitherDecode' $ LBS.fromStrict $ BSC.dropWhile (/= '{') $ BSC.pack output of
+    Left err -> throwError $ T.pack err
+    Right d -> pure d
+  let elems = _ethashData_elements ethashData
+      len = length elems
+      paired = fmap snd
+               $ filter (\(x, _) -> x `mod` 2 == 0)
+               $ zip [(0 :: Int)..]
+               $ zip elems (tail elems)
+  when (len /= 256) $ throwError $ "Invalid length: " <> T.pack (show len)
+  pure $ flip fmap paired $ \(x,y) -> x <> y
+
+ethashproofCachePath :: FilePath
+ethashproofCachePath = $(staticWhich "cache")
+
+ethashproofRelayerPath :: FilePath
+ethashproofRelayerPath = $(staticWhich "relayer")
 
 solcPath :: FilePath
 solcPath = $(staticWhich "solc")
