@@ -150,13 +150,18 @@ function doCall(fn) {
 
         var v = await connection.simulateTransaction(
             txn,
-            signers0
+            signers0,
             );
         logger.log("simulation", JSON.stringify(v));
 
-        var txId = await web3.sendAndConfirmTransaction(connection,
+        var txId = await web3.sendAndConfirmTransaction(
+            connection,
             txn,
-            signers0
+            signers0,
+            {
+                commitment: 'singleGossip',
+                skipPreflight: true,
+            },
             );
         return {"sig": txId};
     };
@@ -180,6 +185,14 @@ async function initialize(argv) {
 }
 async function newBlock(argv) {
     const instructionData = Buffer.from("02" + argv.instruction, argv.instructionEncoding);
+    return {
+        instructionData,
+        isSigner: false,
+        isWritable: true
+    };
+}
+async function provideEthashElement(argv) {
+    const instructionData = Buffer.from("03" + argv.element, argv.elementEncoding);
     return {
         instructionData,
         isSigner: false,
@@ -313,6 +326,12 @@ yargs
             , 'instruction-encoding': {default: 'hex'}
             })
         , callCmd(doCall(newBlock)))
+    .command('provide-ethash-element', 'provide ethash element'
+        , (yargv) => commandArgs(yargv).options(
+            { 'element': {demand: true}
+              , 'element-encoding': {default: 'hex'}
+            })
+        , callCmd(doCall(provideEthashElement)))
 
     .command('inclusion-proof', 'inclusion proof'
         , (yargv) => yargv.options(

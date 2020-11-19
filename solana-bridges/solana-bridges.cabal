@@ -42,6 +42,7 @@ library
                      , network-uri
                      , process
                      , process-extras
+                     , split
                      , time
                      , template-haskell
                      , th-lift-instances

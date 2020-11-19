@@ -17,7 +17,7 @@ let
       super.haskellPackages.override (old: {
         overrides = self: super: with nixpkgs.haskell.lib; {
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
-            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool] ++ (with nixpkgs; [ go-ethereum solc ]);
+            executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool ethashproof] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
           web3 = doJailbreak (dontCheck (self.callCabal2nix "web3" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
@@ -206,19 +206,23 @@ let
   shells = {
     ethereum-client-bpf = shell;
 
-    ethereum-client-x86 = with nixpkgs; mkShell {
-      buildInputs = [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
+    ethereum-client-x86 = nixpkgs.mkShell {
+      nativeBuildInputs = with nixpkgs.buildPackages; [ rustc cargo cargo-deps cargo-watch clippy rustfmt ];
     };
 
     solana-client-evm = with nixpkgs; mkShell {
       buildInputs = [ inotify-tools go-ethereum solc ];
+    };
+
+    scripts = with nixpkgs; mkShell {
+      buildInputs = [ solana solana-client-tool ];
     };
   };
 
   ethereum-client-src = gitignoreSource ./solana-bridges/ethereum-client;
 
   # Cargo hash must be updated when Cargo.lock file changes.
-  ethereum-client-dep-sha256 = "014mnggjv4wqcqx05058d7ldsg9l2zzs8z2qrwgmkj3al45da766";
+  ethereum-client-dep-sha256 = "00xyzzdnm4wkp65bqq04v6arg0zrq1nzxc79xd0yp8449kw2gijv";
   ethereum-client-dep-srcs = nixpkgs.rustPlatform.fetchCargoTarball {
     name = "ethereum-client";
     src = ethereum-client-src;
@@ -258,6 +262,19 @@ let
 
   run-solana-testnet = withSPLEnv "run-solana-testnet";
 
+  ethashproof = with nixpkgs; buildGoModule rec {
+    name = "ethashproof";
+    runVend = true;
+
+    src = fetchFromGitHub {
+      owner = "tranvictor";
+      repo = name;
+      rev = "82a2b716eac4965709898a3dae791b4bace0999a";
+      sha256 = "0xahaiv9i289lp76c0zb68qbz8xk3r2r0grl85zhbk2iykmg6jby";
+    };
+    vendorSha256 = "0chs20pgcxg2wf7y3ppsqfzihhwgaqlrb58f9j56gfpz0va5ysm4";
+  };
+
 in {
   inherit nixpkgs shell shells solc solana solana-rust-bpf solana-llvm spl
     ethereum-client-prog
@@ -266,6 +283,7 @@ in {
     generate-solana-genesis
     solana-client-tool
     run-solana-testnet
+    ethashproof
   ;
   inherit (nixpkgs.haskellPackages) solana-bridges;
 }
