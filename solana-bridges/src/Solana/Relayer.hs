@@ -33,7 +33,6 @@ import Data.Aeson.Lens (_String, key, nth)
 import Data.Aeson.TH
 import Data.Bits
 import Data.ByteArray.HexString
-import Data.Constraint
 import Data.Default (def)
 import Data.FileEmbed (embedFile)
 import Data.Foldable
@@ -70,7 +69,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LBS
-import qualified Data.Char
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -460,14 +458,6 @@ testSolanaCrypto node ca = do
       let expectedDigest = ByteArray.convert $ hashWith SHA512 msg
       check_sha512_testvector msg (HexString expectedDigest)
 
-    check_value :: (Applicative m, Eq a, Show a) => String -> a -> a -> m ()
-    check_value hint expected actual = do
-      unless (expected == actual) $ error $ unlines
-        [ hint <> ": test failed"
-        , "expected: " <> show expected
-        , "got: " <> show actual
-        ]
-
     check_ed25519_synthetic sk msg = do
       let
         pk = Crypto.PubKey.Ed25519.toPublic sk
@@ -479,39 +469,20 @@ testSolanaCrypto node ca = do
   res <- runExceptT $ do
     _ <- getInitialized node ca
 
-    do
-      implTestData <- liftIO $ LBS.readFile "test-extras/ed25519-low-level-tests.txt"
-      for_ (LBS.split (fromIntegral $ Data.Char.ord '\n') implTestData) $ \line -> do
-        case eitherDecode' line of
-          Left bad -> liftIO $ print (bad, line)
-          Right (TestCryptCase fn args expectedResult) -> do
-            Dict <- pure $ testCaseHasOut @Eq fn
-            Dict <- pure $ testCaseHasOut @Show fn
-            result <- test_impl node ca fn args
-            unless (result == expectedResult) $ error $ unlines
-              [ "ed25519 impl test vector failed:"
-              , "test:" <> show line
-              , "expected:" <> show expectedResult
-              , "actual:" <> show result
-              ]
-
     check_ed25519_testvector "0x"
       "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
       "0xe5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
-    check_ed25519_testvector "0xa750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3"
-      "0xb49f3a78b1c6a7fca8f3466f33bc0e929f01fba04306c2a7465f46c3759316d9"
-      "0x04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b"
 
     check_sha512_testvector "abc"
       "0xDDAF35A193617ABACC417349AE20413112E6FA4E89A97EA20A9EEEE64B55D39A2192992A274FC1A836BA3C23A3FEEBBD454D4423643CE80E2A9AC94FA54CA49F"
 
+    check_ed25519_testvector "0xa750c232933dc14b1184d86d8b4ce72e16d69744ba69818b6ac33b1d823bb2c3"
+      "0xb49f3a78b1c6a7fca8f3466f33bc0e929f01fba04306c2a7465f46c3759316d9"
+      "0x04266c033b91c1322ceb3446c901ffcf3cc40c4034e887c9597ca1893ba7330becbbd8b48142ef35c012c6ba51a66df9308cb6268ad6b1e4b03e70102495790b"
+
+
     check_sha512_synthetic
       "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
-
-    for_ [0, 1, 11, 110,111, 112, 113, 126, 127,128,129,130] $ \len -> do
-      let msg = BS.pack $ take len $ cycle [0..255]
-      liftIO $ putStrLn $ "sha512:" <> show len
-      check_sha512_synthetic msg
 
     let
       -- derive a key very insecurely
@@ -526,40 +497,12 @@ testSolanaCrypto node ca = do
       "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
       "0x92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
 
-    for_ [0..20] $ \len -> do
+    for_ [0, 1, 11, 110,111, 112, 113, 126, 127,128,129,130] $ \len -> do
+      let msg = BS.pack $ take len $ cycle [0..255]
+      check_sha512_synthetic msg
       check_ed25519_synthetic
         (kdf $ T.encodeUtf8 $ T.pack $ show len)
-        (BS.pack $ take len $ cycle [0..255])
-
-    check_sha512_synthetic "r"
-    for_ [0..257] $ \len -> do
-      let
-        a = BS.pack $ take 32 $ repeat 97
-        b = BS.pack $ take 32 $ repeat 98
-        msg = BS.pack $ take len $ cycle [0..255]
-      test_packMessage node ca (Base58ByteString a) (Base58ByteString b) msg >>= check_value "test_packMessage" (a <> b <> msg)
-
-
-    liftIO $ putStrLn "c25519-decodeint"
-    test_decodeint node ca (Base58ByteString $ unHexString "0x5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b") >>= check_value "c25519-decodeint" 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
-
-    liftIO $ putStrLn "c25519-curvedistance"
-    test_curvedistance node ca
-      ( 0x6218e309d40065fcc338b3127f46837182324bd01ce6f3cf81ab44e62959c82a
-      , 0x5501492265e073d874d9e5b81e7f87848a826e80cce2869072ac60c3004356e5)
-      >>= check_value "c25519-curvedistance" 0
-
-
-    liftIO $ putStrLn "c25519-xrecover"
-    test_xrecover node ca 0x6666666666666666666666666666666666666666666666666666666666666658 >>= check_value "c25519-xrecover" 0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a
-    
-    liftIO $ putStrLn "c25519-decodepoint"
-    test_decodepoint node ca (Base58ByteString $ unHexString "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") >>= check_value "c25519-decodepoint" (0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce, 0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7)
-
-    liftIO $ putStrLn "c25519-scalarmult"
-    test_scalarmult node ca (0x216936d3cd6e53fec0a4e231fdd6dc5c692cc7609525a7b2c9562d608f25d51a,0x6666666666666666666666666666666666666666666666666666666666666658) 0xb107a8e4341516524be5b59f0f55bd26bb4f91c70391ec6ac3ba3901582b85f
-      >>= check_value "c25519-scalarmult"
-        (0x114237e016d3f2598171d4cc242eee95460ae1ed35857f80c2d214b7e9804938,0x2794ddddd6a5cf42e54475f290e8c5d92c9c6f36c5c16df1e5f992af998a6cfe)
+        msg
 
     liftIO $ putStrLn "OK"
   case res of
