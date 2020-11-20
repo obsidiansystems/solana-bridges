@@ -746,6 +746,10 @@ struct Slot {
     function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
         bytes32 hash = sha256(value);
 
+        // uint64 used for index only fits 16 nibbles
+        if(proof.length > 16)
+            revert("Proof too large");
+
         for (uint height = 0; height < proof.length; height++) {
             uint64 offset = index % 16;
 
