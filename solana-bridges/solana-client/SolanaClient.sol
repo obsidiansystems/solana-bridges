@@ -684,7 +684,7 @@ struct Slot {
         slot.hasBlock = true;
         slot.leaderPublicKey = leader;
         slot.blockHash = hash;
-        //TODO: store bank hash merkle root
+        //TODO: store bank hash merkle root for use in verifyTransaction function
     }
 
     function emptySlot(uint64 s) private {
@@ -712,18 +712,17 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function verifyTransaction(bytes32 accountsHash,
-                               bytes32 blockMerkle,
-                               bytes32[16][] calldata subProof,
-                               uint64 slot,
-                               bytes calldata transaction,
-                               uint64 transactionIndex) external view returns (bool) {
+    function verifyTransaction() external pure returns (bool) {
+        revert("Bank hash merkle roots are not available yet");
+        /*
+        bytes32 bankHashMerkleRoot =  slots[slotOffset(slot)].bankHashMerkleRoot;
         return this.verifyTransactionInclusionProof(accountsHash,
                                                     blockMerkle,
                                                     subProof,
-                                                    slots[slotOffset(slot)].bankHashMerkleRoot,
+                                                    bankHashMerkleRoot,
                                                     transaction,
                                                     transactionIndex);
+        */
     }
 
     function verifyTransactionInclusionProof(bytes32 accountsHash,
