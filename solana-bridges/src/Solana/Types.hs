@@ -1,21 +1,44 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
+
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Solana.Types where
 
 import Control.Applicative
+import Data.Foldable
 import Data.Aeson
 import Data.Aeson.TH
 import Data.Aeson.Types (toJSONKeyText)
 import Data.Map (Map)
+import Data.Sequence (Seq)
 import Data.Text (Text)
-import Data.Time
+-- import Data.Time
 import Data.Word
+import Data.Binary
+import Data.Binary.Get
+import Data.Binary.Put
+import Crypto.Hash (Digest, HashAlgorithm, hashDigestSize, digestFromByteString)
+import Crypto.Error (CryptoFailable(..))
+import Crypto.Hash.Algorithms (SHA256)
+import GHC.Generics
+import Data.Bits
+import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString as BS
+import qualified Data.Sequence as Seq
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Base58 as Base58
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.ByteArray as ByteArray
+import qualified Crypto.PubKey.Ed25519 as Ed25519
 
 data JsonRpcVersion = JsonRpcVersion
 instance ToJSON JsonRpcVersion where toJSON _ = toJSON ("2.0" :: T.Text)
@@ -74,6 +97,194 @@ data SolanaEpochSchedule = SolanaEpochSchedule
   , _solanaEpochSchedule_slotsPerEpoch :: !Word64
   } deriving Show
 
+
+--- Wellknown addresses
+wellKnownAddress :: BS.ByteString -> Ed25519.PublicKey
+wellKnownAddress x = case Base58.decodeBase58 Base58.bitcoinAlphabet x of
+  Nothing -> error "b58"
+  Just y -> case Ed25519.publicKey y of
+      CryptoPassed good -> good
+      CryptoFailed bad -> error $ show bad
+
+solanaVoteProgram :: Ed25519.PublicKey
+solanaVoteProgram = wellKnownAddress "Vote111111111111111111111111111111111111111"
+
+newtype CompactWord16 = CompactWord16 Word16
+  deriving (Real, Integral, Num, Show, Eq, Ord, Enum)
+
+instance Binary CompactWord16 where
+  put (CompactWord16 x)
+    | x < 1 `shiftL` 7  = putWord8 (fromIntegral x         )
+    | x < 1 `shiftL` 14 = putWord8 (fromIntegral x .|. 0x80) <> putWord8 (fromIntegral (x `shiftR` 7)         )
+    | otherwise         = putWord8 (fromIntegral x .|. 0x80) <> putWord8 (fromIntegral (x `shiftR` 7) .|. 0x80) <> putWord8 (fromIntegral (x `shiftR` 14))
+
+  get = getWord8 >>= \x0 -> CompactWord16 <$> if x0 < 1 `shiftL` 7
+    then pure $ fromIntegral x0
+    else getWord8 >>= \x1 -> if x1 < 1 `shiftL` 7
+      then pure $ fromIntegral x0 .|. shiftL (fromIntegral x1) 7
+      else getWord8 >>= \x2 -> if x2 < 1 `shiftL` 2
+        then pure $ fromIntegral x0 .|. shiftL (fromIntegral x1) 7 .|. shiftL (fromIntegral x2) 14
+        else fail "too big"
+
+newtype LengthPrefixedArray sz a = LengthPrefixedArray { unCompactArray :: Seq a}
+  deriving (Show, Functor, Foldable, Traversable)
+
+instance (Integral sz, Num sz, Binary sz, Binary a) => Binary (LengthPrefixedArray sz a) where
+  put (LengthPrefixedArray xs)
+    | length xs /= fromIntegral (fromIntegral (length xs) :: sz) = error "bad LengthPrefixedArray length"
+    | otherwise = put (fromIntegral (length xs) :: sz) <> traverse_ put xs
+
+  get = do
+    numXs :: sz <- get
+    LengthPrefixedArray <$> Seq.replicateM (fromIntegral numXs) get
+
+type CompactArray = LengthPrefixedArray CompactWord16
+
+newtype CompactByteArray = CompactByteArray { unCompactByteArray :: LBS.ByteString }
+  deriving Show
+
+instance Binary CompactByteArray where
+  put (CompactByteArray xs)
+    | LBS.length xs /= fromIntegral (fromIntegral (LBS.length xs) :: Word16) = error "bad CompactByteArray length"
+    | otherwise = put (CompactWord16 $ fromIntegral $ LBS.length xs) <> put xs
+
+  get = do
+    CompactWord16 numXs <- get
+    CompactByteArray <$> getLazyByteString (fromIntegral numXs)
+
+instance Binary Ed25519.Signature where
+  put = put @BS.ByteString . ByteArray.convert
+  get = do
+    sigBytes <- getByteString (Ed25519.signatureSize)
+    case Ed25519.signature sigBytes of
+      CryptoPassed good -> pure good
+      CryptoFailed bad -> fail $ show bad
+
+instance Binary Ed25519.PublicKey where
+  put = put @BS.ByteString . ByteArray.convert
+  get = do
+    sigBytes <- getByteString (Ed25519.publicKeySize)
+    case Ed25519.publicKey sigBytes of
+      CryptoPassed good -> pure good
+      CryptoFailed bad -> fail $ show bad
+
+instance HashAlgorithm a => Binary (Digest a) where
+  put = put @BS.ByteString . ByteArray.convert
+
+  get = do
+      sigBytes <- getByteString len
+      case digestFromByteString sigBytes of
+        Just good -> pure good
+        Nothing -> fail "bad Digest size"
+    where
+     len = hashDigestSize (undefined :: a)
+
+-- https://docs.solana.com/transaction#transaction-format
+data SolanaTxn = SolanaTxn
+  { _solanaTxn_signatures :: CompactArray Ed25519.Signature
+  , _solanaTxn_message :: SolanaTxnMessage
+  } deriving (Generic, Show)
+
+instance Binary SolanaTxn
+
+
+data SolanaTxnMessage = SolanaTxnMessage
+  { _solanaTxnMessage_requiredSignatures :: Word8
+  , _solanaTxnMessage_readOnlySignatures :: Word8
+  , _solanaTxnMessage_readOnlyUnsigned :: Word8
+  , _solanaTxnMessage_addresses :: CompactArray Ed25519.PublicKey
+  , _solanaTxnMessage_recentBlockHash :: Digest SHA256
+  , _solanaTxnMessage_instructions :: CompactArray SolanaTxnInstruction
+  } deriving (Generic, Show)
+
+instance Binary SolanaTxnMessage
+
+-- https://github.com/solana-labs/solana/blob/master/sdk/program/src/instruction.rs#L227
+data SolanaTxnInstruction = SolanaTxnInstruction
+  { _solanaTxnInstruction_programId :: Word8
+  , _solanaTxnInstruction_accounts :: CompactArray Word8
+  , _solanaTxnInstruction_data :: CompactByteArray
+  } deriving (Generic, Show)
+instance Binary SolanaTxnInstruction
+
+isVoteTxn :: SolanaTxn -> Bool
+isVoteTxn txn = any isVoteInstr (_solanaTxnMessage_instructions $ _solanaTxn_message txn)
+  where
+    isVoteInstr :: SolanaTxnInstruction -> Bool
+    isVoteInstr instr
+      = Just solanaVoteProgram == Seq.lookup (fromIntegral $ _solanaTxnInstruction_programId instr) (unCompactArray $ _solanaTxnMessage_addresses $ _solanaTxn_message txn)
+
+
+data VoteAuthorize
+   = VoteAuthorize_Voter
+   | VoteAuthorize_Withdrawer
+   deriving (Generic, Show)
+instance Binary VoteAuthorize
+
+newtype Word64LE = Word64LE { unWord64LE :: Word64 }
+  deriving (Integral, Num, Eq, Ord, Real, Enum, Bounded, Show)
+
+instance Binary Word64LE where
+  get = Word64LE <$> getWord64le
+  put = putWord64le . unWord64LE
+
+
+iterateABit :: SolanaVoteInstruction
+iterateABit = c99
+  where
+
+    corpus = "AeIa+yy2r53fMeNz1WCnjEityg7yUHeKXQNFC+1sIbxOQ03scdL5qO+vYnFP9e8cfyRdvq0yD5pxHaBBTtl4gg8BAAMF01L0Cxouih7U0W+rqrqFKJDpZV3XeSpuqaXgRbrAeAqgAVVnFM8Agxw18NmD9pMJiEV64Q4iw2HyJ+BVmNG3+Qan1RcZLwqvxvJl4/t3zHragsUp0L47E24tAFUgAAAABqfVFxjHdMkoVmOYaR1etoteuKObS21cc1VbIQAAAAAHYUgdNXR0u3xNdiTr072z2DVec9EQQ/wNo1OAAAAAACDmrot1r1vWpmd/D+ChBEBiZhQ4Nd+p2j4sn+uFgN3iAQQEAQIDADUCAAAAAQAAAAAAAADyAgAAAAAAAJV3dv5X/f8VXWn97lr4Gq9klvJ0JKGlPBeouydqEmYFAA==" :: LBS.ByteString
+    Right c2 = Base64.decode $ LBS.toStrict corpus
+    c3 = Data.Binary.decode (LBS.fromStrict c2) :: SolanaTxn
+    c4 = head $ toList $ _solanaTxnMessage_instructions $ _solanaTxn_message c3
+    c99 = Data.Binary.decode (unCompactByteArray  $ _solanaTxnInstruction_data c4) :: SolanaVoteInstruction
+
+
+data SolanaVote = SolanaVote
+  { _solanaVote_slots :: LengthPrefixedArray Word64LE Word64LE -- ^ A stack of votes starting with the oldest vote
+  , _solanaVote_hash :: Digest SHA256-- ^  signature of the bank's state at the last slot
+  , _solanaVote_timestamp :: Maybe Word64LE -- ^  processing timestamp of last slot
+  } deriving (Generic, Show)
+instance Binary SolanaVote
+
+data SolanaVoteInitialize = SolanaVoteInitialize
+  { _solanaVoteInitialize_nodePubkey :: Ed25519.PublicKey
+  , _solanaVoteInitialize_authorizedVoter :: Ed25519.PublicKey
+  , _solanaVoteInitialize_authorizedWithdrawer :: Ed25519.PublicKey
+  , _solanaVoteInitialize_commission :: Word8
+  } deriving (Generic, Show)
+instance Binary SolanaVoteInitialize
+
+data SolanaVoteInstruction
+  = SolanaVoteInstruction_InitializeAccount SolanaVoteInitialize
+  | SolanaVoteInstruction_Authorize Ed25519.PublicKey VoteAuthorize
+  | SolanaVoteInstruction_Vote SolanaVote
+  | SolanaVoteInstruction_Withdraw Word64LE
+  | SolanaVoteInstruction_UpdateValidatorIdentity
+  | SolanaVoteInstruction_UpdateCommission Word8
+  | SolanaVoteInstruction_VoteSwitch SolanaVote (Digest SHA256)
+  deriving Show
+
+instance Binary SolanaVoteInstruction where
+  get = getWord32le >>= \case
+    0 -> SolanaVoteInstruction_InitializeAccount <$> get
+    1 -> SolanaVoteInstruction_Authorize <$> get <*> get
+    2 -> SolanaVoteInstruction_Vote <$> get
+    3 -> SolanaVoteInstruction_Withdraw <$> get
+    4 -> pure SolanaVoteInstruction_UpdateValidatorIdentity
+    5 -> SolanaVoteInstruction_UpdateCommission <$> get
+    6 -> SolanaVoteInstruction_VoteSwitch <$> get <*> get
+    bad -> fail $ "bad tag for SolanaVoteInstruction: " <> show bad
+  put = \case
+    SolanaVoteInstruction_InitializeAccount x     -> putWord32le 0 <> put x
+    SolanaVoteInstruction_Authorize x y           -> putWord32le 1 <> put x <> put y
+    SolanaVoteInstruction_Vote x                  -> putWord32le 2 <> put x
+    SolanaVoteInstruction_Withdraw x              -> putWord32le 3 <> put x
+    SolanaVoteInstruction_UpdateValidatorIdentity -> putWord32le 4
+    SolanaVoteInstruction_UpdateCommission x      -> putWord32le 5 <> put x
+    SolanaVoteInstruction_VoteSwitch x y          -> putWord32le 6 <> put x <> put y
+
+
 firstSlotInEpoch :: SolanaEpochSchedule -> Word64 -> Word64
 firstSlotInEpoch schedule =
   let
@@ -109,12 +320,6 @@ epochFromSlot schedule =
       , _solanaEpochInfo_blockHeight = 0 -- or maybe this should be undefined?
       , _solanaEpochInfo_epoch = epoch
       }
-
-data SolanaVote = SolanaVote
-  { _solanaVote_slots :: ![Word64]
-  , _solanaVote_hash :: !Base58ByteString -- TODO different type
-  , _solanaVote_timestamp :: !(Maybe UTCTime)
-  } deriving Show
 
 
 parseBase58ByteString :: Text -> Maybe Base58ByteString
@@ -193,7 +398,7 @@ do
     , ''SolanaEpochInfo
     , ''SolanaEpochSchedule
     , ''SolanaSlotNotification
-    , ''SolanaVote
+    -- , ''SolanaVote
     , ''SolanaBlockCommitment
     , ''SolanaCommittedBlock
     ]
