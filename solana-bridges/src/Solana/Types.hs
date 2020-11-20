@@ -12,33 +12,31 @@
 module Solana.Types where
 
 import Control.Applicative
-import Data.Foldable
+import Crypto.Error (CryptoFailable(..))
+import Crypto.Hash (Digest, HashAlgorithm, hashDigestSize, digestFromByteString)
+import Crypto.Hash.Algorithms (SHA256)
 import Data.Aeson
 import Data.Aeson.TH
 import Data.Aeson.Types (toJSONKeyText)
-import Data.Map (Map)
-import Data.Sequence (Seq)
-import Data.Text (Text)
--- import Data.Time
-import Data.Word
 import Data.Binary
 import Data.Binary.Get
 import Data.Binary.Put
-import Crypto.Hash (Digest, HashAlgorithm, hashDigestSize, digestFromByteString)
-import Crypto.Error (CryptoFailable(..))
-import Crypto.Hash.Algorithms (SHA256)
-import GHC.Generics
 import Data.Bits
-import qualified Data.ByteString.Base64 as Base64
+import Data.Foldable
+import Data.Map (Map)
+import Data.Sequence (Seq)
+import Data.Text (Text)
+import Data.Word
+import GHC.Generics
+import qualified Crypto.PubKey.Ed25519 as Ed25519
+import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
-import qualified Data.Sequence as Seq
-import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Base58 as Base58
+import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.ByteArray as ByteArray
-import qualified Crypto.PubKey.Ed25519 as Ed25519
 
 data JsonRpcVersion = JsonRpcVersion
 instance ToJSON JsonRpcVersion where toJSON _ = toJSON ("2.0" :: T.Text)
@@ -227,17 +225,6 @@ newtype Word64LE = Word64LE { unWord64LE :: Word64 }
 instance Binary Word64LE where
   get = Word64LE <$> getWord64le
   put = putWord64le . unWord64LE
-
-
-iterateABit :: SolanaVoteInstruction
-iterateABit = c99
-  where
-
-    corpus = "AeIa+yy2r53fMeNz1WCnjEityg7yUHeKXQNFC+1sIbxOQ03scdL5qO+vYnFP9e8cfyRdvq0yD5pxHaBBTtl4gg8BAAMF01L0Cxouih7U0W+rqrqFKJDpZV3XeSpuqaXgRbrAeAqgAVVnFM8Agxw18NmD9pMJiEV64Q4iw2HyJ+BVmNG3+Qan1RcZLwqvxvJl4/t3zHragsUp0L47E24tAFUgAAAABqfVFxjHdMkoVmOYaR1etoteuKObS21cc1VbIQAAAAAHYUgdNXR0u3xNdiTr072z2DVec9EQQ/wNo1OAAAAAACDmrot1r1vWpmd/D+ChBEBiZhQ4Nd+p2j4sn+uFgN3iAQQEAQIDADUCAAAAAQAAAAAAAADyAgAAAAAAAJV3dv5X/f8VXWn97lr4Gq9klvJ0JKGlPBeouydqEmYFAA==" :: LBS.ByteString
-    Right c2 = Base64.decode $ LBS.toStrict corpus
-    c3 = Data.Binary.decode (LBS.fromStrict c2) :: SolanaTxn
-    c4 = head $ toList $ _solanaTxnMessage_instructions $ _solanaTxn_message c3
-    c99 = Data.Binary.decode (unCompactByteArray  $ _solanaTxnInstruction_data c4) :: SolanaVoteInstruction
 
 
 data SolanaVote = SolanaVote
