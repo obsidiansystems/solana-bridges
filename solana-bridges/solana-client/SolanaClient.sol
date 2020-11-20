@@ -570,7 +570,7 @@ struct Slot {
     bool hasBlock;
     bytes32 blockHash;
     bytes32 leaderPublicKey;
-    bytes32 blockMerkleRoot;
+    bytes32 bankHashMerkleRoot;
 }
 
     uint64 constant HISTORY_SIZE = 100;
@@ -684,7 +684,7 @@ struct Slot {
         slot.hasBlock = true;
         slot.leaderPublicKey = leader;
         slot.blockHash = hash;
-        //TODO: store merkle roots
+        //TODO: store bank hash merkle root
     }
 
     function emptySlot(uint64 s) private {
@@ -692,7 +692,7 @@ struct Slot {
         slot.hasBlock = false;
         slot.leaderPublicKey = 0;
         slot.blockHash = 0;
-        slot.blockMerkleRoot = 0;
+        slot.bankHashMerkleRoot = 0;
     }
 
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
@@ -712,12 +712,35 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function verifyTransaction(bytes32[16][] calldata proof, uint64 slot, bytes calldata transaction, uint64 index) external view returns (bool) {
-        return this.verifyMerkleProof(proof, slots[slotOffset(slot)].blockMerkleRoot, transaction, index);
+    function verifyTransaction(bytes32 accountsHash,
+                               bytes32 blockMerkle,
+                               bytes32[16][] calldata subProof,
+                               uint64 slot,
+                               bytes calldata transaction,
+                               uint64 transactionIndex) external view returns (bool) {
+        return this.verifyTransactionInclusionProof(accountsHash,
+                                                    blockMerkle,
+                                                    subProof,
+                                                    slots[slotOffset(slot)].bankHashMerkleRoot,
+                                                    transaction,
+                                                    transactionIndex);
     }
 
-    function verifyMerkleProof(bytes32[16][] calldata proof, bytes32 root, bytes calldata leaf, uint64 index) external pure returns (bool) {
-        bytes32 hash = sha256(leaf);
+    function verifyTransactionInclusionProof(bytes32 accountsHash,
+                                             bytes32 blockMerkle,
+                                             bytes32[16][] memory subProof,
+                                             bytes32 bankHashMerkleRoot,
+                                             bytes memory transaction,
+                                             uint64 transactionIndex) public pure returns (bool) {
+        if (! verifyMerkleProof(subProof, blockMerkle, transaction, transactionIndex))
+            return false;
+
+        bytes memory hashable = abi.encodePacked(accountsHash, blockMerkle);
+        return bankHashMerkleRoot == sha256(hashable);
+    }
+
+    function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
+        bytes32 hash = sha256(value);
 
         for (uint height = 0; height < proof.length; height++) {
             uint64 offset = index % 16;

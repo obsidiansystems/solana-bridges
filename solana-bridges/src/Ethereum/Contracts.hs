@@ -113,12 +113,44 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
+
+{-
+    function verifyTransactionInclusionProof(bytes32 accountsHash,
+                                             bytes32 blockMerkle,
+                                             bytes32[16][] memory subProof,
+                                             bytes32 bankHashMerkleRoot,
+                                             bytes memory transaction,
+                                             uint64 transactionIndex) public pure returns (bool) {
+
+    function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
+-}
+
+verifyTransactionInclusionProof
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Digest SHA256
+  -> Digest SHA256
+  -> [[Digest SHA256]]
+  -> Digest SHA256
+  -> ByteString
+  -> Word64
+  -> m Bool
+verifyTransactionInclusionProof node ca accountsHash blockMerkle subProof bankHashMerkleRoot value transactionIndex =
+  simulate node ca "verifyTransactionInclusionProof" $ Contracts.verifyTransactionInclusionProof
+    (sha256ToBytes32 accountsHash)
+    (sha256ToBytes32 blockMerkle)
+    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert . sha256ToBytes32)) subProof)
+    (sha256ToBytes32 bankHashMerkleRoot)
+    (ByteArray.convert value)
+    (word64ToSol transactionIndex)
+
 verifyMerkleProof :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> [[Digest SHA256]] -> Digest SHA256 -> ByteString -> Word64 -> m Bool
-verifyMerkleProof node ca proof root leaf index = simulate node ca "verifyMerkleProof" $
+verifyMerkleProof node ca proof root value index = simulate node ca "verifyMerkleProof" $
   Contracts.verifyMerkleProof
     (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert . sha256ToBytes32)) proof)
     (sha256ToBytes32 root)
-    (ByteArray.convert leaf)
+    (ByteArray.convert value)
     (word64ToSol index)
 
 -- implementation details

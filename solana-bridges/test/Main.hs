@@ -25,13 +25,15 @@ main = pure ()
 testWithRunningNode :: Provider -> IO ()
 testWithRunningNode node = do
   contract <- deploySolanaClientContract node defaultSolanaRPCConfig
-  testMerkle16 node contract
+  testInclusionProofVerification node contract
 
-testMerkle16 :: Provider -> Address -> IO ()
-testMerkle16 node contract = hspec $ describe "16-ary merkle proof of inclusions verification" $ do
+testInclusionProofVerification :: Provider -> Address -> IO ()
+testInclusionProofVerification node contract = hspec $ describe "16-ary merkle tree" $ do
   let
-    verify expected proof root leaf offset = do
-      res <- runExceptT (verifyMerkleProof node contract proof root leaf offset)
+    verify expected proof blockMerkle value index = do
+      let stubAccountHash = sha256 "qwerty"
+          stubBankHash = sha256 $ ByteArray.convert stubAccountHash <> ByteArray.convert blockMerkle
+      res <- runExceptT (verifyTransactionInclusionProof node contract stubAccountHash blockMerkle proof stubBankHash value index)
       res `shouldBe` Right expected
 
   it "does not access offset when proof is empty " $ do
