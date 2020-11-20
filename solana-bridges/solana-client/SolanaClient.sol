@@ -712,15 +712,15 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function verifyTransaction(bytes32,
-                               bytes32,
-                               bytes32[16][] calldata,
-                               bytes32,
-                               bytes calldata,
-                               uint64) external pure returns (bool) {
+    function verifyTransaction(bytes32 /* accountsHash */,
+                               bytes32 /* blockMerkle */,
+                               bytes32[16][] calldata /* subProof */,
+                               uint64 /* slot */,
+                               bytes calldata /* transaction */,
+                               uint64 /* transactionIndex */) external pure returns (bool) {
         revert("Bank hash merkle roots are not available yet");
         /*
-        bytes32 bankHashMerkleRoot =  slots[slotOffset(slot)].bankHashMerkleRoot;
+        bytes32 bankHashMerkleRoot = slots[slotOffset(slot)].bankHashMerkleRoot;
         return this.verifyTransactionInclusionProof(accountsHash,
                                                     blockMerkle,
                                                     subProof,
