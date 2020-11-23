@@ -119,13 +119,6 @@ let
     fetchSubmodules = true;
   };
 
-  example-helloworld = with nixpkgs; fetchFromGitHub {
-    owner = "solana-labs";
-    repo = "example-helloworld";
-    rev = "0510fcc777a3a4cbbd37e54d09aa806feb128457";
-    sha256 = "0zmy74mlxb1mmfzg2zv5w1fni8rb27ddn3rw8sgzzq8gv65hf8qh";
-  };
-
   # TODO build these properly
   spl = with nixpkgs; {
     token = fetchurl {
@@ -136,34 +129,6 @@ let
       url = "https://github.com/solana-labs/solana-program-library/releases/download/memo-v1.0.0/spl_memo.so";
       sha256 = "0fy664ciriinnk0x6kvsa2wr48prnnrcvlg8g06jpc62kkapn2cv";
     };
-  };
-
-  # TODO: https://github.com/NixOS/nixpkgs/pull/95542/files
-
-  helloWorld = with nixpkgs; stdenv.mkDerivation {
-    RUST_BACKTRACE="1";
-    RUSTUP_TOOLCHAIN="bpf";
-    XARGO_RUST_SRC="${rust-bpf-sysroot}/src";
-    RUST_COMPILER_RT_ROOT="${rust-bpf-sysroot}/src/compiler-rt";
-
-    name = "helloWorld";
-    src = example-helloworld;
-    buildInputs = [ solana-rust-bpf xargo which rustup ];
-    phases = "buildPhase";
-
-    buildPhase = ''
-      export XARGO_HOME="$PWD/xargoxargoxargo";
-      export CARGO_HOME="$PWD/cargo-home";
-
-      # source $stdenv/setup
-      export RUSTUP_HOME=$PWD/.rustup-home
-      # ls -l solana-rust-bpf/
-      cp -r $src example-helloworld
-      which rustc
-      rustup toolchain link bpf $(rustc --print sysroot)
-      cd example-helloworld/src/program-rust
-      xargo build --target bpfel-unknown-unknown --release --no-default-features --features program
-    '';
   };
 
   shell = nixpkgs.haskellPackages.shellFor {
@@ -230,6 +195,7 @@ let
     sha256 = ethereum-client-dep-sha256;
   };
 
+  # TODO: https://github.com/NixOS/nixpkgs/pull/95542/files
   mk-ethereum-client = cargoBuildFlags: nixpkgs.rustPlatform.buildRustPackage {
     name = "ethereum-client";
     src = ethereum-client-src;

@@ -140,10 +140,16 @@ uriToProvider uri = case uriScheme uri of
   where
     httpProvider = Right $ Eth.HttpProvider $ uriToString id uri ""
 
+defaultEthereumRPCConfig :: Eth.Provider
+defaultEthereumRPCConfig = def
+
+defaultSolanaRPCConfig :: SolanaRpcConfig
+defaultSolanaRPCConfig = SolanaRpcConfig "127.0.0.1" 8899 8900
+
 mainDeploySolanaClientContract :: IO ()
 mainDeploySolanaClientContract = do
   mProvider <- getArgs <&> \case
-    [] -> Right (def, SolanaRpcConfig "127.0.0.1" 8899 8900)
+    [] -> Right (defaultEthereumRPCConfig, defaultSolanaRPCConfig)
     ethUrl:solHost:solPort:solWs:[] -> do
       ethProvider <- case parseURI ethUrl of
         Just ethUrl' -> uriToProvider ethUrl'
@@ -623,7 +629,7 @@ deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
 deploySolanaClientContract node solanaConfig = do
   ca <- deploySolanaClientContractImpl node
   res <- runExceptT $ do
-    liftIO $ hPutStrLn stderr $ "Initializing contract: " <> show ca
+    liftIO $ hPutStrLn stderr $ "Deployed contract at address: " <> show ca
 
     ExceptT $ withSolanaWebSocket solanaConfig $ do
       liftIO $ putStrLn "Initializing contract"
@@ -843,7 +849,6 @@ runGeth runDir = do
     genesisFile = runDir <> "/Genesis.json"
     passFile = dataDir <> "/pass.txt"
 
-    cacheArgs = ["--ethash.dagdir", ".ethash"]
     dataDirArgs = [ "--datadir", dataDir ]
     httpArgs = [ "--http", "--http.api", "eth,net,web3,debug,personal" ]
     mineArgs = [ "--mine", "--miner.threads=1", "--miner.etherbase=" <> unlockedAddress ]
@@ -862,7 +867,7 @@ runGeth runDir = do
   BS.writeFile (dataDir <> "/keystore/" <> ethereumAccountFile) ethereumAccount
   BS.writeFile passFile ethereumAccountPass
 
-  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ cacheArgs, dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs, gascapArgs]
+  (_,_,_,ph) <- createProcess $ proc gethPath $ fold [ dataDirArgs, httpArgs, mineArgs, privateArgs, unlockArgs, nodeArgs, gascapArgs]
   void $ waitForProcess ph
 
 withGeth :: FilePath -> IO () -> IO ()

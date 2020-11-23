@@ -299,7 +299,7 @@ epochFromSlot schedule =
             )
           )
         else
-          head $ dropWhile (\(_, (_, firstSlotInEpoch')) -> firstSlotInEpoch' < absoluteSlot) warmup
+          head $ reverse $ filter (\(_, (_, firstSlotInEpoch')) -> firstSlotInEpoch' <= absoluteSlot) warmup
     in SolanaEpochInfo
       { _solanaEpochInfo_slotsInEpoch = slotsInEpoch
       , _solanaEpochInfo_slotIndex = absoluteSlot - firstSlotInEpoch0

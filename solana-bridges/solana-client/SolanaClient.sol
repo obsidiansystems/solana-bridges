@@ -570,6 +570,7 @@ struct Slot {
     bool hasBlock;
     bytes32 blockHash;
     bytes32 leaderPublicKey;
+    bytes32 bankHashMerkleRoot;
 }
 
     uint64 constant HISTORY_SIZE = 100;
@@ -680,16 +681,18 @@ struct Slot {
 
     function fillSlot(uint64 s, bytes32 hash, bytes32 leader) private {
         Slot storage slot = slots[slotOffset(s)];
-        slot.blockHash = hash;
         slot.hasBlock = true;
         slot.leaderPublicKey = leader;
+        slot.blockHash = hash;
+        //TODO: store bank hash merkle root for use in verifyTransaction function
     }
 
     function emptySlot(uint64 s) private {
         Slot storage slot = slots[slotOffset(s)];
-        slot.blockHash = 0;
         slot.hasBlock = false;
         slot.leaderPublicKey = 0;
+        slot.blockHash = 0;
+        slot.bankHashMerkleRoot = 0;
     }
 
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
@@ -709,4 +712,62 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
+    function verifyTransaction(bytes32 /* accountsHash */,
+                               bytes32 /* blockMerkle */,
+                               bytes32[16][] calldata /* subProof */,
+                               uint64 /* slot */,
+                               bytes calldata /* transaction */,
+                               uint64 /* transactionIndex */) external pure returns (bool) {
+        revert("Bank hash merkle roots are not available yet");
+        /*
+        bytes32 bankHashMerkleRoot = slots[slotOffset(slot)].bankHashMerkleRoot;
+        return this.verifyTransactionInclusionProof(accountsHash,
+                                                    blockMerkle,
+                                                    subProof,
+                                                    bankHashMerkleRoot,
+                                                    transaction,
+                                                    transactionIndex);
+        */
+    }
+
+    function verifyTransactionInclusionProof(bytes32 accountsHash,
+                                             bytes32 blockMerkle,
+                                             bytes32[16][] memory subProof,
+                                             bytes32 bankHashMerkleRoot,
+                                             bytes memory transaction,
+                                             uint64 transactionIndex) public pure returns (bool) {
+        if (! verifyMerkleProof(subProof, blockMerkle, transaction, transactionIndex))
+            return false;
+
+        bytes memory hashable = abi.encodePacked(accountsHash, blockMerkle);
+        return bankHashMerkleRoot == sha256(hashable);
+    }
+
+    function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
+        bytes32 hash = sha256(value);
+
+        // uint64 used for index only fits 16 nibbles
+        if(proof.length > 16)
+            revert("Proof too large");
+
+        for (uint height = 0; height < proof.length; height++) {
+            uint64 offset = index % 16;
+
+            if(hash != proof[height][offset]) {
+                return false;
+            }
+
+            bytes memory hashable = new bytes(32 * 16);
+            for(uint i = 0; i < 16; i++) {
+                for(uint j = 0; j < 32; j++) {
+                    hashable[i*32+j] = proof[height][i][j];
+                }
+            }
+
+            index = index / 16;
+            hash = sha256(hashable);
+        }
+
+        return hash == root;
+    }
 }

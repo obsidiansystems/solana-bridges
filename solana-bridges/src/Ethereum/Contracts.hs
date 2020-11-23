@@ -19,11 +19,14 @@
 
 module Ethereum.Contracts where
 
-import Control.Lens
+import Control.Lens hiding (index)
 import Control.Monad
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class
+import Crypto.Hash (Digest, SHA256)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
+import Data.ByteString (ByteString)
+import GHC.Exts (fromList)
 import Data.Functor.Compose
 import Data.Map (Map)
 import Data.Solidity.Prim.Address (Address)
@@ -41,7 +44,6 @@ import qualified Network.Web3.Provider as Eth
 
 import Solana.Types
 import qualified Ethereum.Contracts.Bindings as Contracts
-
 
 test_sha512 :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> BS.ByteString -> m BS.ByteString
 test_sha512 node ca a = bytesFromSol <$> simulate node ca "test_sha512" (Contracts.test_sha512 (bytesToSol a))
@@ -62,8 +64,6 @@ test_ed25519_verify_gas
   -> BS.ByteString -> BS.ByteString -> Base58ByteString
   -> m Eth.TxReceipt
 test_ed25519_verify_gas node ca sig msg pk = simulate node ca "" (Eth.send $ Contracts.Test_ed25519_verifyData (bytesToSol sig) (bytesToSol msg) (unsafeBytes32ToSol pk))
-
-
 
 getInitialized :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Bool
 getInitialized node ca = simulate node ca "initialized" Contracts.initialized
@@ -113,7 +113,50 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
+
+{-
+    function verifyTransactionInclusionProof(bytes32 accountsHash,
+                                             bytes32 blockMerkle,
+                                             bytes32[16][] memory subProof,
+                                             bytes32 bankHashMerkleRoot,
+                                             bytes memory transaction,
+                                             uint64 transactionIndex) public pure returns (bool) {
+
+    function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
+-}
+
+verifyTransactionInclusionProof
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Digest SHA256
+  -> Digest SHA256
+  -> [[Digest SHA256]]
+  -> Digest SHA256
+  -> ByteString
+  -> Word64
+  -> m Bool
+verifyTransactionInclusionProof node ca accountsHash blockMerkle subProof bankHashMerkleRoot value transactionIndex =
+  simulate node ca "verifyTransactionInclusionProof" $ Contracts.verifyTransactionInclusionProof
+    (sha256ToBytes32 accountsHash)
+    (sha256ToBytes32 blockMerkle)
+    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert . sha256ToBytes32)) subProof)
+    (sha256ToBytes32 bankHashMerkleRoot)
+    (ByteArray.convert value)
+    (word64ToSol transactionIndex)
+
+verifyMerkleProof :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> [[Digest SHA256]] -> Digest SHA256 -> ByteString -> Word64 -> m Bool
+verifyMerkleProof node ca proof root value index = simulate node ca "verifyMerkleProof" $
+  Contracts.verifyMerkleProof
+    (fmap (fromList . fmap (unsafeSizedByteArray . ByteArray.convert . sha256ToBytes32)) proof)
+    (sha256ToBytes32 root)
+    (ByteArray.convert value)
+    (word64ToSol index)
+
 -- implementation details
+
+sha256ToBytes32 :: Digest SHA256 -> Data.Solidity.Prim.Bytes.BytesN 32
+sha256ToBytes32 = unsafeSizedByteArray . ByteArray.convert
 
 word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
 word64ToSol = fromInteger . toInteger
