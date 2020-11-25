@@ -26,7 +26,6 @@ import Data.Foldable
 import Data.Map (Map)
 import Data.Sequence (Seq)
 import Data.Text (Text)
-import Data.Word
 import GHC.Generics
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Data.ByteArray as ByteArray
@@ -119,9 +118,9 @@ instance Binary CompactWord16 where
   get = getWord8 >>= \x0 -> CompactWord16 <$> if x0 < 1 `shiftL` 7
     then pure $ fromIntegral x0
     else getWord8 >>= \x1 -> if x1 < 1 `shiftL` 7
-      then pure $ fromIntegral x0 .|. shiftL (fromIntegral x1) 7
+      then pure $ fromIntegral (x0 .&. 0x7f) .|. shiftL (fromIntegral x1) 7
       else getWord8 >>= \x2 -> if x2 < 1 `shiftL` 2
-        then pure $ fromIntegral x0 .|. shiftL (fromIntegral x1) 7 .|. shiftL (fromIntegral x2) 14
+        then pure $ fromIntegral (x0 .&. 0x7f) .|. shiftL (fromIntegral (x1 .&. 0x7f)) 7 .|. shiftL (fromIntegral x2) 14
         else fail "too big"
 
 newtype LengthPrefixedArray sz a = LengthPrefixedArray { unCompactArray :: Seq a}
