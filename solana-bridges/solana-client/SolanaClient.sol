@@ -594,6 +594,10 @@ struct Slot {
     uint64 public lastSlot;
     Slot[HISTORY_SIZE] public slots;
 
+    // slot => transactionIndex => _
+    mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
+    mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
+
     event Success();
 
     constructor () public {
@@ -675,6 +679,32 @@ struct Slot {
         seenBlocks++;
     }
 
+    // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231
+    // TODO: parse offchain and pass in bytes[] calldata - bindings currently bugged either in hs-web3 or solidity
+    function addTransactions(uint64[] calldata txSlots,
+                             uint[] calldata sizes,
+                             bytes calldata transactions // [(signature, messages)]
+                             ) external {
+        authorize();
+        uint startOffset; uint endOffset; uint64 x;
+        for(uint64 i = 0; i < (sizes.length / 2); i++) {
+            if (i == 0 || txSlots[i] != txSlots[i-1]) {
+                x = 0;
+            }
+
+            endOffset += sizes[2*i];
+            transactionSignatures[txSlots[i]][x] = bytes(transactions[startOffset:endOffset]);
+            startOffset = endOffset;
+
+            endOffset += sizes[2*i+1];
+            transactionMessages[txSlots[i]][x] = bytes(transactions[startOffset:endOffset]);
+            startOffset = endOffset;
+
+            x++;
+        }
+        emit Success();
+    }
+
     function slotOffset(uint64 s) private pure returns (uint64) {
         return s % HISTORY_SIZE;
     }
@@ -712,39 +742,204 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    // slot => transactionIndex => _
-    mapping (uint64 => mapping (uint64 => bytes)) public messages;
-    mapping (uint64 => mapping (uint64 => bytes[])) public signatures;
-
-    struct VoteMessage {
-        bytes8 requiredSignatures;
-        bytes8 readOnlySignatures;
-        bytes8 readOnlyUnsigned;
+    struct SolanaMessage {
+        uint8 requiredSignatures;
+        uint8 readOnlySignatures;
+        uint8 readOnlyUnsigned;
         bytes32[] addresses;
         bytes32 recentBlockHash;
-        bytes[] voteInstructions;
+        SolanaInstruction[] instructions;
     }
 
-    struct VoteInstruction {
-        uint64 voterAccountIndex;
-        uint64 signerAccountIndex;
+    struct SolanaInstruction {
+        uint8 programId;
+        bytes accounts;
+        bytes data;
+    }
+
+    struct SolanaVote {
         uint64[] slots;
+        bytes32 hash;
+        bool hasTimestamp;
+        uint64 timestamp;
     }
 
-    function parseVoteMessage(bytes memory message) public pure returns (VoteMessage memory) {
-        /* TODO */
+    // Workaround for misbehaving hs-web3 bindings
+    function parseSolanaMessage_(bytes memory buffer) public pure returns (uint8, uint8, uint8, bytes32[] memory, bytes32) {
+        SolanaMessage memory m;
+        m = parseSolanaMessage(buffer);
+        return (m.requiredSignatures,
+                m.readOnlySignatures,
+                m.readOnlyUnsigned,
+                m.addresses,
+                m.recentBlockHash
+                );
     }
 
-    function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
-        bytes storage signature = signatures[slot][transactionIndex][addressIndex];
-        bytes storage message = messages[slot][transactionIndex];
-        VoteMessage memory voteMsg = parseVoteMessage(message);
-        bytes32 pk = voteMsg.addresses[addressIndex];
+    function parseSolanaMessage(bytes memory buffer) public pure returns (SolanaMessage memory) {
+        SolanaMessage memory solanaMsg;
+        uint cursor;
+        solanaMsg.requiredSignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlySignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlyUnsigned = uint8(buffer[cursor]); cursor++;
+
+        uint length;
+        (length, cursor) = parseCompactWord16(buffer, cursor);
+        solanaMsg.addresses = new bytes32[](length);
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.addresses[i], cursor) = parseBytes32(buffer, cursor);
+        }
+
+        (solanaMsg.recentBlockHash, cursor) = parseBytes32(buffer, cursor);
+
+        (length, cursor) = parseCompactWord16(buffer, cursor);
+        solanaMsg.instructions = new SolanaInstruction[](length);
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.instructions[i], cursor) = parseInstruction(buffer, cursor);
+        }
+
+        return solanaMsg;
+    }
+
+    // Workaround for misbehaving hs-web3 bindings
+    function parseInstruction_(bytes memory buffer, uint cursor) public pure returns (uint8, bytes memory, bytes memory, uint) {
+        SolanaInstruction memory instruction;
+        (instruction, cursor) = parseInstruction(buffer,cursor);
+        return (instruction.programId, instruction.accounts, instruction.data, cursor);
+    }
+
+    function parseInstruction(bytes memory buffer, uint cursor) public pure returns (SolanaInstruction memory, uint) {
+        SolanaInstruction memory instruction;
+        instruction.programId = uint8(buffer[cursor]); cursor++;
+        (instruction.accounts, cursor) = parseBytes(buffer, cursor);
+        (instruction.data, cursor) = parseBytes(buffer, cursor);
+        return (instruction, cursor);
+    }
+
+    function parseUint32LE(bytes memory buffer, uint cursor) public pure returns (uint32, uint) {
+        uint32 u;
+        for (uint i = 0; i < 4; i++) {
+            u |= uint32(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 4);
+    }
+
+    function parseUint64LE(bytes memory buffer, uint cursor) public pure returns (uint64, uint) {
+        uint64 u;
+        for (uint i = 0; i < 8; i++) {
+            u |= uint64(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 8);
+    }
+
+    function parseBytes32(bytes memory buffer, uint cursor) public pure returns (bytes32, uint) {
+        bytes32 b32;
+        for (uint i = 0; i < 32; i++) {
+            b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
+        }
+        return (b32, cursor + 32);
+    }
+
+    function parseSignature(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+        bytes memory b64 = new bytes(64);
+        for (uint i = 0; i < 64; i++) {
+            b64[i] = buffer[cursor + i];
+        }
+        return (b64, cursor + 64);
+    }
+
+    function parseBytes(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+        uint16 bytesLength;
+        (bytesLength, cursor) = parseCompactWord16(buffer, cursor);
+        bytes memory bs = new bytes(bytesLength);
+        for (uint i = 0; i < bytesLength; i++) {
+            bs[i] = buffer[cursor + i];
+        }
+        return (bs, cursor + bytesLength);
+    }
+
+    // Workaround for misbehaving hs-web3 bindings
+    function parseVote_(bytes memory buffer, uint cursor) public pure returns (uint64[] memory, bytes32, bool, uint64, uint) {
+        SolanaVote memory vote;
+        (vote, cursor) = parseVote(buffer, cursor);
+        return (vote.slots, vote.hash, vote.hasTimestamp, vote.timestamp, cursor);
+    }
+
+    function parseVote(bytes memory buffer, uint cursor) public pure returns (SolanaVote memory, uint) {
+        SolanaVote memory vote;
+
+        uint64 length;
+        (length, cursor) = parseUint64LE(buffer, cursor);
+        vote.slots = new uint64[](length);
+        for(uint i = 0; i < length; i++) {
+            (vote.slots[i], cursor) = parseUint64LE(buffer, cursor);
+        }
+
+        (vote.hash, cursor) = parseBytes32(buffer, cursor);
+
+        vote.hasTimestamp = buffer[cursor] != 0; cursor++;
+        if(vote.hasTimestamp) {
+            (vote.timestamp, cursor) = parseUint64LE(buffer, cursor);
+        }
+
+        return (vote, cursor);
+    }
+
+    function parseCompactWord16(bytes memory bs, uint cursor) public pure returns (uint16, uint) {
+        uint8 b0 = uint8(bs[cursor]); cursor++;
+        uint16 w = b0 & 0x7f;
+        if (b0 < (1 << 7))
+            return (w, cursor);
+
+        uint8 b1 = uint8(bs[cursor]); cursor++;
+        w |= uint16(b1 & 0x7f) << 7;
+        if (b1 < (1 << 7))
+            return (w, cursor);
+
+        uint8 b2 = uint8(bs[cursor]); cursor++;
+        w |= uint16(b2 & 0x03) << 14;
+        if (b2 < (1 << 2))
+            return (w, cursor);
+
+        revert("Invalid Compact-u16");
+    }
+
+    function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
+        uint signaturesCount; uint signaturesOffset;
+        (signaturesCount, signaturesOffset) = parseCompactWord16(signatures, 0);
+
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
+
+        // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+        bytes memory data = instruction.data;
+        uint tag;
+        uint cursor;
+        (tag, cursor) = parseUint32LE(data, 0);
+        if (tag != 2) {
+            revert("Not a vote instruction");
+        }
+        SolanaVote memory vote;
+        (vote, cursor) = parseVote(data, cursor);
+
+        uint8 signer = uint8(instruction.accounts[3]);
+        bytes32 pk = parsedMessage.addresses[signer];
+
+        bytes memory signature;
+        (signature, cursor) = parseSignature(signatures, signaturesOffset + signer * 64);
+
         return ed25519_valid(signature, message, pk);
     }
 
-    function challengeTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public {
-        if(verifyTransactionSignature(slot, transactionIndex, addressIndex)) {
+    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public {
+        bytes storage message = transactionMessages[slot][transactionIndex];
+        bytes storage signatures = transactionSignatures[slot][transactionIndex];
+        bool valid = verifyVote(signatures, message, instructionIndex);
+
+        // Must happen before self-destruct to be registered
+        emit Success();
+
+        if(!valid) {
             selfdestruct(msg.sender);
         }
     }

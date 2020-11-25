@@ -23,22 +23,29 @@ import Control.Lens hiding (index)
 import Control.Monad
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class
-import Crypto.Hash (Digest, SHA256)
+import Crypto.Error (CryptoFailable(..))
+import Crypto.Hash (Digest, SHA256, digestFromByteString)
+import Data.ByteArray.HexString (HexString)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as LBS
 import GHC.Exts (fromList)
 import Data.Functor.Compose
 import Data.Map (Map)
 import Data.Solidity.Prim.Address (Address)
 import Data.Word
 import Network.Web3.Provider (runWeb3')
+import qualified Crypto.PubKey.Ed25519 as Ed25519
+import qualified Data.Binary as Binary
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
-import qualified Data.Solidity.Prim.Bytes
-import qualified Data.Solidity.Prim.Int
+import qualified Data.Sequence as Sequence
+import qualified Data.Solidity.Prim.Bytes as Solidity
+import qualified Data.Solidity.Prim.Int as Solidity
 import qualified Network.Ethereum.Account as Eth
-import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..))
+import qualified Network.Ethereum.Api.Eth as Eth (getCode)
+import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..), DefaultBlock(Latest))
 import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
 
@@ -74,6 +81,14 @@ getLastSlot node ca = word64FromSol <$> simulate node ca "lastSlot" Contracts.la
 getLastHash :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Base58ByteString
 getLastHash node ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate node ca "lastHash" Contracts.lastHash
 
+getSignatures :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
+getSignatures node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionSignatures"
+  $ Contracts.transactionSignatures (fromIntegral slot) (fromIntegral tx)
+
+getMessage :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
+getMessage node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionMessages"
+  $ Contracts.transactionMessages (fromIntegral slot) (fromIntegral tx)
+
 -- getSlotLeader :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> m Base58ByteString
 -- getSlotLeader node ca s = bytes32FromSol <$> simulate node ca "getSlotLeader" (Contracts.getSlotLeader $ word64ToSol s)
 
@@ -96,7 +111,14 @@ initialize node ca slot root leader schedule = void $ submit node ca "initialize
   (word64ToSol $ _solanaEpochSchedule_firstNormalSlot schedule)-- uint64 scheduleFirstNormalSlot,
   (word64ToSol $ _solanaEpochSchedule_slotsPerEpoch schedule)-- uint64 scheduleSlotsPerEpoch
 
-addBlocks :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> Map Word64 SolanaLeaderSchedule -> SolanaEpochSchedule -> m ()
+addBlocks
+  :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> [(Word64, SolanaCommittedBlock)]
+  -> Map Word64 SolanaLeaderSchedule
+  -> SolanaEpochSchedule
+  -> m ()
 addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "addBlocks" $ Contracts.addBlocks
   (word64ToSol . fst <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
@@ -108,43 +130,197 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
 
-parseVoteMessage
-  :: (MonadError String m, MonadIO m)
+addTransactions
+  :: (MonadIO m, MonadError String m)
   => Eth.Provider
   -> Address
-  -> Data.Solidity.Prim.Bytes.Bytes
-  -> m ( Data.Solidity.Prim.Bytes.BytesN 8
-       , Data.Solidity.Prim.Bytes.BytesN 8
-       , Data.Solidity.Prim.Bytes.BytesN 8
-       , [Data.Solidity.Prim.Bytes.BytesN 32]
-       , Data.Solidity.Prim.Bytes.BytesN 32
-       , [Data.Solidity.Prim.Bytes.Bytes]
-       )
-parseVoteMessage node ca msg = simulate node ca "parseVoteMessage" $ Contracts.parseVoteMessage msg
-
-verifyTransactionSignature
-  :: (MonadError String m, MonadIO m)
-  => Eth.Provider
-  -> Address
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> m Bool
-verifyTransactionSignature node ca slot transactionIndex addressIndex =
-  simulate node ca "verifyTransactionSignature"
-  $ Contracts.verifyTransactionSignature slot transactionIndex addressIndex
-
-challengeTransactionSignature
-  :: (MonadError String m, MonadIO m)
-  => Eth.Provider
-  -> Address
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
+  -> [(Word64, SolanaTxn)]
   -> m ()
-challengeTransactionSignature node ca slot transactionIndex addressIndex =
-  submit node ca "challengeTransactionSignature"
-  $ Contracts.challengeTransactionSignature slot transactionIndex addressIndex
+addTransactions node ca txs = do
+ submit node ca "addTransactions" $ Contracts.addTransactions
+  (fromIntegral <$> slots)
+  (fromIntegral <$> (sigSizes `alternated` msgsSizes))
+  (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
+  where
+    slots = fmap fst txs
+    (sigs, sigSizes) = unzip $ flip fmap txs $ \(_, tx) ->
+      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_signatures)
+      in (bs, BS.length bs)
+    (msgs, msgsSizes) = unzip $ flip fmap txs $ \(_, tx) ->
+      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_message)
+      in (bs, BS.length bs)
+    alternated xs ys = zip xs ys >>= (\(x,y) -> [x,y])
+
+challengeVote
+  :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> Word64
+  -> Word64
+  -> Word64
+  -> m ()
+challengeVote node ca slot tx instruction = submit node ca "challengeVote"
+  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral tx) (fromIntegral instruction)
+
+challengeVote'
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Word64
+  -> Word64
+  -> Word64
+  -> m Eth.TxReceipt
+challengeVote' node ca slot transactionIndex instructionIndex =
+  simulate node ca "challengeVote"
+  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
+
+verifyVote_gas
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> ByteString
+  -> Word64
+  -> m Eth.TxReceipt
+verifyVote_gas node ca sigs msg idx = simulate node ca "verifyVote"
+  $ Eth.send $ Contracts.VerifyVoteData (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
+
+verifyVote
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> ByteString
+  -> Word64
+  -> m Bool
+verifyVote node ca sigs msg idx = simulate node ca "verifyVote"
+  $ Contracts.verifyVote (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
+
+-- TODO: misbehaving bindings - parsing is fixed in https://github.com/obsidiansystems/hs-web3/tree/tupple-array but encoding seems broken
+parseSolanaMessage
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> m SolanaTxnMessage
+parseSolanaMessage node ca msg = fmap convert $ simulate node ca "parseSolanaMessage_" $ Contracts.parseSolanaMessage_ (ByteArray.convert msg)
+  where
+--    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
+    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash) --, _instructions)
+      = SolanaTxnMessage
+        (SolanaTxnHeader (fromIntegral requiredSignatures)  (fromIntegral readOnlySignatures) (fromIntegral readOnlyUnsigned))
+        (LengthPrefixedArray . Sequence.fromList . fmap unsafeBytes32ToPublicKey $ addresses)
+        (bytes32ToSha256 recentBlockHash)
+        (LengthPrefixedArray $ Sequence.fromList [])
+{-
+        (LengthPrefixedArray $ Sequence.fromList $ flip fmap instructions $
+         \(programId, accounts, data') -> SolanaTxnInstruction
+                                          (fromIntegral programId)
+                                          (bytes accounts)
+                                          (bytes data'))
+-}
+
+parseBytes32
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (Solidity.BytesN 32, Word)
+parseBytes32 node ca bytes cursor = fmap convert $ simulate node ca "parseBytes32"
+  $ Contracts.parseBytes32 (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (bs, fromIntegral w)
+
+parseSignature
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (ByteString, Word)
+parseSignature node ca bytes cursor = fmap convert $ simulate node ca "parseSignature"
+  $ Contracts.parseSignature (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
+
+parseUint64LE
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (Solidity.UIntN 64, Word)
+parseUint64LE node ca bytes cursor = fmap convert $ simulate node ca "parseUint64LE"
+  $ Contracts.parseUint64LE (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (bs, fromIntegral w)
+
+parseCompactWord16
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (CompactWord16, Word)
+parseCompactWord16 node ca bytes offset = fmap convert $ simulate node ca "parseCompactWord16"
+  $ Contracts.parseCompactWord16 (ByteArray.convert bytes) (fromIntegral offset)
+  where
+    convert (w16, w) = (fromIntegral w16, fromIntegral w)
+
+parseBytes
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (ByteString, Word16)
+parseBytes node ca bytes offset = fmap convert $ simulate node ca "parseBytes"
+  $ Contracts.parseBytes (ByteArray.convert bytes) (fromIntegral offset)
+  where
+    convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
+
+parseVote_gas
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m Eth.TxReceipt--(SolanaVote, Word)
+parseVote_gas node ca bytes cursor = simulate node ca "parseVote_"
+  $ Eth.send $ Contracts.ParseVote_Data (ByteArray.convert bytes) (fromIntegral cursor)
+
+parseVote
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (SolanaVote, Word)
+parseVote node ca bytes cursor = fmap convert $ simulate node ca "parseVote_"
+  $ Contracts.parseVote_ (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (slots, hash, hasTimestamp, timestamp, w) =
+      ( SolanaVote
+        (LengthPrefixedArray $ Sequence.fromList $ fmap fromIntegral slots)
+        (bytes32ToSha256 hash)
+        (if hasTimestamp then Just (fromIntegral timestamp) else Nothing)
+      , fromIntegral w)
+
+parseInstruction
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (SolanaTxnInstruction, Word64)
+parseInstruction node ca buffer offset = fmap convert $ simulate node ca "parseInstruction_"
+  $ Contracts.parseInstruction_ (ByteArray.convert buffer) (fromIntegral offset)
+  where
+    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
+    convert (programId, accounts, data', consumed) =
+      (SolanaTxnInstruction (fromIntegral programId) (bytes accounts) (bytes data')
+      , fromIntegral consumed)
 
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
@@ -179,26 +355,34 @@ verifyMerkleProof node ca proof root value index = simulate node ca "verifyMerkl
 
 -- implementation details
 
-sha256ToBytes32 :: Digest SHA256 -> Data.Solidity.Prim.Bytes.BytesN 32
+sha256ToBytes32 :: Digest SHA256 -> Solidity.BytesN 32
 sha256ToBytes32 = unsafeSizedByteArray . ByteArray.convert
 
-word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
+bytes32ToSha256 :: Solidity.BytesN 32 -> Digest SHA256
+bytes32ToSha256 = maybe (error "bytes32ToSha256: digestFromByteString failed") id . digestFromByteString . unSizedByteArray
+
+word64ToSol :: Word64 -> Solidity.UIntN 64
 word64ToSol = fromInteger . toInteger
 
-word64FromSol :: Data.Solidity.Prim.Int.UIntN 64 -> Word64
+word64FromSol :: Solidity.UIntN 64 -> Word64
 word64FromSol = fromInteger . toInteger
 
-unsafeBytes32ToSol :: Base58ByteString -> Data.Solidity.Prim.Bytes.BytesN 32
+unsafeBytes32ToSol :: Base58ByteString -> Solidity.BytesN 32
 unsafeBytes32ToSol = unsafeSizedByteArray . ByteArray.convert . unBase58ByteString
 
-bytes32FromSol :: Data.Solidity.Prim.Bytes.BytesN 32 -> Base58ByteString
+bytes32FromSol :: Solidity.BytesN 32 -> Base58ByteString
 bytes32FromSol = Base58ByteString . ByteArray.convert . unSizedByteArray
 
-bytesToSol :: BS.ByteString -> Data.Solidity.Prim.Bytes.Bytes
+bytesToSol :: BS.ByteString -> Solidity.Bytes
 bytesToSol = ByteArray.convert
 
-bytesFromSol :: Data.Solidity.Prim.Bytes.Bytes -> BS.ByteString
+bytesFromSol :: Solidity.Bytes -> BS.ByteString
 bytesFromSol = ByteArray.convert
+
+unsafeBytes32ToPublicKey :: Solidity.BytesN 32 -> Ed25519.PublicKey
+unsafeBytes32ToPublicKey bytes32 = case Ed25519.publicKey (ByteArray.convert bytes32 :: ByteString) of
+  CryptoPassed good -> good
+  CryptoFailed bad -> error $ "unsafeBytes32ToPublicKey: publicKey failed: " <> show bad
 
 
 invokeContract :: Address
@@ -221,4 +405,10 @@ submit node ca name x = do
   let qname = "'" <> name <> "'"
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not finish"
+    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not produce any logs" --TODO: expose more info in hs-web3
+
+getCode :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m HexString
+getCode node ca = do
+  runWeb3' node (Eth.getCode ca Eth.Latest) >>= \case
+    Left err -> throwError $ "Failed getCode@" <> show ca <> ": " <> show err
+    Right r -> pure r
