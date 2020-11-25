@@ -98,8 +98,8 @@ import Solana.Types
 ethashElementsPerInstruction :: Int
 ethashElementsPerInstruction = 8
 
-mainRelayer :: IO ()
-mainRelayer = do
+mainRelayEthereumToSolana :: IO ()
+mainRelayEthereumToSolana = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile
@@ -115,8 +115,8 @@ mainRelayer = do
 
 type SolanaToEthereumConfig = (Eth.Provider, Address, SolanaRpcConfig)
 
-mainRelayerEth :: IO ()
-mainRelayerEth = do
+mainRelaySolanaToEthereum :: IO ()
+mainRelaySolanaToEthereum = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile

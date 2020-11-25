@@ -1,4 +1,4 @@
 import Solana.Relayer
 
 main :: IO ()
-main = mainRelayerEth
+main = mainRelaySolanaToEthereum
