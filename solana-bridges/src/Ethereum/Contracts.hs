@@ -108,7 +108,43 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
 
+parseVoteMessage
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Data.Solidity.Prim.Bytes.Bytes
+  -> m ( Data.Solidity.Prim.Bytes.BytesN 8
+       , Data.Solidity.Prim.Bytes.BytesN 8
+       , Data.Solidity.Prim.Bytes.BytesN 8
+       , [Data.Solidity.Prim.Bytes.BytesN 32]
+       , Data.Solidity.Prim.Bytes.BytesN 32
+       , [Data.Solidity.Prim.Bytes.Bytes]
+       )
+parseVoteMessage node ca msg = simulate node ca "parseVoteMessage" $ Contracts.parseVoteMessage msg
 
+verifyTransactionSignature
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> m Bool
+verifyTransactionSignature node ca slot transactionIndex addressIndex =
+  simulate node ca "verifyTransactionSignature"
+  $ Contracts.verifyTransactionSignature slot transactionIndex addressIndex
+
+challengeTransactionSignature
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Data.Solidity.Prim.Int.UIntN 64
+  -> m ()
+challengeTransactionSignature node ca slot transactionIndex addressIndex =
+  submit node ca "challengeTransactionSignature"
+  $ Contracts.challengeTransactionSignature slot transactionIndex addressIndex
 
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks

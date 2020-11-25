@@ -712,6 +712,43 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
+    // slot => transactionIndex => _
+    mapping (uint64 => mapping (uint64 => bytes)) public messages;
+    mapping (uint64 => mapping (uint64 => bytes[])) public signatures;
+
+    struct VoteMessage {
+        bytes8 requiredSignatures;
+        bytes8 readOnlySignatures;
+        bytes8 readOnlyUnsigned;
+        bytes32[] addresses;
+        bytes32 recentBlockHash;
+        bytes[] voteInstructions;
+    }
+
+    struct VoteInstruction {
+        uint64 voterAccountIndex;
+        uint64 signerAccountIndex;
+        uint64[] slots;
+    }
+
+    function parseVoteMessage(bytes memory message) public pure returns (VoteMessage memory) {
+        /* TODO */
+    }
+
+    function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
+        bytes storage signature = signatures[slot][transactionIndex][addressIndex];
+        bytes storage message = messages[slot][transactionIndex];
+        VoteMessage memory voteMsg = parseVoteMessage(message);
+        bytes32 pk = voteMsg.addresses[addressIndex];
+        return ed25519_valid(signature, message, pk);
+    }
+
+    function challengeTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public {
+        if(verifyTransactionSignature(slot, transactionIndex, addressIndex)) {
+            selfdestruct(msg.sender);
+        }
+    }
+
     function verifyTransaction(bytes32 /* accountsHash */,
                                bytes32 /* blockMerkle */,
                                bytes32[16][] calldata /* subProof */,
