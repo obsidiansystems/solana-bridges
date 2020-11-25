@@ -149,18 +149,6 @@ challengeTransactionSignature node ca slot transactionIndex addressIndex =
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
-
-{-
-    function verifyTransactionInclusionProof(bytes32 accountsHash,
-                                             bytes32 blockMerkle,
-                                             bytes32[16][] memory subProof,
-                                             bytes32 bankHashMerkleRoot,
-                                             bytes memory transaction,
-                                             uint64 transactionIndex) public pure returns (bool) {
-
-    function verifyMerkleProof(bytes32[16][] memory proof, bytes32 root, bytes memory value, uint64 index) public pure returns (bool) {
--}
-
 verifyTransactionInclusionProof
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
