@@ -108,19 +108,19 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
 
-parseVoteMessage
+parseSolanaMessage
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
   -> Data.Solidity.Prim.Bytes.Bytes
-  -> m ( Data.Solidity.Prim.Bytes.BytesN 8
-       , Data.Solidity.Prim.Bytes.BytesN 8
-       , Data.Solidity.Prim.Bytes.BytesN 8
+  -> m ( Data.Solidity.Prim.Bytes.BytesN 1
+       , Data.Solidity.Prim.Bytes.BytesN 1
+       , Data.Solidity.Prim.Bytes.BytesN 1
        , [Data.Solidity.Prim.Bytes.BytesN 32]
        , Data.Solidity.Prim.Bytes.BytesN 32
        , [Data.Solidity.Prim.Bytes.Bytes]
        )
-parseVoteMessage node ca msg = simulate node ca "parseVoteMessage" $ Contracts.parseVoteMessage msg
+parseSolanaMessage node ca msg = simulate node ca "parseSolanaMessage" $ Contracts.parseSolanaMessage msg
 
 verifyTransactionSignature
   :: (MonadError String m, MonadIO m)

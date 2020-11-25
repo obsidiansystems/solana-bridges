@@ -716,29 +716,101 @@ struct Slot {
     mapping (uint64 => mapping (uint64 => bytes)) public messages;
     mapping (uint64 => mapping (uint64 => bytes[])) public signatures;
 
-    struct VoteMessage {
-        bytes8 requiredSignatures;
-        bytes8 readOnlySignatures;
-        bytes8 readOnlyUnsigned;
+    struct SolanaMessage {
+        bytes1 requiredSignatures;
+        bytes1 readOnlySignatures;
+        bytes1 readOnlyUnsigned;
         bytes32[] addresses;
         bytes32 recentBlockHash;
-        bytes[] voteInstructions;
+        bytes[] instructions;
     }
 
-    struct VoteInstruction {
-        uint64 voterAccountIndex;
-        uint64 signerAccountIndex;
+    struct SolanaInstruction {
+        bytes1 programId;
+        uint8[] accounts;
+        bytes data;
+    }
+
+    struct SolanaVote {
         uint64[] slots;
+        bytes32 hash;
+        uint64 timestamp; // optional
     }
 
-    function parseVoteMessage(bytes memory message) public pure returns (VoteMessage memory) {
-        /* TODO */
+    function parseSolanaMessage(bytes memory message) public pure returns (SolanaMessage memory) {
+        SolanaMessage memory solanaMsg;
+        solanaMsg.requiredSignatures = message[0];
+        solanaMsg.readOnlySignatures = message[1];
+        solanaMsg.readOnlyUnsigned = message[2];
+
+        (uint8 consumed, uint16 addressesLength) = parseCompactWord16(message, 3);
+        solanaMsg.addresses = new bytes32[](addressesLength);
+        for(uint16 i = 0; i < addressesLength; i++) {
+            //solanaMsg.addresses[i] = TODO;
+        }
+
+        //solanaMsg.recentBlockHash = TODO;
+
+        /*
+        uint16 instructionCount = parseCompactWord16(message, _);
+        solanaMsg.instructions = new SolanaInstruction[](instructionCount);
+        for(uint16 i = 0; i < instructionCount; i++) {
+            //solanaMsg.instructions[i] = TODO;
+        }
+        */
+
+        return solanaMsg;
     }
+
+    function parseInstruction(bytes memory message) public pure returns (SolanaInstruction memory) {
+        SolanaInstruction memory instruction;
+        instruction.programId = message[0];
+
+        (uint8 consumed, uint16 accountsLength) = parseCompactWord16(message, 1);
+        //slice
+
+        //(uint8 consumed_, uint16 dataLength) = parseCompactWord16(message, _);
+        //slice
+    }
+
+    function parseVote(bytes memory data) public pure returns (SolanaVote memory) {
+        SolanaVote memory vote;
+        (uint8 consumed, uint16 slotsLength) = parseCompactWord16(data, 0);
+        vote.slots = new uint64[](slotsLength);
+        for(uint16 i = 0; i < slotsLength; i++) {
+            //vote.slots[i] = TODO;
+        }
+        //vote.hash = TODO;
+        //vote.timestamp = TODO;
+    }
+
+    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint8, uint16) {
+        uint8 size = 1;
+        uint8 b0 = uint8(bs[offset + 0]);
+        uint16 w = b0 & 0x7f;
+        if (b0 < (1 << 7))
+            return (size, w);
+
+        size++;
+        uint8 b1 = uint8(bs[offset + 1]);
+        w |= (b1 & 0x7f) << 7;
+        if (b1 < (1 << 7))
+            return (size, w);
+
+        size++;
+        uint8 b2 = uint8(bs[offset + 2]);
+        w |= (b2 & 0x03) << 14;
+        if (b2 < (1 << 2))
+            return (size, w);
+
+        revert("Invalid Compact-u16");
+    }
+
 
     function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
         bytes storage signature = signatures[slot][transactionIndex][addressIndex];
         bytes storage message = messages[slot][transactionIndex];
-        VoteMessage memory voteMsg = parseVoteMessage(message);
+        SolanaMessage memory voteMsg = parseSolanaMessage(message);
         bytes32 pk = voteMsg.addresses[addressIndex];
         return ed25519_valid(signature, message, pk);
     }
