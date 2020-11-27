@@ -722,12 +722,12 @@ struct Slot {
         bytes1 readOnlyUnsigned;
         bytes32[] addresses;
         bytes32 recentBlockHash;
-        bytes[] instructions;
+        bytes instructions;
     }
 
     struct SolanaInstruction {
         bytes1 programId;
-        uint8[] accounts;
+        bytes accounts;
         bytes data;
     }
 
@@ -739,69 +739,82 @@ struct Slot {
 
     function parseSolanaMessage(bytes memory message) public pure returns (SolanaMessage memory) {
         SolanaMessage memory solanaMsg;
-        solanaMsg.requiredSignatures = message[0];
-        solanaMsg.readOnlySignatures = message[1];
-        solanaMsg.readOnlyUnsigned = message[2];
+        uint offset;
+        solanaMsg.requiredSignatures = message[0]; offset++;
+        solanaMsg.readOnlySignatures = message[1]; offset++;
+        solanaMsg.readOnlyUnsigned = message[2]; offset++;
 
-        (uint8 consumed, uint16 addressesLength) = parseCompactWord16(message, 3);
-        solanaMsg.addresses = new bytes32[](addressesLength);
-        for(uint16 i = 0; i < addressesLength; i++) {
+        uint length;
+        (length, offset) = parseCompactWord16(message, offset);
+        solanaMsg.addresses = new bytes32[](length);
+        for(uint16 i = 0; i < length; i++) {
             //solanaMsg.addresses[i] = TODO;
         }
 
-        //solanaMsg.recentBlockHash = TODO;
-
-        /*
-        uint16 instructionCount = parseCompactWord16(message, _);
-        solanaMsg.instructions = new SolanaInstruction[](instructionCount);
-        for(uint16 i = 0; i < instructionCount; i++) {
-            //solanaMsg.instructions[i] = TODO;
-        }
-        */
+        // solanaMsg.recentBlockHash = TODO;
+        // solanaMsg.instructions = TODO;
+        // offset += TODO;
 
         return solanaMsg;
     }
 
-    function parseInstruction(bytes memory message) public pure returns (SolanaInstruction memory) {
+    function parseInstruction(bytes memory buffer, uint offset) public pure returns (SolanaInstruction memory, uint) {
         SolanaInstruction memory instruction;
-        instruction.programId = message[0];
+        instruction.programId = buffer[offset]; offset++;
 
-        (uint8 consumed, uint16 accountsLength) = parseCompactWord16(message, 1);
-        //slice
-
-        //(uint8 consumed_, uint16 dataLength) = parseCompactWord16(message, _);
-        //slice
+        (instruction.accounts, offset) = parseBytes(buffer, offset);
+        (instruction.data, offset) = parseBytes(buffer, offset);
+        return (instruction, offset);
     }
 
-    function parseVote(bytes memory data) public pure returns (SolanaVote memory) {
-        SolanaVote memory vote;
-        (uint8 consumed, uint16 slotsLength) = parseCompactWord16(data, 0);
-        vote.slots = new uint64[](slotsLength);
-        for(uint16 i = 0; i < slotsLength; i++) {
-            //vote.slots[i] = TODO;
+    function parseBytes(bytes memory buffer, uint offset) public pure returns (bytes memory, uint) {
+        uint16 bytesLength;
+        (bytesLength, offset) = parseCompactWord16(buffer, offset);
+
+        bytes memory bs = new bytes(bytesLength);
+        for (uint i = 0; i < bytesLength; i++) {
+            bs[i] = buffer[offset + i];
         }
+        return (bs, offset + bytesLength);
+    }
+
+    function parseUInt64s(bytes memory buffer, uint offset) public pure returns (uint64[] memory, uint) {
+        uint16 length;
+        (length, offset) = parseCompactWord16(buffer, offset);
+
+        uint64[] memory ints = new uint64[](length);
+        for (uint i = 0; i < length; i++) {
+            //TODO
+        }
+        //return (ints, offset + 8 * length);
+    }
+
+    function parseVote(bytes memory buffer, uint offset) public pure returns (SolanaVote memory, uint) {
+        SolanaVote memory vote;
+        (vote.slots, offset) = parseUInt64s(buffer, offset);
         //vote.hash = TODO;
         //vote.timestamp = TODO;
+        //offset += TODO;
     }
 
-    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint8, uint16) {
+    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint16, uint8) {
         uint8 size = 1;
         uint8 b0 = uint8(bs[offset + 0]);
         uint16 w = b0 & 0x7f;
         if (b0 < (1 << 7))
-            return (size, w);
+            return (w, size);
 
         size++;
         uint8 b1 = uint8(bs[offset + 1]);
-        w |= (b1 & 0x7f) << 7;
+        w |= uint16(b1 & 0x7f) << 7;
         if (b1 < (1 << 7))
-            return (size, w);
+            return (w, size);
 
         size++;
         uint8 b2 = uint8(bs[offset + 2]);
-        w |= (b2 & 0x03) << 14;
+        w |= uint16(b2 & 0x03) << 14;
         if (b2 < (1 << 2))
-            return (size, w);
+            return (w, size);
 
         revert("Invalid Compact-u16");
     }

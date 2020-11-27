@@ -35,8 +35,8 @@ import Network.Web3.Provider (runWeb3')
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
-import qualified Data.Solidity.Prim.Bytes
-import qualified Data.Solidity.Prim.Int
+import qualified Data.Solidity.Prim.Bytes as Solidity
+import qualified Data.Solidity.Prim.Int as Solidity
 import qualified Network.Ethereum.Account as Eth
 import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..))
 import qualified Network.Ethereum.Unit as Eth
@@ -112,23 +112,47 @@ parseSolanaMessage
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
-  -> Data.Solidity.Prim.Bytes.Bytes
-  -> m ( Data.Solidity.Prim.Bytes.BytesN 1
-       , Data.Solidity.Prim.Bytes.BytesN 1
-       , Data.Solidity.Prim.Bytes.BytesN 1
-       , [Data.Solidity.Prim.Bytes.BytesN 32]
-       , Data.Solidity.Prim.Bytes.BytesN 32
-       , [Data.Solidity.Prim.Bytes.Bytes]
+  -> Solidity.Bytes
+  -> m ( Solidity.BytesN 1
+       , Solidity.BytesN 1
+       , Solidity.BytesN 1
+       , [Solidity.BytesN 32]
+       , Solidity.BytesN 32
+       , Solidity.Bytes
        )
 parseSolanaMessage node ca msg = simulate node ca "parseSolanaMessage" $ Contracts.parseSolanaMessage msg
+
+parseCompactWord16
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (Word8, CompactWord16)
+parseCompactWord16 node ca bytes offset = fmap convert $ simulate node ca "parseCompactWord16"
+  $ Contracts.parseCompactWord16 (ByteArray.convert bytes) (fromIntegral offset)
+  where
+    convert (w16, w8) = (fromIntegral w16, fromIntegral w8)
+
+parseBytes
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (ByteString, Word8)
+parseBytes node ca bytes offset = fmap convert $ simulate node ca "parseBytes"
+  $ Contracts.parseBytes (ByteArray.convert bytes) (fromIntegral offset)
+  where
+    convert (bs, w8) = (ByteArray.convert bs, fromIntegral w8)
 
 verifyTransactionSignature
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Solidity.UIntN 64
+  -> Solidity.UIntN 64
+  -> Solidity.UIntN 64
   -> m Bool
 verifyTransactionSignature node ca slot transactionIndex addressIndex =
   simulate node ca "verifyTransactionSignature"
@@ -138,9 +162,9 @@ challengeTransactionSignature
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
-  -> Data.Solidity.Prim.Int.UIntN 64
+  -> Solidity.UIntN 64
+  -> Solidity.UIntN 64
+  -> Solidity.UIntN 64
   -> m ()
 challengeTransactionSignature node ca slot transactionIndex addressIndex =
   submit node ca "challengeTransactionSignature"
@@ -179,25 +203,25 @@ verifyMerkleProof node ca proof root value index = simulate node ca "verifyMerkl
 
 -- implementation details
 
-sha256ToBytes32 :: Digest SHA256 -> Data.Solidity.Prim.Bytes.BytesN 32
+sha256ToBytes32 :: Digest SHA256 -> Solidity.BytesN 32
 sha256ToBytes32 = unsafeSizedByteArray . ByteArray.convert
 
-word64ToSol :: Word64 -> Data.Solidity.Prim.Int.UIntN 64
+word64ToSol :: Word64 -> Solidity.UIntN 64
 word64ToSol = fromInteger . toInteger
 
-word64FromSol :: Data.Solidity.Prim.Int.UIntN 64 -> Word64
+word64FromSol :: Solidity.UIntN 64 -> Word64
 word64FromSol = fromInteger . toInteger
 
-unsafeBytes32ToSol :: Base58ByteString -> Data.Solidity.Prim.Bytes.BytesN 32
+unsafeBytes32ToSol :: Base58ByteString -> Solidity.BytesN 32
 unsafeBytes32ToSol = unsafeSizedByteArray . ByteArray.convert . unBase58ByteString
 
-bytes32FromSol :: Data.Solidity.Prim.Bytes.BytesN 32 -> Base58ByteString
+bytes32FromSol :: Solidity.BytesN 32 -> Base58ByteString
 bytes32FromSol = Base58ByteString . ByteArray.convert . unSizedByteArray
 
-bytesToSol :: BS.ByteString -> Data.Solidity.Prim.Bytes.Bytes
+bytesToSol :: BS.ByteString -> Solidity.Bytes
 bytesToSol = ByteArray.convert
 
-bytesFromSol :: Data.Solidity.Prim.Bytes.Bytes -> BS.ByteString
+bytesFromSol :: Solidity.Bytes -> BS.ByteString
 bytesFromSol = ByteArray.convert
 
 
