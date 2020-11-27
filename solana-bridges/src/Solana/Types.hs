@@ -124,7 +124,7 @@ instance Binary CompactWord16 where
         else fail "too big"
 
 newtype LengthPrefixedArray sz a = LengthPrefixedArray { unCompactArray :: Seq a}
-  deriving (Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 instance (Integral sz, Num sz, Binary sz, Binary a) => Binary (LengthPrefixedArray sz a) where
   put (LengthPrefixedArray xs)
@@ -138,7 +138,7 @@ instance (Integral sz, Num sz, Binary sz, Binary a) => Binary (LengthPrefixedArr
 type CompactArray = LengthPrefixedArray CompactWord16
 
 newtype CompactByteArray = CompactByteArray { unCompactByteArray :: LBS.ByteString }
-  deriving Show
+  deriving (Eq, Ord, Show)
 
 instance Binary CompactByteArray where
   put (CompactByteArray xs)
@@ -180,7 +180,7 @@ instance HashAlgorithm a => Binary (Digest a) where
 data SolanaTxn = SolanaTxn
   { _solanaTxn_signatures :: CompactArray Ed25519.Signature
   , _solanaTxn_message :: SolanaTxnMessage
-  } deriving (Generic, Show)
+  } deriving (Eq, Generic, Show)
 
 instance Binary SolanaTxn
 
@@ -192,7 +192,7 @@ data SolanaTxnMessage = SolanaTxnMessage
   , _solanaTxnMessage_addresses :: CompactArray Ed25519.PublicKey
   , _solanaTxnMessage_recentBlockHash :: Digest SHA256
   , _solanaTxnMessage_instructions :: CompactArray SolanaTxnInstruction
-  } deriving (Generic, Show)
+  } deriving (Eq, Generic, Show)
 
 instance Binary SolanaTxnMessage
 
@@ -201,7 +201,7 @@ data SolanaTxnInstruction = SolanaTxnInstruction
   { _solanaTxnInstruction_programId :: Word8
   , _solanaTxnInstruction_accounts :: CompactArray Word8
   , _solanaTxnInstruction_data :: CompactByteArray
-  } deriving (Generic, Show)
+  } deriving (Eq, Generic, Show)
 instance Binary SolanaTxnInstruction
 
 isVoteTxn :: SolanaTxn -> Bool
