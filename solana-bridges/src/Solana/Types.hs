@@ -143,14 +143,14 @@ newtype CompactByteArray = CompactByteArray { unCompactByteArray :: LBS.ByteStri
 instance Binary CompactByteArray where
   put (CompactByteArray xs)
     | LBS.length xs /= fromIntegral (fromIntegral (LBS.length xs) :: Word16) = error "bad CompactByteArray length"
-    | otherwise = put (CompactWord16 $ fromIntegral $ LBS.length xs) <> put xs
+    | otherwise = put (CompactWord16 $ fromIntegral $ LBS.length xs) <> putByteString (LBS.toStrict xs)
 
   get = do
     CompactWord16 numXs <- get
     CompactByteArray <$> getLazyByteString (fromIntegral numXs)
 
 instance Binary Ed25519.Signature where
-  put = put @BS.ByteString . ByteArray.convert
+  put = putByteString . ByteArray.convert
   get = do
     sigBytes <- getByteString (Ed25519.signatureSize)
     case Ed25519.signature sigBytes of
@@ -158,7 +158,7 @@ instance Binary Ed25519.Signature where
       CryptoFailed bad -> fail $ show bad
 
 instance Binary Ed25519.PublicKey where
-  put = put @BS.ByteString . ByteArray.convert
+  put = putByteString . ByteArray.convert
   get = do
     sigBytes <- getByteString (Ed25519.publicKeySize)
     case Ed25519.publicKey sigBytes of
@@ -166,7 +166,7 @@ instance Binary Ed25519.PublicKey where
       CryptoFailed bad -> fail $ show bad
 
 instance HashAlgorithm a => Binary (Digest a) where
-  put = put @BS.ByteString . ByteArray.convert
+  put = putByteString . ByteArray.convert
 
   get = do
       sigBytes <- getByteString len
