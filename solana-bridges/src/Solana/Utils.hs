@@ -38,7 +38,6 @@ txnParsed = Data.Binary.decode $ LBS.fromStrict txnBinary
 txnMessage :: SolanaTxnMessage
 txnMessage = Data.Binary.decode $ LBS.fromStrict $ BS.drop 65 $ txnBinary
 
-
 roundtrip :: forall b. Binary b => b -> b
 roundtrip = dec . enc
   where
@@ -64,7 +63,7 @@ testParsing = do
   hspec $ describe "Parser " $ do
     let roundtrips x = roundtrip x `shouldBe` x
 
-    it "parses compact compact-u16" $ do
+    it "parses compact-u16" $ do
       let parses buffer cursor expected@(w16, _) = do
             roundtrips w16
             res <- runExceptT $ parseCompactWord16 node contract buffer cursor

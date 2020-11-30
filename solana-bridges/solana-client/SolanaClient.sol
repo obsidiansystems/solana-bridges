@@ -792,7 +792,6 @@ struct Slot {
 
     function parseUint64LE(bytes memory buffer, uint cursor) public pure returns (uint64, uint) {
         uint64 u;
-
         for (uint i = 0; i < 8; i++) {
             u |= uint64(uint256(uint8(buffer[cursor + i])) << (i * 8));
         }
@@ -801,7 +800,6 @@ struct Slot {
 
     function parseBytes32(bytes memory buffer, uint cursor) public pure returns (bytes32, uint) {
         bytes32 b32;
-
         for (uint i = 0; i < 32; i++) {
             b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
         }
@@ -811,7 +809,6 @@ struct Slot {
     function parseBytes(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
         uint16 bytesLength;
         (bytesLength, cursor) = parseCompactWord16(buffer, cursor);
-
         bytes memory bs = new bytes(bytesLength);
         for (uint i = 0; i < bytesLength; i++) {
             bs[i] = buffer[cursor + i];
@@ -835,11 +832,14 @@ struct Slot {
         for(uint i = 0; i < length; i++) {
             (vote.slots[i], cursor) = parseUint64LE(buffer, cursor);
         }
+
         (vote.hash, cursor) = parseBytes32(buffer, cursor);
+
         vote.hasTimestamp = buffer[cursor] != 0; cursor++;
         if(vote.hasTimestamp) {
             (vote.timestamp, cursor) = parseUint64LE(buffer, cursor);
         }
+
         return (vote, cursor);
     }
 
