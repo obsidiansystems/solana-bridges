@@ -882,6 +882,13 @@ struct Slot {
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
 
         // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+        bytes memory data = instruction.data;
+        if (uint8(data[0]) != 2) {
+            revert("Not a vote instruction");
+        }
+        SolanaVote memory vote; uint cursor;
+        (vote, cursor) = parseVote(data, 1);
+
         uint8 signer = uint8(instruction.accounts[3]);
         bytes32 pk = parsedMessage.addresses[signer];
         bytes storage signature = signatures[slot][transactionIndex][signer];

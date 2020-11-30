@@ -226,17 +226,17 @@ verifyTransactionSignature node ca slot transactionIndex addressIndex =
   simulate node ca "verifyTransactionSignature"
   $ Contracts.verifyTransactionSignature slot transactionIndex addressIndex
 
-challengeTransactionSignature
+verifyVote
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
-  -> Solidity.UIntN 64
-  -> Solidity.UIntN 64
-  -> Solidity.UIntN 64
-  -> m ()
-challengeTransactionSignature node ca slot transactionIndex addressIndex =
-  submit node ca "challengeTransactionSignature"
-  $ Contracts.challengeTransactionSignature slot transactionIndex addressIndex
+  -> Word64
+  -> Word64
+  -> Word64
+  -> m Bool
+verifyVote node ca slot transactionIndex instructionIndex =
+  simulate node ca "verifyVote"
+  $ Contracts.verifyVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
 
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
