@@ -734,7 +734,8 @@ struct Slot {
     struct SolanaVote {
         uint64[] slots;
         bytes32 hash;
-        uint64 timestamp; // optional
+        bool hasTimestamp;
+        uint64 timestamp;
     }
 
     // Workaround for misbehaving hs-web3 bindings
@@ -764,8 +765,12 @@ struct Slot {
         }
 
         (solanaMsg.recentBlockHash, cursor) = parseBytes32(buffer, cursor);
-        // solanaMsg.instructions = TODO;
-        // cursor += TODO;
+
+        (length, cursor) = parseCompactWord16(buffer, cursor);
+        solanaMsg.instructions = new SolanaInstruction[](length);
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.instructions[i], cursor) = parseInstruction(buffer, cursor);
+        }
 
         return solanaMsg;
     }
@@ -783,6 +788,15 @@ struct Slot {
         (instruction.accounts, cursor) = parseBytes(buffer, cursor);
         (instruction.data, cursor) = parseBytes(buffer, cursor);
         return (instruction, cursor);
+    }
+
+    function parseUint64LE(bytes memory buffer, uint cursor) public pure returns (uint64, uint) {
+        uint64 u;
+
+        for (uint i = 0; i < 8; i++) {
+            u |= uint64(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 8);
     }
 
     function parseBytes32(bytes memory buffer, uint cursor) public pure returns (bytes32, uint) {
@@ -805,23 +819,28 @@ struct Slot {
         return (bs, cursor + bytesLength);
     }
 
-    function parseUInt64s(bytes memory buffer, uint cursor) public pure returns (uint64[] memory, uint) {
-        uint16 length;
-        (length, cursor) = parseCompactWord16(buffer, cursor);
-
-        uint64[] memory ints = new uint64[](length);
-        for (uint i = 0; i < length; i++) {
-            //TODO
-        }
-        //return (ints, cursor + 8 * length);
+    // Workaround for misbehaving hs-web3 bindings
+    function parseVote_(bytes memory buffer, uint cursor) public pure returns (uint64[] memory, bytes32, bool, uint64, uint) {
+        SolanaVote memory vote;
+        (vote, cursor) = parseVote(buffer, cursor);
+        return (vote.slots, vote.hash, vote.hasTimestamp, vote.timestamp, cursor);
     }
 
     function parseVote(bytes memory buffer, uint cursor) public pure returns (SolanaVote memory, uint) {
         SolanaVote memory vote;
-        (vote.slots, cursor) = parseUInt64s(buffer, cursor);
-        //vote.hash = TODO;
-        //vote.timestamp = TODO;
-        //cursor += TODO;
+
+        uint64 length;
+        (length, cursor) = parseUint64LE(buffer, cursor);
+        vote.slots = new uint64[](length);
+        for(uint i = 0; i < length; i++) {
+            (vote.slots[i], cursor) = parseUint64LE(buffer, cursor);
+        }
+        (vote.hash, cursor) = parseBytes32(buffer, cursor);
+        vote.hasTimestamp = buffer[cursor] != 0; cursor++;
+        if(vote.hasTimestamp) {
+            (vote.timestamp, cursor) = parseUint64LE(buffer, cursor);
+        }
+        return (vote, cursor);
     }
 
     function parseCompactWord16(bytes memory bs, uint cursor) public pure returns (uint16, uint) {
@@ -842,7 +861,6 @@ struct Slot {
 
         revert("Invalid Compact-u16");
     }
-
 
     function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
         bytes storage signature = signatures[slot][transactionIndex][addressIndex];

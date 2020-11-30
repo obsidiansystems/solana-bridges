@@ -99,8 +99,41 @@ testParsing = do
       res <- runExceptT $ parseBytes32 node contract buffer 0
       res `shouldBe` Right (sha256ToBytes32 hash, 32)
 
+    it "parses uint64" $ do
+      let uint = Word64LE 0x1122334455667788
+      roundtrips uint
+      let buffer = LBS.toStrict $ Data.Binary.encode (uint, uint)
+      res <- runExceptT $ parseUint64LE node contract buffer 8
+      res `shouldBe` Right (fromIntegral uint, 16)
+
+    it "parses votes" $ do
+      let [i] = txnMessage
+            & _solanaTxnMessage_instructions
+            & fmap _solanaTxnInstruction_data
+            & fmap unCompactByteArray
+            & unCompactArray
+            & toList
+          vi = Data.Binary.decode i :: SolanaVoteInstruction
+          SolanaVoteInstruction_Vote v = vi
+
+          v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
+          vi' = SolanaVoteInstruction_Vote v'
+
+      let parse vote = do
+            let buffer = LBS.toStrict $ Data.Binary.encode vote
+            res <- runExceptT $ parseVote node contract buffer 0
+            res `shouldBe` Right (vote, fromIntegral (BS.length buffer))
+
+      roundtrips vi
+      roundtrips vi'
+
+      parse v
+      parse v'
+
+{-
     it "parses messages" $ do
       roundtrips txnMessage
       let buffer = LBS.toStrict $ Data.Binary.encode txnMessage
       res <- runExceptT $ parseSolanaMessage node contract buffer
       res `shouldBe` Right txnMessage
+-}

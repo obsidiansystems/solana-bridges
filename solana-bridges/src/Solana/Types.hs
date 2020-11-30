@@ -215,7 +215,7 @@ isVoteTxn txn = any isVoteInstr (_solanaTxnMessage_instructions $ _solanaTxn_mes
 data VoteAuthorize
    = VoteAuthorize_Voter
    | VoteAuthorize_Withdrawer
-   deriving (Generic, Show)
+   deriving (Generic, Eq, Show)
 instance Binary VoteAuthorize
 
 newtype Word64LE = Word64LE { unWord64LE :: Word64 }
@@ -230,7 +230,7 @@ data SolanaVote = SolanaVote
   { _solanaVote_slots :: LengthPrefixedArray Word64LE Word64LE -- ^ A stack of votes starting with the oldest vote
   , _solanaVote_hash :: Digest SHA256-- ^  signature of the bank's state at the last slot
   , _solanaVote_timestamp :: Maybe Word64LE -- ^  processing timestamp of last slot
-  } deriving (Generic, Show)
+  } deriving (Generic, Eq, Show)
 instance Binary SolanaVote
 
 data SolanaVoteInitialize = SolanaVoteInitialize
@@ -238,7 +238,7 @@ data SolanaVoteInitialize = SolanaVoteInitialize
   , _solanaVoteInitialize_authorizedVoter :: Ed25519.PublicKey
   , _solanaVoteInitialize_authorizedWithdrawer :: Ed25519.PublicKey
   , _solanaVoteInitialize_commission :: Word8
-  } deriving (Generic, Show)
+  } deriving (Generic, Eq, Show)
 instance Binary SolanaVoteInitialize
 
 data SolanaVoteInstruction
@@ -249,7 +249,7 @@ data SolanaVoteInstruction
   | SolanaVoteInstruction_UpdateValidatorIdentity
   | SolanaVoteInstruction_UpdateCommission Word8
   | SolanaVoteInstruction_VoteSwitch SolanaVote (Digest SHA256)
-  deriving Show
+  deriving (Eq, Show)
 
 instance Binary SolanaVoteInstruction where
   get = getWord32le >>= \case

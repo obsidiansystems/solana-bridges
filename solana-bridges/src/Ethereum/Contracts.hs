@@ -120,14 +120,19 @@ parseSolanaMessage
   -> m SolanaTxnMessage
 parseSolanaMessage node ca msg = fmap convert $ simulate node ca "parseSolanaMessage_" $ Contracts.parseSolanaMessage_ (ByteArray.convert msg)
   where
-    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash, _instructions)
+    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
+    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash, instructions)
       = SolanaTxnMessage
         (fromIntegral requiredSignatures)
         (fromIntegral readOnlySignatures)
         (fromIntegral readOnlyUnsigned)
         (LengthPrefixedArray . Sequence.fromList . fmap unsafeBytes32ToPublicKey $ addresses)
         (bytes32ToSha256 recentBlockHash)
-        (LengthPrefixedArray []) -- TODO: instructions
+        (LengthPrefixedArray $ Sequence.fromList $ flip fmap instructions $
+         \(programId, accounts, data') -> SolanaTxnInstruction
+                                          (fromIntegral programId)
+                                          (bytes accounts)
+                                          (bytes data'))
 
 parseBytes32
   :: (MonadError String m, MonadIO m)
@@ -138,6 +143,18 @@ parseBytes32
   -> m (Solidity.BytesN 32, Word)
 parseBytes32 node ca bytes cursor = fmap convert $ simulate node ca "parseBytes32"
   $ Contracts.parseBytes32 (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (bs, fromIntegral w)
+
+parseUint64LE
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (Solidity.UIntN 64, Word)
+parseUint64LE node ca bytes cursor = fmap convert $ simulate node ca "parseUint64LE"
+  $ Contracts.parseUint64LE (ByteArray.convert bytes) (fromIntegral cursor)
   where
     convert (bs, w) = (bs, fromIntegral w)
 
@@ -164,6 +181,23 @@ parseBytes node ca bytes offset = fmap convert $ simulate node ca "parseBytes"
   $ Contracts.parseBytes (ByteArray.convert bytes) (fromIntegral offset)
   where
     convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
+
+parseVote
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (SolanaVote, Word)
+parseVote node ca bytes cursor = fmap convert $ simulate node ca "parseVote_"
+  $ Contracts.parseVote_ (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (slots, hash, hasTimestamp, timestamp, w) =
+      ( SolanaVote
+        (LengthPrefixedArray $ Sequence.fromList $ fmap fromIntegral slots)
+        (bytes32ToSha256 hash)
+        (if hasTimestamp then Just (fromIntegral timestamp) else Nothing)
+      , fromIntegral w)
 
 parseInstruction
   :: (MonadError String m, MonadIO m)
