@@ -23,7 +23,8 @@ import Control.Lens hiding (index)
 import Control.Monad
 import Control.Monad.Except (MonadError, throwError)
 import Control.Monad.IO.Class
-import Crypto.Hash (Digest, SHA256)
+import Crypto.Error (CryptoFailable(..))
+import Crypto.Hash (Digest, SHA256, digestFromByteString)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
@@ -33,9 +34,11 @@ import Data.Map (Map)
 import Data.Solidity.Prim.Address (Address)
 import Data.Word
 import Network.Web3.Provider (runWeb3')
+import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Sequence
 import qualified Data.Solidity.Prim.Bytes as Solidity
 import qualified Data.Solidity.Prim.Int as Solidity
 import qualified Network.Ethereum.Account as Eth
@@ -113,15 +116,30 @@ parseSolanaMessage
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
-  -> Solidity.Bytes
-  -> m ( Solidity.BytesN 1
-       , Solidity.BytesN 1
-       , Solidity.BytesN 1
-       , [Solidity.BytesN 32]
-       , Solidity.BytesN 32
-       , Solidity.Bytes
-       )
-parseSolanaMessage node ca msg = simulate node ca "parseSolanaMessage" $ Contracts.parseSolanaMessage msg
+  -> ByteString
+  -> m SolanaTxnMessage
+parseSolanaMessage node ca msg = fmap convert $ simulate node ca "parseSolanaMessage_" $ Contracts.parseSolanaMessage_ (ByteArray.convert msg)
+  where
+    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash, _instructions)
+      = SolanaTxnMessage
+        (fromIntegral requiredSignatures)
+        (fromIntegral readOnlySignatures)
+        (fromIntegral readOnlyUnsigned)
+        (LengthPrefixedArray . Sequence.fromList . fmap unsafeBytes32ToPublicKey $ addresses)
+        (bytes32ToSha256 recentBlockHash)
+        (LengthPrefixedArray []) -- TODO: instructions
+
+parseBytes32
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (Solidity.BytesN 32, Word)
+parseBytes32 node ca bytes cursor = fmap convert $ simulate node ca "parseBytes32"
+  $ Contracts.parseBytes32 (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (bs, fromIntegral w)
 
 parseCompactWord16
   :: (MonadError String m, MonadIO m)
@@ -129,7 +147,7 @@ parseCompactWord16
   -> Address
   -> ByteString
   -> Word64
-  -> m (CompactWord16, Word16)
+  -> m (CompactWord16, Word)
 parseCompactWord16 node ca bytes offset = fmap convert $ simulate node ca "parseCompactWord16"
   $ Contracts.parseCompactWord16 (ByteArray.convert bytes) (fromIntegral offset)
   where
@@ -222,6 +240,9 @@ verifyMerkleProof node ca proof root value index = simulate node ca "verifyMerkl
 sha256ToBytes32 :: Digest SHA256 -> Solidity.BytesN 32
 sha256ToBytes32 = unsafeSizedByteArray . ByteArray.convert
 
+bytes32ToSha256 :: Solidity.BytesN 32 -> Digest SHA256
+bytes32ToSha256 = maybe (error "bytes32ToSha256: digestFromByteString failed") id . digestFromByteString . unSizedByteArray
+
 word64ToSol :: Word64 -> Solidity.UIntN 64
 word64ToSol = fromInteger . toInteger
 
@@ -239,6 +260,11 @@ bytesToSol = ByteArray.convert
 
 bytesFromSol :: Solidity.Bytes -> BS.ByteString
 bytesFromSol = ByteArray.convert
+
+unsafeBytes32ToPublicKey :: Solidity.BytesN 32 -> Ed25519.PublicKey
+unsafeBytes32ToPublicKey bytes32 = case Ed25519.publicKey (ByteArray.convert bytes32 :: ByteString) of
+  CryptoPassed good -> good
+  CryptoFailed bad -> error $ "unsafeBytes32ToPublicKey: publicKey failed: " <> show bad
 
 
 invokeContract :: Address

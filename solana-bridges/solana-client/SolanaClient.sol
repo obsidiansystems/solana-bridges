@@ -717,9 +717,9 @@ struct Slot {
     mapping (uint64 => mapping (uint64 => bytes[])) public signatures;
 
     struct SolanaMessage {
-        bytes1 requiredSignatures;
-        bytes1 readOnlySignatures;
-        bytes1 readOnlyUnsigned;
+        uint8 requiredSignatures;
+        uint8 readOnlySignatures;
+        uint8 readOnlyUnsigned;
         bytes32[] addresses;
         bytes32 recentBlockHash;
         bytes instructions;
@@ -737,87 +737,108 @@ struct Slot {
         uint64 timestamp; // optional
     }
 
-    function parseSolanaMessage(bytes memory message) public pure returns (SolanaMessage memory) {
+    // Workaround for misbehaving hs-web3 bindings
+    function parseSolanaMessage_(bytes memory buffer) public pure returns (uint8, uint8, uint8, bytes32[] memory, bytes32, bytes memory) {
+        SolanaMessage memory m;
+        m = parseSolanaMessage(buffer);
+        return (m.requiredSignatures,
+                m.readOnlySignatures,
+                m.readOnlyUnsigned,
+                m.addresses,
+                m.recentBlockHash,
+                m.instructions);
+    }
+
+    function parseSolanaMessage(bytes memory buffer) public pure returns (SolanaMessage memory) {
         SolanaMessage memory solanaMsg;
-        uint offset;
-        solanaMsg.requiredSignatures = message[0]; offset++;
-        solanaMsg.readOnlySignatures = message[1]; offset++;
-        solanaMsg.readOnlyUnsigned = message[2]; offset++;
+        uint cursor;
+        solanaMsg.requiredSignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlySignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlyUnsigned = uint8(buffer[cursor]); cursor++;
 
         uint length;
-        (length, offset) = parseCompactWord16(message, offset);
+        (length, cursor) = parseCompactWord16(buffer, cursor);
         solanaMsg.addresses = new bytes32[](length);
-        for(uint16 i = 0; i < length; i++) {
-            //solanaMsg.addresses[i] = TODO;
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.addresses[i], cursor) = parseBytes32(buffer, cursor);
         }
 
-        // solanaMsg.recentBlockHash = TODO;
+        (solanaMsg.recentBlockHash, cursor) = parseBytes32(buffer, cursor);
         // solanaMsg.instructions = TODO;
-        // offset += TODO;
+        // cursor += TODO;
 
         return solanaMsg;
     }
 
     // Workaround for misbehaving hs-web3 bindings
-    function parseInstruction_(bytes memory buffer, uint offset) public pure returns (uint8, bytes memory, bytes memory, uint) {
+    function parseInstruction_(bytes memory buffer, uint cursor) public pure returns (uint8, bytes memory, bytes memory, uint) {
         SolanaInstruction memory instruction;
-        (instruction, offset) = parseInstruction(buffer,offset);
-        return (instruction.programId, instruction.accounts, instruction.data, offset);
+        (instruction, cursor) = parseInstruction(buffer,cursor);
+        return (instruction.programId, instruction.accounts, instruction.data, cursor);
     }
 
-    function parseInstruction(bytes memory buffer, uint offset) public pure returns (SolanaInstruction memory, uint) {
+    function parseInstruction(bytes memory buffer, uint cursor) public pure returns (SolanaInstruction memory, uint) {
         SolanaInstruction memory instruction;
-        instruction.programId = uint8(buffer[offset]); offset++;
-        (instruction.accounts, offset) = parseBytes(buffer, offset);
-        (instruction.data, offset) = parseBytes(buffer, offset);
-        return (instruction, offset);
+        instruction.programId = uint8(buffer[cursor]); cursor++;
+        (instruction.accounts, cursor) = parseBytes(buffer, cursor);
+        (instruction.data, cursor) = parseBytes(buffer, cursor);
+        return (instruction, cursor);
     }
 
-    function parseBytes(bytes memory buffer, uint offset) public pure returns (bytes memory, uint) {
-        uint16 bytesLength; uint offset2;
-        (bytesLength, offset2) = parseCompactWord16(buffer, offset);
+    function parseBytes32(bytes memory buffer, uint cursor) public pure returns (bytes32, uint) {
+        bytes32 b32;
+
+        for (uint i = 0; i < 32; i++) {
+            b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
+        }
+        return (b32, cursor + 32);
+    }
+
+    function parseBytes(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+        uint16 bytesLength;
+        (bytesLength, cursor) = parseCompactWord16(buffer, cursor);
 
         bytes memory bs = new bytes(bytesLength);
         for (uint i = 0; i < bytesLength; i++) {
-            bs[i] = buffer[offset2 + i];
+            bs[i] = buffer[cursor + i];
         }
-        return (bs, offset2 + bytesLength);
+        return (bs, cursor + bytesLength);
     }
 
-    function parseUInt64s(bytes memory buffer, uint offset) public pure returns (uint64[] memory, uint) {
+    function parseUInt64s(bytes memory buffer, uint cursor) public pure returns (uint64[] memory, uint) {
         uint16 length;
-        (length, offset) = parseCompactWord16(buffer, offset);
+        (length, cursor) = parseCompactWord16(buffer, cursor);
 
         uint64[] memory ints = new uint64[](length);
         for (uint i = 0; i < length; i++) {
             //TODO
         }
-        //return (ints, offset + 8 * length);
+        //return (ints, cursor + 8 * length);
     }
 
-    function parseVote(bytes memory buffer, uint offset) public pure returns (SolanaVote memory, uint) {
+    function parseVote(bytes memory buffer, uint cursor) public pure returns (SolanaVote memory, uint) {
         SolanaVote memory vote;
-        (vote.slots, offset) = parseUInt64s(buffer, offset);
+        (vote.slots, cursor) = parseUInt64s(buffer, cursor);
         //vote.hash = TODO;
         //vote.timestamp = TODO;
-        //offset += TODO;
+        //cursor += TODO;
     }
 
-    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint16, uint) {
-        uint8 b0 = uint8(bs[offset]); offset++;
+    function parseCompactWord16(bytes memory bs, uint cursor) public pure returns (uint16, uint) {
+        uint8 b0 = uint8(bs[cursor]); cursor++;
         uint16 w = b0 & 0x7f;
         if (b0 < (1 << 7))
-            return (w, offset);
+            return (w, cursor);
 
-        uint8 b1 = uint8(bs[offset]); offset++;
+        uint8 b1 = uint8(bs[cursor]); cursor++;
         w |= uint16(b1 & 0x7f) << 7;
         if (b1 < (1 << 7))
-            return (w, offset);
+            return (w, cursor);
 
-        uint8 b2 = uint8(bs[offset]); offset++;
+        uint8 b2 = uint8(bs[cursor]); cursor++;
         w |= uint16(b2 & 0x03) << 14;
         if (b2 < (1 << 2))
-            return (w, offset);
+            return (w, cursor);
 
         revert("Invalid Compact-u16");
     }
