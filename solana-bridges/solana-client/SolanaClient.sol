@@ -870,11 +870,25 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function challengeTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public {
-        if(verifyTransactionSignature(slot, transactionIndex, addressIndex)) {
+    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public returns (bool) {
+        if(!verifyVote(slot, transactionIndex, instructionIndex)) {
             selfdestruct(msg.sender);
         }
     }
+
+    function verifyVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public view returns (bool) {
+        bytes storage message = messages[slot][transactionIndex];
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
+
+        // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+        uint8 signer = uint8(instruction.accounts[3]);
+        bytes32 pk = parsedMessage.addresses[signer];
+        bytes storage signature = signatures[slot][transactionIndex][signer];
+
+        return ed25519_valid(signature, message, pk);
+    }
+
 
     function verifyTransaction(bytes32 /* accountsHash */,
                                bytes32 /* blockMerkle */,
