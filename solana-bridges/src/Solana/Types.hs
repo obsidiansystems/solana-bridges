@@ -199,7 +199,7 @@ instance Binary SolanaTxnMessage
 -- https://github.com/solana-labs/solana/blob/master/sdk/program/src/instruction.rs#L227
 data SolanaTxnInstruction = SolanaTxnInstruction
   { _solanaTxnInstruction_programId :: Word8
-  , _solanaTxnInstruction_accounts :: CompactArray Word8
+  , _solanaTxnInstruction_accounts :: CompactByteArray
   , _solanaTxnInstruction_data :: CompactByteArray
   } deriving (Eq, Generic, Show)
 instance Binary SolanaTxnInstruction

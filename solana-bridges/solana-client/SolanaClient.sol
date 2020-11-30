@@ -726,7 +726,7 @@ struct Slot {
     }
 
     struct SolanaInstruction {
-        bytes1 programId;
+        uint8 programId;
         bytes accounts;
         bytes data;
     }
@@ -758,24 +758,30 @@ struct Slot {
         return solanaMsg;
     }
 
+    // Workaround for misbehaving hs-web3 bindings
+    function parseInstruction_(bytes memory buffer, uint offset) public pure returns (uint8, bytes memory, bytes memory, uint) {
+        SolanaInstruction memory instruction;
+        (instruction, offset) = parseInstruction(buffer,offset);
+        return (instruction.programId, instruction.accounts, instruction.data, offset);
+    }
+
     function parseInstruction(bytes memory buffer, uint offset) public pure returns (SolanaInstruction memory, uint) {
         SolanaInstruction memory instruction;
-        instruction.programId = buffer[offset]; offset++;
-
+        instruction.programId = uint8(buffer[offset]); offset++;
         (instruction.accounts, offset) = parseBytes(buffer, offset);
         (instruction.data, offset) = parseBytes(buffer, offset);
         return (instruction, offset);
     }
 
     function parseBytes(bytes memory buffer, uint offset) public pure returns (bytes memory, uint) {
-        uint16 bytesLength;
-        (bytesLength, offset) = parseCompactWord16(buffer, offset);
+        uint16 bytesLength; uint offset2;
+        (bytesLength, offset2) = parseCompactWord16(buffer, offset);
 
         bytes memory bs = new bytes(bytesLength);
         for (uint i = 0; i < bytesLength; i++) {
-            bs[i] = buffer[offset + i];
+            bs[i] = buffer[offset2 + i];
         }
-        return (bs, offset + bytesLength);
+        return (bs, offset2 + bytesLength);
     }
 
     function parseUInt64s(bytes memory buffer, uint offset) public pure returns (uint64[] memory, uint) {
@@ -797,24 +803,21 @@ struct Slot {
         //offset += TODO;
     }
 
-    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint16, uint8) {
-        uint8 size = 1;
-        uint8 b0 = uint8(bs[offset + 0]);
+    function parseCompactWord16(bytes memory bs, uint offset) public pure returns (uint16, uint) {
+        uint8 b0 = uint8(bs[offset]); offset++;
         uint16 w = b0 & 0x7f;
         if (b0 < (1 << 7))
-            return (w, size);
+            return (w, offset);
 
-        size++;
-        uint8 b1 = uint8(bs[offset + 1]);
+        uint8 b1 = uint8(bs[offset]); offset++;
         w |= uint16(b1 & 0x7f) << 7;
         if (b1 < (1 << 7))
-            return (w, size);
+            return (w, offset);
 
-        size++;
-        uint8 b2 = uint8(bs[offset + 2]);
+        uint8 b2 = uint8(bs[offset]); offset++;
         w |= uint16(b2 & 0x03) << 14;
         if (b2 < (1 << 2))
-            return (w, size);
+            return (w, offset);
 
         revert("Invalid Compact-u16");
     }

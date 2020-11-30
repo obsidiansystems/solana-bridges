@@ -26,6 +26,7 @@ import Control.Monad.IO.Class
 import Crypto.Hash (Digest, SHA256)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as LBS
 import GHC.Exts (fromList)
 import Data.Functor.Compose
 import Data.Map (Map)
@@ -128,11 +129,11 @@ parseCompactWord16
   -> Address
   -> ByteString
   -> Word64
-  -> m (Word8, CompactWord16)
+  -> m (CompactWord16, Word16)
 parseCompactWord16 node ca bytes offset = fmap convert $ simulate node ca "parseCompactWord16"
   $ Contracts.parseCompactWord16 (ByteArray.convert bytes) (fromIntegral offset)
   where
-    convert (w16, w8) = (fromIntegral w16, fromIntegral w8)
+    convert (w16, w) = (fromIntegral w16, fromIntegral w)
 
 parseBytes
   :: (MonadError String m, MonadIO m)
@@ -140,11 +141,26 @@ parseBytes
   -> Address
   -> ByteString
   -> Word64
-  -> m (ByteString, Word8)
+  -> m (ByteString, Word16)
 parseBytes node ca bytes offset = fmap convert $ simulate node ca "parseBytes"
   $ Contracts.parseBytes (ByteArray.convert bytes) (fromIntegral offset)
   where
-    convert (bs, w8) = (ByteArray.convert bs, fromIntegral w8)
+    convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
+
+parseInstruction
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (SolanaTxnInstruction, Word64)
+parseInstruction node ca buffer offset = fmap convert $ simulate node ca "parseInstruction_"
+  $ Contracts.parseInstruction_ (ByteArray.convert buffer) (fromIntegral offset)
+  where
+    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
+    convert (programId, accounts, data', consumed) =
+      (SolanaTxnInstruction (fromIntegral programId) (bytes accounts) (bytes data')
+      , fromIntegral consumed)
 
 verifyTransactionSignature
   :: (MonadError String m, MonadIO m)
