@@ -383,10 +383,14 @@ data SolanaCommittedBlock = SolanaCommittedBlock
   { _solanaCommittedBlock_blockhash :: !Base58ByteString
   , _solanaCommittedBlock_previousBlockhash :: !Base58ByteString
   , _solanaCommittedBlock_parentSlot :: !Word64
---  , _solanaCommittedBlock_transactions :: ![SolanaTxnMeta]
+  , _solanaCommittedBlock_transactions :: ![SolanaTxnWithMeta]
   , _solanaCommittedBlock_rewards :: ![Value]
   , _solanaCommittedBlock_blockTime :: !(Maybe Word64)
   } deriving Show
+
+data SolanaTxnWithMeta = SolanaTxnWithMeta
+  { _solanaTxnWithMeta_transaction :: !SolanaTxn
+  } deriving (Eq, Show, Generic)
 
 type SolanaLeaderSchedule = Map Base58ByteString [Word64]
 
@@ -428,7 +432,7 @@ do
     -- , ''SolanaVote
     , ''SolanaBlockCommitment
     , ''SolanaCommittedBlock
-
+    , ''SolanaTxnWithMeta
     , ''SolanaTxn
     , ''SolanaTxnMessage
     , ''SolanaTxnHeader
