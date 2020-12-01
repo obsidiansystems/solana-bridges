@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -12,6 +13,8 @@
 module Solana.Types where
 
 import Control.Applicative
+import Control.Lens ((<&>))
+import Control.Monad ((<=<))
 import Crypto.Error (CryptoFailable(..))
 import Crypto.Hash (Digest, HashAlgorithm, hashDigestSize, digestFromByteString)
 import Crypto.Hash.Algorithms (SHA256)
@@ -124,7 +127,7 @@ instance Binary CompactWord16 where
         else fail "too big"
 
 newtype LengthPrefixedArray sz a = LengthPrefixedArray { unCompactArray :: Seq a}
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance (Integral sz, Num sz, Binary sz, Binary a) => Binary (LengthPrefixedArray sz a) where
   put (LengthPrefixedArray xs)
@@ -149,67 +152,105 @@ instance Binary CompactByteArray where
     CompactWord16 numXs <- get
     CompactByteArray <$> getLazyByteString (fromIntegral numXs)
 
+
+instance ToJSON a => ToJSON (LengthPrefixedArray sz a) where
+  toJSON = toJSON . unCompactArray
+instance FromJSON a => FromJSON (LengthPrefixedArray sz a) where
+  parseJSON = fmap LengthPrefixedArray . parseJSON
+
 instance Binary Ed25519.Signature where
   put = putByteString . ByteArray.convert
-  get = do
-    sigBytes <- getByteString (Ed25519.signatureSize)
-    case Ed25519.signature sigBytes of
-      CryptoPassed good -> pure good
-      CryptoFailed bad -> fail $ show bad
-
+  get = mkEd25519Signature =<< getByteString (Ed25519.signatureSize)
 instance Binary Ed25519.PublicKey where
   put = putByteString . ByteArray.convert
-  get = do
-    sigBytes <- getByteString (Ed25519.publicKeySize)
-    case Ed25519.publicKey sigBytes of
-      CryptoPassed good -> pure good
-      CryptoFailed bad -> fail $ show bad
-
+  get = mkEd25519PublicKey =<< getByteString (Ed25519.publicKeySize)
 instance HashAlgorithm a => Binary (Digest a) where
   put = putByteString . ByteArray.convert
+  get = mkDigest =<< getByteString (hashDigestSize (undefined :: a))
 
-  get = do
-      sigBytes <- getByteString len
-      case digestFromByteString sigBytes of
-        Just good -> pure good
-        Nothing -> fail "bad Digest size"
-    where
-     len = hashDigestSize (undefined :: a)
+instance ToJSON Ed25519.Signature where
+  toJSON = toJSON . Base58ByteString . ByteArray.convert
+instance ToJSON Ed25519.PublicKey where
+  toJSON = toJSON . Base58ByteString . ByteArray.convert
+instance ToJSON (Digest SHA256) where
+  toJSON = toJSON . Base58ByteString . ByteArray.convert
+
+instance FromJSON Ed25519.Signature where
+  parseJSON = mkEd25519Signature . unBase58ByteString <=< parseJSON
+instance FromJSON Ed25519.PublicKey where
+  parseJSON = mkEd25519PublicKey . unBase58ByteString <=< parseJSON
+instance FromJSON (Digest SHA256) where
+  parseJSON = mkDigest . unBase58ByteString <=< parseJSON
+
+
+mkEd25519PublicKey :: MonadFail m => BS.ByteString -> m Ed25519.PublicKey
+mkEd25519PublicKey bs = case Ed25519.publicKey bs of
+  CryptoPassed good -> pure good
+  CryptoFailed bad -> fail $ show bad
+
+mkEd25519Signature :: MonadFail m => BS.ByteString -> m Ed25519.Signature
+mkEd25519Signature bs = case Ed25519.signature bs of
+  CryptoPassed good -> pure good
+  CryptoFailed bad -> fail $ show bad
+
+mkDigest :: (MonadFail m, HashAlgorithm ha) => BS.ByteString -> m (Digest ha)
+mkDigest bs = case digestFromByteString bs of
+  Just good -> pure good
+  Nothing -> fail "bad Digest size"
 
 -- https://docs.solana.com/transaction#transaction-format
 data SolanaTxn = SolanaTxn
   { _solanaTxn_signatures :: CompactArray Ed25519.Signature
   , _solanaTxn_message :: SolanaTxnMessage
   } deriving (Eq, Generic, Show)
-
 instance Binary SolanaTxn
 
-
 data SolanaTxnMessage = SolanaTxnMessage
-  { _solanaTxnMessage_requiredSignatures :: Word8
-  , _solanaTxnMessage_readOnlySignatures :: Word8
-  , _solanaTxnMessage_readOnlyUnsigned :: Word8
-  , _solanaTxnMessage_addresses :: CompactArray Ed25519.PublicKey
-  , _solanaTxnMessage_recentBlockHash :: Digest SHA256
+  { _solanaTxnMessage_header :: SolanaTxnHeader
+  , _solanaTxnMessage_accountKeys :: CompactArray Ed25519.PublicKey
+  , _solanaTxnMessage_recentBlockhash :: Digest SHA256
   , _solanaTxnMessage_instructions :: CompactArray SolanaTxnInstruction
   } deriving (Eq, Generic, Show)
-
 instance Binary SolanaTxnMessage
+
+data SolanaTxnHeader = SolanaTxnHeader
+  { _solanaTxnHeader_numRequiredSignatures :: Word8
+  , _solanaTxnHeader_numReadonlySignedAccounts :: Word8
+  , _solanaTxnHeader_numReadonlyUnsignedAccounts :: Word8
+  } deriving (Eq, Ord, Generic, Show)
+instance Binary SolanaTxnHeader
 
 -- https://github.com/solana-labs/solana/blob/master/sdk/program/src/instruction.rs#L227
 data SolanaTxnInstruction = SolanaTxnInstruction
-  { _solanaTxnInstruction_programId :: Word8
+  { _solanaTxnInstruction_programIdIndex :: Word8
   , _solanaTxnInstruction_accounts :: CompactByteArray
   , _solanaTxnInstruction_data :: CompactByteArray
   } deriving (Eq, Generic, Show)
 instance Binary SolanaTxnInstruction
+
+instance ToJSON SolanaTxnInstruction where
+  toJSON tx = object
+    [ "programIdIndex" .= _solanaTxnInstruction_programIdIndex tx
+    , "accounts" .= LBS.unpack (unCompactByteArray $ _solanaTxnInstruction_accounts tx)
+    , "data" .= base58ByteStringToText (Base58ByteString $ LBS.toStrict $ unCompactByteArray $ _solanaTxnInstruction_data tx)
+    ]
+
+instance FromJSON SolanaTxnInstruction where
+  parseJSON = withObject "SolanaTxnInstruction" $ \v -> SolanaTxnInstruction
+    <$> v .: "programIdIndex"
+    <*> (v .: "accounts" <&> (CompactByteArray . LBS.pack)) --parseJSON -- pure (CompactByteArray "") --v .: "accounts"
+    <*> ((v .: "data") >>= parseData)
+    where
+      parseData txt = case parseBase58ByteString txt of
+        Nothing -> fail "bah"
+        Just bs -> pure $ CompactByteArray $ LBS.fromStrict $ unBase58ByteString bs  --pure (CompactByteArray "") --v .: "data"
 
 isVoteTxn :: SolanaTxn -> Bool
 isVoteTxn txn = any isVoteInstr (_solanaTxnMessage_instructions $ _solanaTxn_message txn)
   where
     isVoteInstr :: SolanaTxnInstruction -> Bool
     isVoteInstr instr
-      = Just solanaVoteProgram == Seq.lookup (fromIntegral $ _solanaTxnInstruction_programId instr) (unCompactArray $ _solanaTxnMessage_addresses $ _solanaTxn_message txn)
+      = Just solanaVoteProgram == Seq.lookup (fromIntegral $ _solanaTxnInstruction_programIdIndex instr) (unCompactArray $ _solanaTxnMessage_accountKeys $ _solanaTxn_message txn)
 
 
 data VoteAuthorize
@@ -342,8 +383,8 @@ data SolanaCommittedBlock = SolanaCommittedBlock
   { _solanaCommittedBlock_blockhash :: !Base58ByteString
   , _solanaCommittedBlock_previousBlockhash :: !Base58ByteString
   , _solanaCommittedBlock_parentSlot :: !Word64
-  -- , _solanaCommittedBlock_transactions :: ![Value]
-  -- , _solanaCommittedBlock_rewards :: ![Value]
+--  , _solanaCommittedBlock_transactions :: ![SolanaTxnMeta]
+  , _solanaCommittedBlock_rewards :: ![Value]
   , _solanaCommittedBlock_blockTime :: !(Maybe Word64)
   } deriving Show
 
@@ -387,4 +428,8 @@ do
     -- , ''SolanaVote
     , ''SolanaBlockCommitment
     , ''SolanaCommittedBlock
+
+    , ''SolanaTxn
+    , ''SolanaTxnMessage
+    , ''SolanaTxnHeader
     ]

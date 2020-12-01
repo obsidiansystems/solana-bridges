@@ -51,7 +51,7 @@ verifySigs txn = flip fmap (Seq.zip pks sigs) $ \(pk, sig) -> Ed25519.verify pk 
     msg' = LBS.toStrict $ Data.Binary.encode msg
 
     pks :: Seq.Seq Ed25519.PublicKey
-    pks = unCompactArray $ _solanaTxnMessage_addresses msg
+    pks = unCompactArray $ _solanaTxnMessage_accountKeys msg
 
     sigs :: Seq.Seq Ed25519.Signature
     sigs = unCompactArray (_solanaTxn_signatures txn)
@@ -92,7 +92,7 @@ testParsing = do
         res `shouldBe` Right (i, fromIntegral (BS.length buffer))
 
     it "parses bytes32" $ do
-      let hash = txnMessage & _solanaTxnMessage_recentBlockHash
+      let hash = txnMessage & _solanaTxnMessage_recentBlockhash
       roundtrips hash
       let buffer = LBS.toStrict $ Data.Binary.encode hash
       res <- runExceptT $ parseBytes32 node contract buffer 0
