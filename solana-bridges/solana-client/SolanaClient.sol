@@ -679,10 +679,28 @@ struct Slot {
         seenBlocks++;
     }
 
-    function addTransactions(uint64 slot, bytes[] memory signatures, bytes[] memory messages) public {
+    // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231
+    // TODO: parse offchain and pass in bytes[] calldata - bindings currently bugged either in hs-web3 or solidity
+    function addTransactions(uint64 initialSlot,
+                             bytes calldata signatures,
+                             bytes calldata messages,
+                             uint[] calldata signaturesFieldSizes,
+                             uint[] calldata messageFieldSizes
+                             ) external {
         authorize();
-//        for(uint i = 0;
-//        transactionSignatures[slot]
+        uint startOffset; uint endOffset;
+        for(uint64 i = 0; i < signaturesFieldSizes.length; i++) {
+            endOffset += signaturesFieldSizes[i];
+            transactionSignatures[initialSlot][i] = bytes(signatures[startOffset:endOffset]);
+            startOffset = endOffset;
+        }
+        startOffset = 0; endOffset = 0;
+        for(uint64 i = 0; i < messageFieldSizes.length; i++) {
+            endOffset += messageFieldSizes[i];
+            transactionMessages[initialSlot][i] = bytes(messages[startOffset:endOffset]);
+            startOffset = endOffset;
+        }
+        emit Success();
     }
 
     function slotOffset(uint64 s) private pure returns (uint64) {
@@ -911,13 +929,17 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public {
+    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public returns (bool) {
         bytes storage message = transactionMessages[slot][transactionIndex];
         bytes storage signatures = transactionSignatures[slot][transactionIndex];
 
-        if(!verifyVote(signatures, message, instructionIndex)) {
+        bool valid = verifyVote(signatures, message, instructionIndex);
+        if(!valid) {
             selfdestruct(msg.sender);
         }
+
+        emit Success();
+        return valid;
     }
 
     function verifyTransaction(bytes32 /* accountsHash */,

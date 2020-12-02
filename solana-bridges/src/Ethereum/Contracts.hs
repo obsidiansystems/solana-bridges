@@ -35,6 +35,7 @@ import Data.Solidity.Prim.Address (Address)
 import Data.Word
 import Network.Web3.Provider (runWeb3')
 import qualified Crypto.PubKey.Ed25519 as Ed25519
+import qualified Data.Binary as Binary
 import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
@@ -78,6 +79,14 @@ getLastSlot node ca = word64FromSol <$> simulate node ca "lastSlot" Contracts.la
 getLastHash :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Base58ByteString
 getLastHash node ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate node ca "lastHash" Contracts.lastHash
 
+getSignatures :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
+getSignatures node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionSignatures"
+  $ Contracts.transactionSignatures (fromIntegral slot) (fromIntegral tx)
+
+getMessage :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
+getMessage node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionMessages"
+  $ Contracts.transactionMessages (fromIntegral slot) (fromIntegral tx)
+
 -- getSlotLeader :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> m Base58ByteString
 -- getSlotLeader node ca s = bytes32FromSol <$> simulate node ca "getSlotLeader" (Contracts.getSlotLeader $ word64ToSol s)
 
@@ -100,7 +109,14 @@ initialize node ca slot root leader schedule = void $ submit node ca "initialize
   (word64ToSol $ _solanaEpochSchedule_firstNormalSlot schedule)-- uint64 scheduleFirstNormalSlot,
   (word64ToSol $ _solanaEpochSchedule_slotsPerEpoch schedule)-- uint64 scheduleSlotsPerEpoch
 
-addBlocks :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> Map Word64 SolanaLeaderSchedule -> SolanaEpochSchedule -> m ()
+addBlocks
+  :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> [(Word64, SolanaCommittedBlock)]
+  -> Map Word64 SolanaLeaderSchedule
+  -> SolanaEpochSchedule
+  -> m ()
 addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "addBlocks" $ Contracts.addBlocks
   (word64ToSol . fst <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
@@ -111,6 +127,52 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
     mergedSchedules = ifoldMap (\(epoch, leaderPk) slotIndices ->
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
+
+addTransactions
+  :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> [SolanaTxn]
+  -> m ()
+addTransactions node ca txs = do
+ liftIO $ print sigSizes
+ liftIO $ print msgsSizes
+ submit node ca "addTransactions" $ Contracts.addTransactions
+  0
+  (ByteArray.convert $ BS.concat sigs)
+  (ByteArray.convert $ BS.concat msgs)
+  (fromIntegral <$> sigSizes)
+  (fromIntegral <$> msgsSizes)
+  where
+    (sigs, sigSizes) = unzip $ flip fmap txs $ \tx ->
+      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_signatures)
+      in (bs, BS.length bs)
+    (msgs, msgsSizes) = unzip $ flip fmap txs $ \tx ->
+      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_message)
+      in (bs, BS.length bs)
+
+challengeVote
+  :: (MonadIO m, MonadError String m)
+  => Eth.Provider
+  -> Address
+  -> Word64
+  -> Word64
+  -> Word64
+  -> m ()
+challengeVote node ca slot tx instruction = submit node ca "challengeVote"
+  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral tx) (fromIntegral instruction)
+
+challengeVote'
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> Word64
+  -> Word64
+  -> Word64
+  -> m Eth.TxReceipt
+challengeVote' node ca slot transactionIndex instructionIndex =
+  simulate node ca "challengeVote"
+  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
 
 verifyVote_gas
   :: (MonadError String m, MonadIO m)
@@ -260,18 +322,6 @@ parseInstruction node ca buffer offset = fmap convert $ simulate node ca "parseI
       (SolanaTxnInstruction (fromIntegral programId) (bytes accounts) (bytes data')
       , fromIntegral consumed)
 
-challengeVote
-  :: (MonadError String m, MonadIO m)
-  => Eth.Provider
-  -> Address
-  -> Word64
-  -> Word64
-  -> Word64
-  -> m Eth.TxReceipt
-challengeVote node ca slot transactionIndex instructionIndex =
-  simulate node ca "challengeVote"
-  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
-
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks
 
@@ -355,4 +405,4 @@ submit node ca name x = do
   let qname = "'" <> name <> "'"
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not finish"
+    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not produce any logs" --TODO: expose more info in hs-web3

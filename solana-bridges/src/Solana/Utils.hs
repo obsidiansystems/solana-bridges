@@ -180,3 +180,15 @@ testSolanaClient = do
             res `shouldBe` Right expected
 
       test True sigs msg 0
+
+    it "can submit transactions" $ do
+      res <- runExceptT $ addTransactions node contract [txnParsed]
+      res `shouldBe` Right ()
+      sig <- runExceptT $ getSignatures def contract 0 0
+      sig `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
+      msg <- runExceptT $ getMessage def contract 0 0
+      msg `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
+
+    it "can challenge" $ do
+      res <- runExceptT $ challengeVote' node contract 0 0 0
+      res `shouldBe` Right False
