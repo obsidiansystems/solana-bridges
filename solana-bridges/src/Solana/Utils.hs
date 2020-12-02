@@ -63,6 +63,27 @@ testSolanaClient = do
   let node = def
   contract <- deploySolanaClientContract node defaultSolanaRPCConfig
 
+  let [vi] = txnParsed
+        & _solanaTxn_message
+        & _solanaTxnMessage_instructions
+        & fmap _solanaTxnInstruction_data
+        & fmap unCompactByteArray
+        & unCompactArray
+        & toList
+        & fmap Data.Binary.decode
+      SolanaVoteInstruction_Vote v = vi
+
+      v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
+      vi' = SolanaVoteInstruction_Vote v'
+
+  res' <- runExceptT $ verifyVote_gas
+    node
+    contract
+    (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
+    (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
+    0
+  print res'
+
   hspec $ describe "Solana client" $ do
     let roundtrips x = roundtrip x `shouldBe` x
         verify expected txn = do
@@ -125,19 +146,6 @@ testSolanaClient = do
       res `shouldBe` Right (fromIntegral uint, 16)
 
     it "parses votes" $ do
-      let [i] = txnParsed
-            & _solanaTxn_message
-            & _solanaTxnMessage_instructions
-            & fmap _solanaTxnInstruction_data
-            & fmap unCompactByteArray
-            & unCompactArray
-            & toList
-          vi = Data.Binary.decode i :: SolanaVoteInstruction
-          SolanaVoteInstruction_Vote v = vi
-
-          v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
-          vi' = SolanaVoteInstruction_Vote v'
-
       let parse vote = do
             let buffer = LBS.toStrict $ Data.Binary.encode vote
             res <- runExceptT $ parseVote node contract buffer 0
@@ -164,12 +172,11 @@ testSolanaClient = do
         & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 40
 
     it "verifies vote transactions" $ do
-      --    function verifyVoteTransaction(bytes[] memory signatures, bytes memory message, uint64 instructionIndex)
-      res <- runExceptT $ test_verifyVote
-        node
-        contract
-        (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
-        (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
-        0
+      let sigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
+          msg = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message
 
-      res `shouldBe` Right True
+          test expected s m i = do
+            res <- runExceptT $ verifyVote node contract s m i
+            res `shouldBe` Right expected
+
+      test True sigs msg 0

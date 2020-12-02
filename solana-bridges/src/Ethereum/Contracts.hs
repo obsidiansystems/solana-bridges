@@ -112,7 +112,18 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
 
-test_verifyVote
+verifyVote_gas
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> ByteString
+  -> Word64
+  -> m Eth.TxReceipt
+verifyVote_gas node ca sigs msg idx = simulate node ca "verifyVote"
+  $ Eth.send $ Contracts.VerifyVoteData (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
+
+verifyVote
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
@@ -120,8 +131,8 @@ test_verifyVote
   -> ByteString
   -> Word64
   -> m Bool
-test_verifyVote node ca sigs msg idx = simulate node ca "test_verifyVote"
-  $ Contracts.test_verifyVote (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
+verifyVote node ca sigs msg idx = simulate node ca "verifyVote"
+  $ Contracts.verifyVote (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
 
 -- TODO: misbehaving bindings - parsing is fixed in https://github.com/obsidiansystems/hs-web3/tree/tupple-array but encoding seems broken
 parseSolanaMessage
@@ -207,6 +218,16 @@ parseBytes node ca bytes offset = fmap convert $ simulate node ca "parseBytes"
   where
     convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
 
+parseVote_gas
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m Eth.TxReceipt--(SolanaVote, Word)
+parseVote_gas node ca bytes cursor = simulate node ca "parseVote_"
+  $ Eth.send $ Contracts.ParseVote_Data (ByteArray.convert bytes) (fromIntegral cursor)
+
 parseVote
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
@@ -239,29 +260,17 @@ parseInstruction node ca buffer offset = fmap convert $ simulate node ca "parseI
       (SolanaTxnInstruction (fromIntegral programId) (bytes accounts) (bytes data')
       , fromIntegral consumed)
 
-verifyTransactionSignature
-  :: (MonadError String m, MonadIO m)
-  => Eth.Provider
-  -> Address
-  -> Solidity.UIntN 64
-  -> Solidity.UIntN 64
-  -> Solidity.UIntN 64
-  -> m Bool
-verifyTransactionSignature node ca slot transactionIndex addressIndex =
-  simulate node ca "verifyTransactionSignature"
-  $ Contracts.verifyTransactionSignature slot transactionIndex addressIndex
-
-verifyVote
+challengeVote
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
   -> Address
   -> Word64
   -> Word64
   -> Word64
-  -> m Bool
-verifyVote node ca slot transactionIndex instructionIndex =
-  simulate node ca "verifyVote"
-  $ Contracts.verifyVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
+  -> m Eth.TxReceipt
+challengeVote node ca slot transactionIndex instructionIndex =
+  simulate node ca "challengeVote"
+  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
 
 getSeenBlocks :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Word64
 getSeenBlocks node ca = word64FromSol <$> simulate node ca "seenBlocks" Contracts.seenBlocks

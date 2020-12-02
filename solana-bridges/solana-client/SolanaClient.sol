@@ -596,7 +596,7 @@ struct Slot {
 
     // slot => transactionIndex => _
     mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
-    mapping (uint64 => mapping (uint64 => bytes[])) public transactionSignatures;
+    mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
 
     event Success();
 
@@ -679,7 +679,7 @@ struct Slot {
         seenBlocks++;
     }
 
-    function addTransactions(uint64 slot, bytes[][] memory signatures, bytes[] memory messages) public {
+    function addTransactions(uint64 slot, bytes[] memory signatures, bytes[] memory messages) public {
         authorize();
 //        for(uint i = 0;
 //        transactionSignatures[slot]
@@ -796,6 +796,14 @@ struct Slot {
         return (instruction, cursor);
     }
 
+    function parseUint32LE(bytes memory buffer, uint cursor) public pure returns (uint32, uint) {
+        uint32 u;
+        for (uint i = 0; i < 4; i++) {
+            u |= uint32(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 4);
+    }
+
     function parseUint64LE(bytes memory buffer, uint cursor) public pure returns (uint64, uint) {
         uint64 u;
         for (uint i = 0; i < 8; i++) {
@@ -876,70 +884,40 @@ struct Slot {
         revert("Invalid Compact-u16");
     }
 
-    function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
-        bytes storage signature = transactionSignatures[slot][transactionIndex][addressIndex];
-        bytes storage message = transactionMessages[slot][transactionIndex];
-        SolanaMessage memory voteMsg = parseSolanaMessage(message);
-        bytes32 pk = voteMsg.addresses[addressIndex];
-        return ed25519_valid(signature, message, pk);
-    }
-
-    function test_verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public view returns (bool) {
+    function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
         uint cursor; uint length;
         (length, cursor) = parseCompactWord16(signatures, cursor);
-        bytes[] memory parsedSignatures = new bytes[](length);
-
-        for(uint i = 0; i < length; i++) {
-            (parsedSignatures[i], cursor) = parseSignature(signatures, cursor);
-        }
 
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
 
         // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
         bytes memory data = instruction.data;
-        if (uint8(data[0]) != 2) {
+        uint tag;
+        (tag, cursor) = parseUint32LE(data, 0);
+        if (tag != 2) {
             revert("Not a vote instruction");
         }
         SolanaVote memory vote;
-        return true;
-        (vote, cursor) = parseVote(data, 1);
-        return true;
+        (vote, cursor) = parseVote(data, cursor);
 
         uint8 signer = uint8(instruction.accounts[3]);
         bytes32 pk = parsedMessage.addresses[signer];
-        bytes memory signature = parsedSignatures[signer];
+
+        bytes memory signature;
+        (signature, cursor) = parseSignature(signatures, length + signer * 64);
 
         return ed25519_valid(signature, message, pk);
-
     }
 
-    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public returns (bool) {
-        if(!verifyVote(slot, transactionIndex, instructionIndex)) {
+    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public {
+        bytes storage message = transactionMessages[slot][transactionIndex];
+        bytes storage signatures = transactionSignatures[slot][transactionIndex];
+
+        if(!verifyVote(signatures, message, instructionIndex)) {
             selfdestruct(msg.sender);
         }
     }
-
-    function verifyVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public view returns (bool) {
-        bytes storage message = transactionMessages[slot][transactionIndex];
-        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
-        SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
-
-        // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
-        bytes memory data = instruction.data;
-        if (uint8(data[0]) != 2) {
-            revert("Not a vote instruction");
-        }
-        SolanaVote memory vote; uint cursor;
-        (vote, cursor) = parseVote(data, 1);
-
-        uint8 signer = uint8(instruction.accounts[3]);
-        bytes32 pk = parsedMessage.addresses[signer];
-        bytes storage signature = transactionSignatures[slot][transactionIndex][signer];
-
-        return ed25519_valid(signature, message, pk);
-    }
-
 
     function verifyTransaction(bytes32 /* accountsHash */,
                                bytes32 /* blockMerkle */,
