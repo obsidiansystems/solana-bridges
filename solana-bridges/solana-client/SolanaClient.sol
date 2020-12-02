@@ -594,6 +594,10 @@ struct Slot {
     uint64 public lastSlot;
     Slot[HISTORY_SIZE] public slots;
 
+    // slot => transactionIndex => _
+    mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
+    mapping (uint64 => mapping (uint64 => bytes[])) public transactionSignatures;
+
     event Success();
 
     constructor () public {
@@ -675,6 +679,12 @@ struct Slot {
         seenBlocks++;
     }
 
+    function addTransactions(uint64 slot, bytes[][] memory signatures, bytes[] memory messages) public {
+        authorize();
+//        for(uint i = 0;
+//        transactionSignatures[slot]
+    }
+
     function slotOffset(uint64 s) private pure returns (uint64) {
         return s % HISTORY_SIZE;
     }
@@ -712,17 +722,13 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    // slot => transactionIndex => _
-    mapping (uint64 => mapping (uint64 => bytes)) public messages;
-    mapping (uint64 => mapping (uint64 => bytes[])) public signatures;
-
     struct SolanaMessage {
         uint8 requiredSignatures;
         uint8 readOnlySignatures;
         uint8 readOnlyUnsigned;
         bytes32[] addresses;
         bytes32 recentBlockHash;
-        bytes instructions;
+        SolanaInstruction[] instructions;
     }
 
     struct SolanaInstruction {
@@ -739,15 +745,15 @@ struct Slot {
     }
 
     // Workaround for misbehaving hs-web3 bindings
-    function parseSolanaMessage_(bytes memory buffer) public pure returns (uint8, uint8, uint8, bytes32[] memory, bytes32, bytes memory) {
+    function parseSolanaMessage_(bytes memory buffer) public pure returns (uint8, uint8, uint8, bytes32[] memory, bytes32) {
         SolanaMessage memory m;
         m = parseSolanaMessage(buffer);
         return (m.requiredSignatures,
                 m.readOnlySignatures,
                 m.readOnlyUnsigned,
                 m.addresses,
-                m.recentBlockHash,
-                m.instructions);
+                m.recentBlockHash
+                );
     }
 
     function parseSolanaMessage(bytes memory buffer) public pure returns (SolanaMessage memory) {
@@ -804,6 +810,14 @@ struct Slot {
             b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
         }
         return (b32, cursor + 32);
+    }
+
+    function parseSignature(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+        bytes memory b64 = new bytes(64);
+        for (uint i = 0; i < 64; i++) {
+            b64[i] = buffer[cursor + i];
+        }
+        return (b64, cursor + 64);
     }
 
     function parseBytes(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
@@ -863,11 +877,41 @@ struct Slot {
     }
 
     function verifyTransactionSignature(uint64 slot, uint64 transactionIndex, uint64 addressIndex) public view returns (bool) {
-        bytes storage signature = signatures[slot][transactionIndex][addressIndex];
-        bytes storage message = messages[slot][transactionIndex];
+        bytes storage signature = transactionSignatures[slot][transactionIndex][addressIndex];
+        bytes storage message = transactionMessages[slot][transactionIndex];
         SolanaMessage memory voteMsg = parseSolanaMessage(message);
         bytes32 pk = voteMsg.addresses[addressIndex];
         return ed25519_valid(signature, message, pk);
+    }
+
+    function test_verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public view returns (bool) {
+        uint cursor; uint length;
+        (length, cursor) = parseCompactWord16(signatures, cursor);
+        bytes[] memory parsedSignatures = new bytes[](length);
+
+        for(uint i = 0; i < length; i++) {
+            (parsedSignatures[i], cursor) = parseSignature(signatures, cursor);
+        }
+
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
+
+        // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+        bytes memory data = instruction.data;
+        if (uint8(data[0]) != 2) {
+            revert("Not a vote instruction");
+        }
+        SolanaVote memory vote;
+        return true;
+        (vote, cursor) = parseVote(data, 1);
+        return true;
+
+        uint8 signer = uint8(instruction.accounts[3]);
+        bytes32 pk = parsedMessage.addresses[signer];
+        bytes memory signature = parsedSignatures[signer];
+
+        return ed25519_valid(signature, message, pk);
+
     }
 
     function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public returns (bool) {
@@ -877,7 +921,7 @@ struct Slot {
     }
 
     function verifyVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public view returns (bool) {
-        bytes storage message = messages[slot][transactionIndex];
+        bytes storage message = transactionMessages[slot][transactionIndex];
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
 
@@ -891,7 +935,7 @@ struct Slot {
 
         uint8 signer = uint8(instruction.accounts[3]);
         bytes32 pk = parsedMessage.addresses[signer];
-        bytes storage signature = signatures[slot][transactionIndex][signer];
+        bytes storage signature = transactionSignatures[slot][transactionIndex][signer];
 
         return ed25519_valid(signature, message, pk);
     }

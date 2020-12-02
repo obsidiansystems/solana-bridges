@@ -36,9 +36,6 @@ Right txnBinary = Base64.decode txnBase64
 txnParsed :: SolanaTxn
 txnParsed = Data.Binary.decode $ LBS.fromStrict txnBinary
 
-txnMessage :: SolanaTxnMessage
-txnMessage = Data.Binary.decode $ LBS.fromStrict $ BS.drop 65 $ txnBinary
-
 roundtrip :: forall b. Binary b => b -> b
 roundtrip = dec . enc
   where
@@ -76,13 +73,6 @@ testSolanaClient = do
                 res `shouldBe` Right expected
           for_ ed25519 verifies
 
-    it "accepts valid sigs" $ do
-      verify True txnParsed
-
-    it "rejects invalid sigs" $ do
-      verify False $ txnParsed
-        & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 40
-
     it "parses compact-u16" $ do
       let parses buffer cursor expected@(w16, _) = do
             roundtrips w16
@@ -105,18 +95,27 @@ testSolanaClient = do
       parses "abcdef"
 
     it "parses instructions" $ do
-      for_ (txnMessage & _solanaTxnMessage_instructions) $ \i -> do
+      for_ (txnParsed & _solanaTxn_message & _solanaTxnMessage_instructions) $ \i -> do
         roundtrips i
         let buffer = LBS.toStrict $ Data.Binary.encode i
         res <- runExceptT $ parseInstruction node contract buffer 0
         res `shouldBe` Right (i, fromIntegral (BS.length buffer))
 
     it "parses bytes32" $ do
-      let hash = txnMessage & _solanaTxnMessage_recentBlockhash
+      let hash = txnParsed & _solanaTxn_message & _solanaTxnMessage_recentBlockhash
       roundtrips hash
       let buffer = LBS.toStrict $ Data.Binary.encode hash
       res <- runExceptT $ parseBytes32 node contract buffer 0
       res `shouldBe` Right (sha256ToBytes32 hash, 32)
+
+    it "parses signatures" $ do
+      let parse sig = do
+            roundtrips sig
+            let buffer = LBS.toStrict $ Data.Binary.encode sig
+            res <- runExceptT $ parseSignature node contract buffer 0
+            res `shouldBe` Right (ByteArray.convert sig, 64)
+
+      for_ (txnParsed & _solanaTxn_signatures) parse
 
     it "parses uint64" $ do
       let uint = Word64LE 0x1122334455667788
@@ -126,7 +125,8 @@ testSolanaClient = do
       res `shouldBe` Right (fromIntegral uint, 16)
 
     it "parses votes" $ do
-      let [i] = txnMessage
+      let [i] = txnParsed
+            & _solanaTxn_message
             & _solanaTxnMessage_instructions
             & fmap _solanaTxnInstruction_data
             & fmap unCompactByteArray
@@ -148,7 +148,6 @@ testSolanaClient = do
 
       parse v
       parse v'
-
 {-
     it "parses messages" $ do
       roundtrips txnMessage
@@ -156,3 +155,21 @@ testSolanaClient = do
       res <- runExceptT $ parseSolanaMessage node contract buffer
       res `shouldBe` Right txnMessage
 -}
+
+    it "accepts valid sigs" $ do
+      verify True txnParsed
+
+    it "rejects invalid sigs" $ do
+      verify False $ txnParsed
+        & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 40
+
+    it "verifies vote transactions" $ do
+      --    function verifyVoteTransaction(bytes[] memory signatures, bytes memory message, uint64 instructionIndex)
+      res <- runExceptT $ test_verifyVote
+        node
+        contract
+        (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
+        (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
+        0
+
+      res `shouldBe` Right True

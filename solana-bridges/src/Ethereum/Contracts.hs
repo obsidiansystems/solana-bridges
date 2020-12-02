@@ -112,6 +112,18 @@ addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "a
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
       $ Compose leaderSchedule
 
+test_verifyVote
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> ByteString
+  -> Word64
+  -> m Bool
+test_verifyVote node ca sigs msg idx = simulate node ca "test_verifyVote"
+  $ Contracts.test_verifyVote (ByteArray.convert sigs) (ByteArray.convert msg) (fromIntegral idx)
+
+-- TODO: misbehaving bindings - parsing is fixed in https://github.com/obsidiansystems/hs-web3/tree/tupple-array but encoding seems broken
 parseSolanaMessage
   :: (MonadError String m, MonadIO m)
   => Eth.Provider
@@ -120,19 +132,20 @@ parseSolanaMessage
   -> m SolanaTxnMessage
 parseSolanaMessage node ca msg = fmap convert $ simulate node ca "parseSolanaMessage_" $ Contracts.parseSolanaMessage_ (ByteArray.convert msg)
   where
-    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
-    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash, instructions)
+--    bytes = CompactByteArray . LBS.fromStrict . ByteArray.convert
+    convert (requiredSignatures, readOnlySignatures, readOnlyUnsigned, addresses, recentBlockHash) --, _instructions)
       = SolanaTxnMessage
-        (fromIntegral requiredSignatures)
-        (fromIntegral readOnlySignatures)
-        (fromIntegral readOnlyUnsigned)
+        (SolanaTxnHeader (fromIntegral requiredSignatures)  (fromIntegral readOnlySignatures) (fromIntegral readOnlyUnsigned))
         (LengthPrefixedArray . Sequence.fromList . fmap unsafeBytes32ToPublicKey $ addresses)
         (bytes32ToSha256 recentBlockHash)
+        (LengthPrefixedArray $ Sequence.fromList [])
+{-
         (LengthPrefixedArray $ Sequence.fromList $ flip fmap instructions $
          \(programId, accounts, data') -> SolanaTxnInstruction
                                           (fromIntegral programId)
                                           (bytes accounts)
                                           (bytes data'))
+-}
 
 parseBytes32
   :: (MonadError String m, MonadIO m)
@@ -145,6 +158,18 @@ parseBytes32 node ca bytes cursor = fmap convert $ simulate node ca "parseBytes3
   $ Contracts.parseBytes32 (ByteArray.convert bytes) (fromIntegral cursor)
   where
     convert (bs, w) = (bs, fromIntegral w)
+
+parseSignature
+  :: (MonadError String m, MonadIO m)
+  => Eth.Provider
+  -> Address
+  -> ByteString
+  -> Word64
+  -> m (ByteString, Word)
+parseSignature node ca bytes cursor = fmap convert $ simulate node ca "parseSignature"
+  $ Contracts.parseSignature (ByteArray.convert bytes) (fromIntegral cursor)
+  where
+    convert (bs, w) = (ByteArray.convert bs, fromIntegral w)
 
 parseUint64LE
   :: (MonadError String m, MonadIO m)
