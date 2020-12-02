@@ -885,9 +885,8 @@ struct Slot {
     }
 
     function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
-        uint cursor; uint signaturesCount; uint signaturesOffset;
-        (signaturesCount, cursor) = parseCompactWord16(signatures, cursor);
-        signaturesOffset = cursor;
+        uint signaturesCount; uint signaturesOffset;
+        (signaturesCount, signaturesOffset) = parseCompactWord16(signatures, 0);
 
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
@@ -895,6 +894,7 @@ struct Slot {
         // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
         bytes memory data = instruction.data;
         uint tag;
+        uint cursor;
         (tag, cursor) = parseUint32LE(data, 0);
         if (tag != 2) {
             revert("Not a vote instruction");
