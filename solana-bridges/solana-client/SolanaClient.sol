@@ -885,8 +885,9 @@ struct Slot {
     }
 
     function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
-        uint cursor; uint length;
-        (length, cursor) = parseCompactWord16(signatures, cursor);
+        uint cursor; uint signaturesCount; uint signaturesOffset;
+        (signaturesCount, cursor) = parseCompactWord16(signatures, cursor);
+        signaturesOffset = cursor;
 
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
@@ -905,7 +906,7 @@ struct Slot {
         bytes32 pk = parsedMessage.addresses[signer];
 
         bytes memory signature;
-        (signature, cursor) = parseSignature(signatures, length + signer * 64);
+        (signature, cursor) = parseSignature(signatures, signaturesOffset + signer * 64);
 
         return ed25519_valid(signature, message, pk);
     }
