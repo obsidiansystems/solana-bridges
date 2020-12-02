@@ -13,7 +13,7 @@
 module Solana.Types where
 
 import Control.Applicative
-import Control.Lens ((<&>))
+import Control.Lens (makeLenses, (<&>))
 import Control.Monad ((<=<))
 import Crypto.Error (CryptoFailable(..))
 import Crypto.Hash (Digest, HashAlgorithm, hashDigestSize, digestFromByteString)
@@ -437,3 +437,10 @@ do
     , ''SolanaTxnMessage
     , ''SolanaTxnHeader
     ]
+
+concat <$> traverse (makeLenses)
+  [ ''SolanaTxn
+  , ''SolanaTxnMessage
+  , ''SolanaTxnHeader
+  , ''SolanaTxnInstruction
+  ]

@@ -2,10 +2,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Solana.Utils where
 
-import Control.Lens ((&))
+import Control.Lens ((&), (.~))
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import Crypto.Random.Types
 import Data.Binary
+import qualified Data.ByteArray as ByteArray
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LBS
@@ -44,11 +45,10 @@ roundtrip = dec . enc
     dec = Data.Binary.decode . LBS.fromStrict
     enc = LBS.toStrict . Data.Binary.encode
 
-verifySigs :: SolanaTxn -> Seq.Seq Bool
-verifySigs txn = flip fmap (Seq.zip pks sigs) $ \(pk, sig) -> Ed25519.verify pk msg' sig
+txnSigningInfo :: SolanaTxn -> (BS.ByteString, Seq.Seq (Ed25519.PublicKey, Ed25519.Signature))
+txnSigningInfo txn = (LBS.toStrict $ Data.Binary.encode msg, Seq.zip pks sigs)
   where
     msg = _solanaTxn_message txn
-    msg' = LBS.toStrict $ Data.Binary.encode msg
 
     pks :: Seq.Seq Ed25519.PublicKey
     pks = unCompactArray $ _solanaTxnMessage_accountKeys msg
@@ -56,12 +56,32 @@ verifySigs txn = flip fmap (Seq.zip pks sigs) $ \(pk, sig) -> Ed25519.verify pk 
     sigs :: Seq.Seq Ed25519.Signature
     sigs = unCompactArray (_solanaTxn_signatures txn)
 
-testParsing :: IO ()
-testParsing = do
+verifySigs :: SolanaTxn -> Seq.Seq Bool
+verifySigs txn = flip fmap ed25519 $ \(pk, sig) -> Ed25519.verify pk msg sig
+  where
+    (msg, ed25519) = txnSigningInfo txn
+
+testSolanaClient :: IO ()
+testSolanaClient = do
   let node = def
   contract <- deploySolanaClientContract node defaultSolanaRPCConfig
-  hspec $ describe "Parser " $ do
+
+  hspec $ describe "Solana client" $ do
     let roundtrips x = roundtrip x `shouldBe` x
+        verify expected txn = do
+          let (msg, ed25519) = txnSigningInfo txn
+          let verifies (pk,sig) = do
+                Ed25519.verify pk msg sig `shouldBe` expected
+                res <- runExceptT $ test_ed25519_verify node contract (ByteArray.convert sig) msg (Base58ByteString $ ByteArray.convert pk)
+                res `shouldBe` Right expected
+          for_ ed25519 verifies
+
+    it "accepts valid sigs" $ do
+      verify True txnParsed
+
+    it "rejects invalid sigs" $ do
+      verify False $ txnParsed
+        & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 40
 
     it "parses compact-u16" $ do
       let parses buffer cursor expected@(w16, _) = do
