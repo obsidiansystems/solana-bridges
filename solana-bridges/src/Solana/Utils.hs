@@ -193,35 +193,39 @@ testSolanaClient = do
         res <- runExceptT $ addTransactions node contract slot txns
         res `shouldBe` Right ()
 
-      expectedSigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
-      expectedMsg = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message
+      expectSigs slot txIdx expectedTx = do
+        sigs <- runExceptT $ getSignatures node contract slot txIdx
+        sigs `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_signatures)
 
-      expectSigs expected s tx = do
-        sigs <- runExceptT $ getSignatures node contract s tx
-        sigs `shouldBe` Right expected
-
-      expectMsg expected s tx = do
-        msg <- runExceptT $ getMessage node contract s tx
-        msg `shouldBe` Right expected
-
-      startingSlot = 0
+      expectMsg slot txIdx expectedTx = do
+        msg <- runExceptT $ getMessage node contract slot txIdx
+        msg `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_message)
 
       expectContractDestroyed = do
         res <- runExceptT $ getCode node contract
         res `shouldBe` Right ""
 
-    it "can submit transactions" $ do
-      submitTransactions startingSlot [txnParsed]
-      expectSigs expectedSigs startingSlot 0
-      expectMsg expectedMsg startingSlot 0
+      startingSlot = 0
+      txCopies :: Num a => a
+      txCopies = 300
+
+    it "can submit transactions in bulk" $ do
+      submitTransactions startingSlot $ replicate txCopies txnParsed <> [txnTamperedMessage]
+
+      expectSigs startingSlot 0 txnParsed
+      expectSigs startingSlot 1 txnParsed
+      expectSigs startingSlot txCopies txnParsed
+
+      expectMsg startingSlot 0 txnParsed
+      expectMsg startingSlot 1 txnParsed
+      expectMsg startingSlot txCopies txnTamperedMessage
 
     it "survives on challenge of valid vote signatures" $ do
       submitChallenge startingSlot 0 0
-      expectSigs expectedSigs startingSlot 0
+      submitChallenge startingSlot (txCopies - 1) 0
+
+      expectSigs startingSlot 0 txnParsed
 
     it "self-destructs on challenge of invalid vote signatures" $ do
-      let s = startingSlot + 1
-      submitTransactions s [txnTamperedMessage]
-      expectSigs expectedSigs s 0
-      submitChallenge s 0 0
+      submitChallenge startingSlot txCopies 0
       expectContractDestroyed
