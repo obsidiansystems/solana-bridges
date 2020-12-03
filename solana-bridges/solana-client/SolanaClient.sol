@@ -929,17 +929,17 @@ struct Slot {
         return ed25519_valid(signature, message, pk);
     }
 
-    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public returns (bool) {
+    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public {
         bytes storage message = transactionMessages[slot][transactionIndex];
         bytes storage signatures = transactionSignatures[slot][transactionIndex];
-
         bool valid = verifyVote(signatures, message, instructionIndex);
+
+        // Must happen before self-destruct to be registered
+        emit Success();
+
         if(!valid) {
             selfdestruct(msg.sender);
         }
-
-        emit Success();
-        return valid;
     }
 
     function verifyTransaction(bytes32 /* accountsHash */,

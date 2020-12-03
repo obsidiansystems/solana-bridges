@@ -36,6 +36,10 @@ Right txnBinary = Base64.decode txnBase64
 txnParsed :: SolanaTxn
 txnParsed = Data.Binary.decode $ LBS.fromStrict txnBinary
 
+txnTamperedMessage :: SolanaTxn
+txnTamperedMessage = txnParsed
+  & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 111
+
 roundtrip :: forall b. Binary b => b -> b
 roundtrip = dec . enc
   where
@@ -168,8 +172,7 @@ testSolanaClient = do
       verify True txnParsed
 
     it "rejects invalid sigs" $ do
-      verify False $ txnParsed
-        & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 40
+      verify False txnTamperedMessage
 
     it "verifies vote transactions" $ do
       let sigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
@@ -181,14 +184,44 @@ testSolanaClient = do
 
       test True sigs msg 0
 
-    it "can submit transactions" $ do
-      res <- runExceptT $ addTransactions node contract [txnParsed]
-      res `shouldBe` Right ()
-      sig <- runExceptT $ getSignatures def contract 0 0
-      sig `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
-      msg <- runExceptT $ getMessage def contract 0 0
-      msg `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
+    let
+      submitChallenge slot tx instr = do
+        res <- runExceptT $ challengeVote node contract slot tx instr
+        res `shouldBe` Right ()
 
-    it "can challenge" $ do
-      res <- runExceptT $ challengeVote' node contract 0 0 0
-      res `shouldBe` Right False
+      submitTransactions slot txns = do
+        res <- runExceptT $ addTransactions node contract slot txns
+        res `shouldBe` Right ()
+
+      expectedSigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
+      expectedMsg = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message
+
+      expectSigs expected s tx = do
+        sigs <- runExceptT $ getSignatures node contract s tx
+        sigs `shouldBe` Right expected
+
+      expectMsg expected s tx = do
+        msg <- runExceptT $ getMessage node contract s tx
+        msg `shouldBe` Right expected
+
+      startingSlot = 0
+
+      expectContractDestroyed = do
+        res <- runExceptT $ getCode node contract
+        res `shouldBe` Right ""
+
+    it "can submit transactions" $ do
+      submitTransactions startingSlot [txnParsed]
+      expectSigs expectedSigs startingSlot 0
+      expectMsg expectedMsg startingSlot 0
+
+    it "survives on challenge of valid vote signatures" $ do
+      submitChallenge startingSlot 0 0
+      expectSigs expectedSigs startingSlot 0
+
+    it "self-destructs on challenge of invalid vote signatures" $ do
+      let s = startingSlot + 1
+      submitTransactions s [txnTamperedMessage]
+      expectSigs expectedSigs s 0
+      submitChallenge s 0 0
+      expectContractDestroyed
