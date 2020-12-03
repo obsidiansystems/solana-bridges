@@ -189,15 +189,14 @@ testSolanaClient = do
         res <- runExceptT $ challengeVote node contract slot tx instr
         res `shouldBe` Right ()
 
-      submitTransactions slot txns = do
-        res <- runExceptT $ addTransactions node contract slot txns
+      submitTransactions txnsWithSlot = do
+        res <- runExceptT $ addTransactions node contract txnsWithSlot
         res `shouldBe` Right ()
 
-      expectSigs slot txIdx expectedTx = do
+      expectTx slot txIdx expectedTx = do
         sigs <- runExceptT $ getSignatures node contract slot txIdx
         sigs `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_signatures)
 
-      expectMsg slot txIdx expectedTx = do
         msg <- runExceptT $ getMessage node contract slot txIdx
         msg `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_message)
 
@@ -205,27 +204,38 @@ testSolanaClient = do
         res <- runExceptT $ getCode node contract
         res `shouldBe` Right ""
 
-      startingSlot = 0
-      txCopies :: Num a => a
-      txCopies = 300
+    do
+      let
+        startingSlot = 0
 
-    it "can submit transactions in bulk" $ do
-      submitTransactions startingSlot $ replicate txCopies txnParsed <> [txnTamperedMessage]
+        txsPerSlot :: Num a => a
+        txsPerSlot = 10
 
-      expectSigs startingSlot 0 txnParsed
-      expectSigs startingSlot 1 txnParsed
-      expectSigs startingSlot txCopies txnParsed
+        txCopies :: Word64
+        txCopies = 300
 
-      expectMsg startingSlot 0 txnParsed
-      expectMsg startingSlot 1 txnParsed
-      expectMsg startingSlot txCopies txnTamperedMessage
+        tamperedSlot = startingSlot + txCopies `div` txsPerSlot --TODO: roundup when fractional
 
-    it "survives on challenge of valid vote signatures" $ do
-      submitChallenge startingSlot 0 0
-      submitChallenge startingSlot (txCopies - 1) 0
+        copies = flip fmap [0..txCopies-1] $ \i ->
+          (startingSlot + (i `div` txsPerSlot), txnParsed)
 
-      expectSigs startingSlot 0 txnParsed
+      it "can submit transactions in bulk" $ do
+        submitTransactions $ copies <> [(tamperedSlot, txnTamperedMessage)]
 
-    it "self-destructs on challenge of invalid vote signatures" $ do
-      submitChallenge startingSlot txCopies 0
-      expectContractDestroyed
+        expectTx startingSlot       0                txnParsed
+        expectTx startingSlot       (txsPerSlot - 1) txnParsed
+        expectTx (startingSlot + 1) 0                txnParsed
+        expectTx (startingSlot + 2) (txsPerSlot - 1) txnParsed
+        expectTx tamperedSlot       0                txnTamperedMessage
+
+      it "survives on challenge of valid vote signatures" $ do
+        submitChallenge startingSlot 0 0
+        submitChallenge startingSlot 1 0
+        submitChallenge (startingSlot + 1) 0 0
+        submitChallenge (startingSlot + 1) 1 0
+
+        expectTx startingSlot 0 txnParsed
+
+      it "self-destructs on challenge of invalid vote signatures" $ do
+        submitChallenge tamperedSlot 0 0
+        expectContractDestroyed

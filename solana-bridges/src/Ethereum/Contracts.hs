@@ -134,21 +134,19 @@ addTransactions
   :: (MonadIO m, MonadError String m)
   => Eth.Provider
   -> Address
-  -> Word64
-  -> [SolanaTxn]
+  -> [(Word64, SolanaTxn)]
   -> m ()
-addTransactions node ca slot txs = do
- liftIO $ print sigSizes
- liftIO $ print msgsSizes
+addTransactions node ca txs = do
  submit node ca "addTransactions" $ Contracts.addTransactions
-  (fromIntegral slot)
-  (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
+  (fromIntegral <$> slots)
   (fromIntegral <$> (sigSizes `alternated` msgsSizes))
+  (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
   where
-    (sigs, sigSizes) = unzip $ flip fmap txs $ \tx ->
+    slots = fmap fst txs
+    (sigs, sigSizes) = unzip $ flip fmap txs $ \(_, tx) ->
       let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_signatures)
       in (bs, BS.length bs)
-    (msgs, msgsSizes) = unzip $ flip fmap txs $ \tx ->
+    (msgs, msgsSizes) = unzip $ flip fmap txs $ \(_, tx) ->
       let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_message)
       in (bs, BS.length bs)
     alternated xs ys = zip xs ys >>= (\(x,y) -> [x,y])
