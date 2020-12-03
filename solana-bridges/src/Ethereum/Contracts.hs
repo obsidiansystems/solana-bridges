@@ -142,10 +142,8 @@ addTransactions node ca slot txs = do
  liftIO $ print msgsSizes
  submit node ca "addTransactions" $ Contracts.addTransactions
   (fromIntegral slot)
-  (ByteArray.convert $ BS.concat sigs)
-  (ByteArray.convert $ BS.concat msgs)
-  (fromIntegral <$> sigSizes)
-  (fromIntegral <$> msgsSizes)
+  (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
+  (fromIntegral <$> (sigSizes `alternated` msgsSizes))
   where
     (sigs, sigSizes) = unzip $ flip fmap txs $ \tx ->
       let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_signatures)
@@ -153,6 +151,7 @@ addTransactions node ca slot txs = do
     (msgs, msgsSizes) = unzip $ flip fmap txs $ \tx ->
       let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_message)
       in (bs, BS.length bs)
+    alternated xs ys = zip xs ys >>= (\(x,y) -> [x,y])
 
 challengeVote
   :: (MonadIO m, MonadError String m)
