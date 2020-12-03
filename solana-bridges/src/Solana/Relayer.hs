@@ -9,6 +9,7 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -649,9 +650,10 @@ deploySolanaClientContract node solanaConfig = do
       let
         slotLeader0 :: Base58ByteString
         slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
-      runExceptT $ initialize node ca slot0 block0 slotLeader0 epochSchedule
-
-    liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
+      runExceptT $ do
+        initialize node ca slot0 block0 slotLeader0 epochSchedule
+        sendTransactions node ca [(slot0, block0)]
+        liftIO $ hPutStrLn stderr $ "Initialized contract with slot " <> show slot0
 
   case res of
     Left err -> error err
@@ -740,6 +742,11 @@ relaySolanaToEthereum node solanaConfig ca = do
               Left _ -> pure ()
               Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
 
+            liftIO $ putStrLn $ "Sending vote transactions"
+            runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
+              Left bad -> error $ show bad
+              Right () -> pure ()
+
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
 
@@ -753,6 +760,11 @@ relaySolanaToEthereum node solanaConfig ca = do
 
   putStrLn "All done - network can be stopped now"
 
+sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m ()
+sendTransactions node ca blocksAndSlots = do
+  let txs = join $ flip fmap blocksAndSlots $ \(s,b) ->
+        fmap (s,) $ fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b
+  addTransactions node ca txs
 
 data ContractConfig = ContractConfig
  { _contractConfig_programId :: Text
