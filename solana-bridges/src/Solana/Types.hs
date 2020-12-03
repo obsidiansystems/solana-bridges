@@ -238,12 +238,12 @@ instance ToJSON SolanaTxnInstruction where
 instance FromJSON SolanaTxnInstruction where
   parseJSON = withObject "SolanaTxnInstruction" $ \v -> SolanaTxnInstruction
     <$> v .: "programIdIndex"
-    <*> (v .: "accounts" <&> (CompactByteArray . LBS.pack)) --parseJSON -- pure (CompactByteArray "") --v .: "accounts"
+    <*> (v .: "accounts" <&> (CompactByteArray . LBS.pack))
     <*> ((v .: "data") >>= parseData)
     where
       parseData txt = case parseBase58ByteString txt of
-        Nothing -> fail "bah"
-        Just bs -> pure $ CompactByteArray $ LBS.fromStrict $ unBase58ByteString bs  --pure (CompactByteArray "") --v .: "data"
+        Nothing -> fail "invalid base58"
+        Just bs -> pure $ CompactByteArray $ LBS.fromStrict $ unBase58ByteString bs
 
 isVoteTxn :: SolanaTxn -> Bool
 isVoteTxn txn = any isVoteInstr (_solanaTxnMessage_instructions $ _solanaTxn_message txn)
