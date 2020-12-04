@@ -118,8 +118,8 @@ addBlocks
   -> [(Word64, SolanaCommittedBlock)]
   -> Map Word64 SolanaLeaderSchedule
   -> SolanaEpochSchedule
-  -> m ()
-addBlocks node ca blocks leaderSchedule epochSchedule = void $ submit node ca "addBlocks" $ Contracts.addBlocks
+  -> m Eth.TxReceipt
+addBlocks node ca blocks leaderSchedule epochSchedule = submit node ca "addBlocks" $ Contracts.addBlocks
   (word64ToSol . fst <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
   (word64ToSol . _solanaCommittedBlock_parentSlot . snd <$> blocks)
@@ -135,9 +135,9 @@ addTransactions
   => Eth.Provider
   -> Address
   -> [(Word64, SolanaTxn)]
-  -> m ()
+  -> m Eth.TxReceipt
 addTransactions node ca txs = do
- submit node ca "addTransactions" $ Contracts.addTransactions
+ submit node ca "addTransactions" $ Eth.send $ Contracts.AddTransactionsData
   (fromIntegral <$> slots)
   (fromIntegral <$> (sigSizes `alternated` msgsSizes))
   (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
@@ -158,21 +158,9 @@ challengeVote
   -> Word64
   -> Word64
   -> Word64
-  -> m ()
+  -> m Eth.TxReceipt
 challengeVote node ca slot tx instruction = submit node ca "challengeVote"
   $ Contracts.challengeVote (fromIntegral slot) (fromIntegral tx) (fromIntegral instruction)
-
-challengeVote'
-  :: (MonadError String m, MonadIO m)
-  => Eth.Provider
-  -> Address
-  -> Word64
-  -> Word64
-  -> Word64
-  -> m Eth.TxReceipt
-challengeVote' node ca slot transactionIndex instructionIndex =
-  simulate node ca "challengeVote"
-  $ Contracts.challengeVote (fromIntegral slot) (fromIntegral transactionIndex) (fromIntegral instructionIndex)
 
 verifyVote_gas
   :: (MonadError String m, MonadIO m)
@@ -400,12 +388,14 @@ simulate node ca name x = do
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
     Right r -> pure r
 
-submit :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 Eth.TxReceipt -> m ()
+submit :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> String -> Eth.DefaultAccount Eth.Web3 Eth.TxReceipt -> m Eth.TxReceipt
 submit node ca name x = do
   let qname = "'" <> name <> "'"
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
-    Right r -> when (null $ Eth.receiptLogs r) $ throwError "Contract execution did not produce any logs" --TODO: expose more info in hs-web3
+    Right r -> do
+      when (Just 1 /= Eth.receiptStatus r) $ throwError "Contract execution did not report success"
+      pure r
 
 getCode :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m HexString
 getCode node ca = do

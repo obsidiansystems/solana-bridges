@@ -1,8 +1,10 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Solana.Utils where
 
 import Control.Lens ((&), (.~))
+import Control.Monad.Except (MonadError, MonadIO, runExceptT)
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import Crypto.Random.Types
 import Data.Binary
@@ -13,8 +15,9 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Default
 import Data.Foldable
 import qualified Data.Sequence as Seq
-
-import Control.Monad.Except (runExceptT)
+import qualified Data.Solidity.Prim.Address as Solidity
+import qualified Network.Ethereum.Api.Types as Eth
+import qualified Network.Web3.Provider as Eth
 import Test.Hspec (it, describe, hspec, shouldBe)
 
 import Ethereum.Contracts
@@ -25,6 +28,13 @@ mkSignature :: MonadRandom m => BS.ByteString -> m Ed25519.Signature
 mkSignature msg = do
   sk <- Ed25519.generateSecretKey
   pure $ Ed25519.sign sk (Ed25519.toPublic sk) msg
+
+getTransaction :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> Word64 -> m SolanaTxn
+getTransaction node contract slot txIdx = do
+  sigs <- getSignatures node contract slot txIdx
+  msg <- getMessage node contract slot txIdx
+  pure $ Data.Binary.decode $ LBS.fromStrict $ sigs <> msg
+
 
 -- curl base64
 txnBase64 :: BS.ByteString
@@ -79,14 +89,6 @@ testSolanaClient = do
 
       v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
       vi' = SolanaVoteInstruction_Vote v'
-
-  res' <- runExceptT $ verifyVote_gas
-    node
-    contract
-    (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures)
-    (LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_message)
-    0
-  print res'
 
   hspec $ describe "Solana client" $ do
     let roundtrips x = roundtrip x `shouldBe` x
@@ -187,18 +189,15 @@ testSolanaClient = do
     let
       submitChallenge slot tx instr = do
         res <- runExceptT $ challengeVote node contract slot tx instr
-        res `shouldBe` Right ()
+        fmap Eth.receiptStatus res `shouldBe` Right (Just 1)
 
       submitTransactions txnsWithSlot = do
         res <- runExceptT $ addTransactions node contract txnsWithSlot
-        res `shouldBe` Right ()
+        fmap Eth.receiptStatus res `shouldBe` Right (Just 1)
 
       expectTx slot txIdx expectedTx = do
-        sigs <- runExceptT $ getSignatures node contract slot txIdx
-        sigs `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_signatures)
-
-        msg <- runExceptT $ getMessage node contract slot txIdx
-        msg `shouldBe` Right (LBS.toStrict $ Data.Binary.encode $ expectedTx & _solanaTxn_message)
+        tx <- runExceptT $ getTransaction node contract slot txIdx
+        tx `shouldBe` Right expectedTx
 
       expectContractDestroyed = do
         res <- runExceptT $ getCode node contract

@@ -653,7 +653,7 @@ deploySolanaClientContract node solanaConfig = do
         slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
       runExceptT $ do
         initialize node ca slot0 block0 slotLeader0 epochSchedule
-        sendTransactions node ca [(slot0, block0)]
+        void $ sendTransactions node ca [(slot0, block0)]
         liftIO $ hPutStrLn stderr $ "Initialized contract with slot " <> show slot0
 
   case res of
@@ -736,11 +736,11 @@ relaySolanaToEthereum node solanaConfig ca = do
           when (not $ null confirmedBlocks) $ do
             liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
             lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
-              Right () -> pure ()
               Left bad -> error $ show bad
+              Right receipt -> liftIO $ putStrLn $ "Gas cost: " <> show (Eth.receiptGasUsed receipt)
             runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
               Left bad -> error $ show bad
-              Right () -> pure ()
+              Right receipt -> liftIO $ putStrLn $ "Gas cost: " <> show (Eth.receiptGasUsed receipt)
             for_ blocksAndSlots $ \(s, b) -> do
               liftIO $ putStrLn $ "Slot " <> show s
               liftIO $ putStr $ showBlockInstructions b
@@ -790,7 +790,7 @@ showBlockInstructions b = showBlock
     showBlock = unlines $ imap (showTransaction 1) $ _solanaCommittedBlock_transactions b
     indent depth = (replicate depth ' ' <>)
 
-sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m ()
+sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m Eth.TxReceipt
 sendTransactions node ca blocksAndSlots = do
   let txs = join $ flip fmap blocksAndSlots $ \(s,b) ->
         fmap (s,) $ fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b
