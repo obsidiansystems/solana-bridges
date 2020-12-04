@@ -598,8 +598,6 @@ struct Slot {
     mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
     mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
 
-    event Success();
-
     constructor () public {
         creator = msg.sender;
     }
@@ -632,8 +630,6 @@ struct Slot {
         slotsPerEpoch = scheduleSlotsPerEpoch;
 
         initialized = true;
-
-        emit Success();
     }
 
     function authorize() internal view {
@@ -652,13 +648,11 @@ struct Slot {
         authorize();
         for(uint i = 0; i < blockSlots.length; i++)
             addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i], leaders[i]);
-        emit Success();
     }
 
     function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leaderPublicKey) external {
         authorize();
         addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash, leaderPublicKey);
-        emit Success();
     }
 
     function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leader) private {
@@ -702,7 +696,6 @@ struct Slot {
 
             x++;
         }
-        emit Success();
     }
 
     function slotOffset(uint64 s) private pure returns (uint64) {
@@ -935,9 +928,6 @@ struct Slot {
         bytes storage message = transactionMessages[slot][transactionIndex];
         bytes storage signatures = transactionSignatures[slot][transactionIndex];
         bool valid = verifyVote(signatures, message, instructionIndex);
-
-        // Must happen before self-destruct to be registered
-        emit Success();
 
         if(!valid) {
             selfdestruct(msg.sender);
