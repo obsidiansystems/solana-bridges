@@ -639,38 +639,32 @@ struct Slot {
             revert("Sender not trusted");
     }
 
-    function addBlocks(uint64[] calldata blockSlots,
+    function addBlocks(uint64 parentSlot,
+                       bytes32 parentBlockHash,
+                       uint64[] calldata blockSlots,
                        bytes32[] calldata blockHashes,
-                       uint64[] calldata parentSlots,
-                       bytes32[] calldata parentBlockHashes,
                        bytes32[] calldata leaders
                        ) external {
         authorize();
-        for(uint i = 0; i < blockSlots.length; i++)
-            addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i], leaders[i]);
-    }
 
-    function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leaderPublicKey) external {
-        authorize();
-        addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash, leaderPublicKey);
-    }
-
-    function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leader) private {
-        if(slot <= lastSlot)
+        if(blockSlots[0] <= lastSlot)
             revert("Already seen slot");
         if(parentSlot != lastSlot)
             revert("Unexpected parent slot");
         if(parentBlockHash != lastHash)
             revert("Unexpected parent hash");
 
-        for(uint64 s = lastSlot + 1; s < slot; s++) {
+        for(uint64 s = lastSlot + 1; s < blockSlots[0]; s++) {
             emptySlot(s);
         }
-        fillSlot(slot, blockHash, leader);
 
-        lastSlot = slot;
-        lastHash = blockHash;
-        seenBlocks++;
+        for(uint i = 0; i < blockSlots.length; i++) {
+            fillSlot(blockSlots[i], blockHashes[i], leaders[i]);
+        }
+
+        seenBlocks += uint64(blockSlots.length);
+        lastSlot = blockSlots[blockSlots.length-1];
+        lastHash = blockHashes[blockHashes.length-1];
     }
 
     // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231

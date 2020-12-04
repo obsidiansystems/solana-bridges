@@ -120,10 +120,10 @@ addBlocks
   -> SolanaEpochSchedule
   -> m Eth.TxReceipt
 addBlocks node ca blocks leaderSchedule epochSchedule = submit node ca "addBlocks" $ Contracts.addBlocks
+  (word64ToSol . _solanaCommittedBlock_parentSlot . snd . head $ blocks)
+  (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd . head $ blocks)
   (word64ToSol . fst <$> blocks)
   (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
-  (word64ToSol . _solanaCommittedBlock_parentSlot . snd <$> blocks)
-  (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd <$> blocks)
   (unsafeBytes32ToSol . (mergedSchedules Map.!) . fst <$> blocks)
   where
     mergedSchedules = ifoldMap (\(epoch, leaderPk) slotIndices ->
