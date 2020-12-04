@@ -79,6 +79,7 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -737,15 +738,17 @@ relaySolanaToEthereum node solanaConfig ca = do
             lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
               Right () -> pure ()
               Left bad -> error $ show bad
+            runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
+              Left bad -> error $ show bad
+              Right () -> pure ()
+            for_ blocksAndSlots $ \(s, b) -> do
+              liftIO $ putStrLn $ "Slot " <> show s
+              liftIO $ putStr $ showBlockInstructions b
+
             liftIO $ putStrLn "Submitted new slots to contract"
             runExceptT (getSeenBlocks node ca) >>= \case
               Left _ -> pure ()
               Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
-
-            liftIO $ putStrLn $ "Sending vote transactions"
-            runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
-              Left bad -> error $ show bad
-              Right () -> pure ()
 
           when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
@@ -759,6 +762,33 @@ relaySolanaToEthereum node solanaConfig ca = do
     Right _ -> pure ()
 
   putStrLn "All done - network can be stopped now"
+
+showBlockInstructions :: SolanaCommittedBlock -> String
+showBlockInstructions b = showBlock
+  where
+    lookupProgram m i =
+      Seq.lookup
+      (fromIntegral $ _solanaTxnInstruction_programIdIndex i)
+      (unCompactArray $ _solanaTxnMessage_accountKeys m)
+
+    showProgram p = if p == solanaVoteProgram
+                    then "Vote111111111111111111111111111111111111111"
+                    else show p
+
+    showTransaction depth idxT t = unlines $ header : imap (showInstruction (depth+1)) instructions
+      where
+        m = _solanaTxn_message $ _solanaTxnWithMeta_transaction t
+        instructions = toList $ _solanaTxnMessage_instructions $ m
+        header = indent depth $ "Transaction " <> show idxT
+
+        showInstruction depth' idxI i = indent depth' $ intercalate " "
+          [ "Instruction"
+          , show idxI <> ":"
+          , maybe "Invalid index" showProgram (lookupProgram m i)
+          ]
+
+    showBlock = unlines $ imap (showTransaction 1) $ _solanaCommittedBlock_transactions b
+    indent depth = (replicate depth ' ' <>)
 
 sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m ()
 sendTransactions node ca blocksAndSlots = do
