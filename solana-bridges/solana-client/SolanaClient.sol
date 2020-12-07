@@ -680,18 +680,20 @@ struct Slot {
                              bytes calldata transactions // [(signature, messages)]
                              ) external {
         authorize();
-        uint startOffset; uint endOffset; uint64 x;
+        uint startOffset; uint endOffset; uint64 x; uint64 s;
         for(uint64 i = 0; i < (sizes.length / 2); i++) {
-            if (i == 0 || txSlots[i] != txSlots[i-1]) {
+            s = txSlots[i];
+
+            if (i == 0 || s != txSlots[i-1]) {
                 x = 0;
             }
 
             endOffset += sizes[2*i];
-            transactionSignatures[txSlots[i]][x] = bytes(transactions[startOffset:endOffset]);
+            transactionSignatures[s][x] = bytes(transactions[startOffset:endOffset]);
             startOffset = endOffset;
 
             endOffset += sizes[2*i+1];
-            transactionMessages[txSlots[i]][x] = bytes(transactions[startOffset:endOffset]);
+            transactionMessages[s][x] = bytes(transactions[startOffset:endOffset]);
             startOffset = endOffset;
 
             x++;
