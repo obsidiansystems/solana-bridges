@@ -3,8 +3,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Solana.Utils where
 
-import Control.Lens ((&), (.~))
+import Control.Lens (mapped, (&), (.~))
 import Control.Monad.Except (MonadError, MonadIO, runExceptT)
+import Crypto.Hash (Digest, SHA256, hash)
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import Crypto.Random.Types
 import Data.Binary
@@ -46,10 +47,6 @@ Right txnBinary = Base64.decode txnBase64
 txnParsed :: SolanaTxn
 txnParsed = Data.Binary.decode $ LBS.fromStrict txnBinary
 
-txnTamperedMessage :: SolanaTxn
-txnTamperedMessage = txnParsed
-  & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 111
-
 roundtrip :: forall b. Binary b => b -> b
 roundtrip = dec . enc
   where
@@ -66,6 +63,9 @@ txnSigningInfo txn = (LBS.toStrict $ Data.Binary.encode msg, Seq.zip pks sigs)
 
     sigs :: Seq.Seq Ed25519.Signature
     sigs = unCompactArray (_solanaTxn_signatures txn)
+
+sha256 :: BS.ByteString -> Digest SHA256
+sha256 = hash
 
 verifySigs :: SolanaTxn -> Seq.Seq Bool
 verifySigs txn = flip fmap ed25519 $ \(pk, sig) -> Ed25519.verify pk msg sig
@@ -89,6 +89,16 @@ testSolanaClient = do
 
       v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
       vi' = SolanaVoteInstruction_Vote v'
+
+      -- VoteSwitch's Hash is of a switching proof which is currently unused since optimistic confirmation proofs are not yet implemented
+      madeUpHash = sha256 "0x1234567890"
+      vs = SolanaVoteInstruction_VoteSwitch v madeUpHash
+
+      txnTamperedMessageHeader = txnParsed
+        & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 111
+
+      txnTamperedVoteSwitch = txnParsed
+        & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode vs)
 
   hspec $ describe "Solana client" $ do
     let roundtrips x = roundtrip x `shouldBe` x
@@ -129,11 +139,11 @@ testSolanaClient = do
         res `shouldBe` Right (i, fromIntegral (BS.length buffer))
 
     it "parses bytes32" $ do
-      let hash = txnParsed & _solanaTxn_message & _solanaTxnMessage_recentBlockhash
-      roundtrips hash
-      let buffer = LBS.toStrict $ Data.Binary.encode hash
+      let blockHash = txnParsed & _solanaTxn_message & _solanaTxnMessage_recentBlockhash
+      roundtrips blockHash
+      let buffer = LBS.toStrict $ Data.Binary.encode blockHash
       res <- runExceptT $ parseBytes32 node contract buffer 0
-      res `shouldBe` Right (sha256ToBytes32 hash, 32)
+      res `shouldBe` Right (sha256ToBytes32 blockHash, 32)
 
     it "parses signatures" $ do
       let parse sig = do
@@ -174,7 +184,8 @@ testSolanaClient = do
       verify True txnParsed
 
     it "rejects invalid sigs" $ do
-      verify False txnTamperedMessage
+      verify False txnTamperedMessageHeader
+      verify False txnTamperedVoteSwitch
 
     it "verifies vote transactions" $ do
       let sigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
@@ -219,13 +230,13 @@ testSolanaClient = do
           (startingSlot + (i `div` txsPerSlot), txnParsed)
 
       it "can submit transactions in bulk" $ do
-        submitTransactions $ copies <> [(tamperedSlot, txnTamperedMessage)]
+        submitTransactions $ copies <> [(tamperedSlot, txnTamperedVoteSwitch)]
 
         expectTx startingSlot       0                txnParsed
         expectTx startingSlot       (txsPerSlot - 1) txnParsed
         expectTx (startingSlot + 1) 0                txnParsed
         expectTx (startingSlot + 2) (txsPerSlot - 1) txnParsed
-        expectTx tamperedSlot       0                txnTamperedMessage
+        expectTx tamperedSlot       0                txnTamperedVoteSwitch
 
       it "survives on challenge of valid vote signatures" $ do
         submitChallenge startingSlot 0 0

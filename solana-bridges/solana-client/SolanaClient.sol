@@ -909,8 +909,8 @@ struct Slot {
         uint tag;
         uint cursor;
         (tag, cursor) = parseUint32LE(data, 0);
-        if (tag != 2) {
-            revert("Not a vote instruction");
+        if (tag != 2 && tag != 6) {
+            revert("Not a Vote nor VoteSwitch instruction");
         }
         SolanaVote memory vote;
         (vote, cursor) = parseVote(data, cursor);
