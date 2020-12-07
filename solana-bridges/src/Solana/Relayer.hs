@@ -771,11 +771,9 @@ showBlockInstructions b = showBlock
       (fromIntegral $ _solanaTxnInstruction_programIdIndex i)
       (unCompactArray $ _solanaTxnMessage_accountKeys m)
 
-    showProgram p = if p == solanaVoteProgram
-                    then "Vote111111111111111111111111111111111111111"
-                    else show p
+    showProgram p = fromMaybe (show p) $ show <$> findWellKnownProgram p
 
-    showTransaction depth idxT t = unlines $ header : imap (showInstruction (depth+1)) instructions
+    showTransaction depth idxT t = intercalate "\n" $ header : imap (showInstruction (depth+1)) instructions
       where
         m = _solanaTxn_message $ _solanaTxnWithMeta_transaction t
         instructions = toList $ _solanaTxnMessage_instructions $ m
