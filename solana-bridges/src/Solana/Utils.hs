@@ -216,7 +216,8 @@ testSolanaClient = do
 
     do
       let
-        startingSlot = 0
+        [votedOnSlot] = v & _solanaVote_slots & toList
+        startingSlot = 1 + fromIntegral votedOnSlot
 
         txsPerSlot :: Num a => a
         txsPerSlot = 10
@@ -230,7 +231,12 @@ testSolanaClient = do
           (startingSlot + (i `div` txsPerSlot), txnParsed)
 
       it "can submit transactions in bulk" $ do
-        submitTransactions $ copies <> [(tamperedSlot, txnTamperedVoteSwitch)]
+        let txs = copies <> [(tamperedSlot, txnTamperedVoteSwitch)]
+        submitTransactions txs
+
+        for_ (_solanaVote_slots v) $ \s -> do
+          res <- runExceptT $ getVoteCounts node contract (fromIntegral s)
+          res `shouldBe` Right (fromIntegral $ length txs)
 
         expectTx startingSlot       0                txnParsed
         expectTx startingSlot       (txsPerSlot - 1) txnParsed

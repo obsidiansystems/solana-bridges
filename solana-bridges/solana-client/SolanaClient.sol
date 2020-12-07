@@ -594,6 +594,8 @@ struct Slot {
     uint64 public lastSlot;
     Slot[HISTORY_SIZE] public slots;
 
+    mapping (uint64 => uint64) public voteCounts;
+
     // slot => transactionIndex => _
     mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
     mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
@@ -680,9 +682,9 @@ struct Slot {
                              bytes calldata transactions // [(signature, messages)]
                              ) external {
         authorize();
-        uint startOffset; uint endOffset; uint64 x; uint64 s;
+        uint startOffset; uint endOffset; uint64 x;
         for(uint64 i = 0; i < (sizes.length / 2); i++) {
-            s = txSlots[i];
+            uint64 s = txSlots[i];
 
             if (i == 0 || s != txSlots[i-1]) {
                 x = 0;
@@ -693,8 +695,11 @@ struct Slot {
             startOffset = endOffset;
 
             endOffset += sizes[2*i+1];
-            transactionMessages[s][x] = bytes(transactions[startOffset:endOffset]);
+            bytes memory message = bytes(transactions[startOffset:endOffset]);
+            transactionMessages[s][x] = message;
             startOffset = endOffset;
+
+            countVotes(s, message);
 
             x++;
         }
@@ -899,6 +904,34 @@ struct Slot {
         revert("Invalid Compact-u16");
     }
 
+    uint256 constant voteTag = 2;
+    uint256 constant voteSwitchTag = 6;
+
+    function countVotes(uint64 slot, bytes memory message) public {
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        for(uint i = 0; i < parsedMessage.instructions.length; i++) {
+            SolanaInstruction memory instruction = parsedMessage.instructions[i];
+
+            // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+            bytes memory data = instruction.data;
+            uint tag;
+            uint cursor;
+            (tag, cursor) = parseUint32LE(data, 0);
+            if (tag != voteTag && tag != voteSwitchTag) {
+                continue;
+            }
+
+            uint64 length; uint64 voteSlot;
+            (length, cursor) = parseUint64LE(data, cursor);
+            for(uint j = 0; j < length; j++) {
+                (voteSlot, cursor) = parseUint64LE(data, cursor);
+                if(voteSlot + 32 < slot || slot <= voteSlot)
+                    revert("Voting for invalid slot");
+                voteCounts[voteSlot]++;
+            }
+        }
+    }
+
     function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
         uint signaturesCount; uint signaturesOffset;
         (signaturesCount, signaturesOffset) = parseCompactWord16(signatures, 0);
@@ -911,7 +944,7 @@ struct Slot {
         uint tag;
         uint cursor;
         (tag, cursor) = parseUint32LE(data, 0);
-        if (tag != 2 && tag != 6) {
+        if (tag != voteTag && tag != voteSwitchTag) {
             revert("Not a Vote nor VoteSwitch instruction");
         }
         SolanaVote memory vote;
