@@ -394,7 +394,7 @@ submit node ca name x = do
   runWeb3' node (invokeContract ca x) >>= \case
     Left err -> throwError $ "Failed " <> qname <> ": " <> show err
     Right r -> do
-      when (Just 1 /= Eth.receiptStatus r) $ throwError "Contract execution did not report success"
+      when (Just 1 /= Eth.receiptStatus r) $ throwError "Contract execution reported failure"
       pure r
 
 getCode :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m HexString

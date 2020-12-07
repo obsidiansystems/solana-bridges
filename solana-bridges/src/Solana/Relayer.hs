@@ -17,7 +17,7 @@
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (forConcurrently_, withAsync)
+import Control.Concurrent.Async (concurrently, forConcurrently_, withAsync)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
@@ -735,15 +735,20 @@ relaySolanaToEthereum node solanaConfig ca = do
               ]
           when (not $ null confirmedBlocks) $ do
             liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-            lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
-              Left bad -> error $ show bad
-              Right receipt -> liftIO $ putStrLn $ "Gas cost: " <> show (Eth.receiptGasUsed receipt)
-            runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
-              Left bad -> error $ show bad
-              Right receipt -> liftIO $ putStrLn $ "Gas cost: " <> show (Eth.receiptGasUsed receipt)
             for_ blocksAndSlots $ \(s, b) -> do
               liftIO $ putStrLn $ "Slot " <> show s
               liftIO $ putStr $ showBlockInstructions b
+
+            let
+              addBlocks' = runExceptT (addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
+                Left bad -> error $ show bad
+                Right receipt -> liftIO $ putStrLn $ "addBlocks gas cost: " <> show (Eth.receiptGasUsed receipt)
+
+              sendTransactions' = runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
+                Left bad -> error $ show bad
+                Right receipt -> liftIO $ putStrLn $ "addTransactions gas cost: " <> show (Eth.receiptGasUsed receipt)
+
+            void $ lift $ concurrently addBlocks' sendTransactions'
 
             liftIO $ putStrLn "Submitted new slots to contract"
             runExceptT (getSeenBlocks node ca) >>= \case
