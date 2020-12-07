@@ -778,20 +778,14 @@ showBlockInstructions b = showBlock
 
     showProgram p = fromMaybe (show p) $ show <$> findWellKnownProgram p
 
-    showTransaction depth idxT t = intercalate "\n" $ header : imap (showInstruction (depth+1)) instructions
+    showTransaction idxT t = "  Transaction " <> show idxT <> ": " <> intercalate ", " (imap showInstruction instructions)
       where
         m = _solanaTxn_message $ _solanaTxnWithMeta_transaction t
         instructions = toList $ _solanaTxnMessage_instructions $ m
-        header = indent depth $ "Transaction " <> show idxT
+        showInstruction idxI i = maybe (error malformed) showProgram (lookupProgram m i)
+          where malformed = "Malformed instruction #" <> show idxI <>  " has invalid program index: " <> show t
 
-        showInstruction depth' idxI i = indent depth' $ intercalate " "
-          [ "Instruction"
-          , show idxI <> ":"
-          , maybe "Invalid index" showProgram (lookupProgram m i)
-          ]
-
-    showBlock = unlines $ imap (showTransaction 1) $ _solanaCommittedBlock_transactions b
-    indent depth = (replicate depth ' ' <>)
+    showBlock = unlines $ imap showTransaction $ _solanaCommittedBlock_transactions b
 
 sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m Eth.TxReceipt
 sendTransactions node ca blocksAndSlots = do
