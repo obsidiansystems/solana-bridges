@@ -75,7 +75,7 @@ verifySigs txn = flip fmap ed25519 $ \(pk, sig) -> Ed25519.verify pk msg sig
 testSolanaClient :: IO ()
 testSolanaClient = do
   let node = def
-  contract <- deploySolanaClientContract node defaultSolanaRPCConfig
+  (contract, _slot0) <- deploySolanaClientContract node defaultSolanaRPCConfig
 
   let [vi] = txnParsed
         & _solanaTxn_message
@@ -114,6 +114,10 @@ testSolanaClient = do
                 res <- runExceptT $ test_ed25519_verify node contract (ByteArray.convert sig) msg (Base58ByteString $ ByteArray.convert pk)
                 res `shouldBe` Right expected
           for_ ed25519 verifies
+
+    it "has enough balance for challenge payout" $ do
+      res <- runExceptT $ getBalance node contract
+      res `shouldBe` Right challengePayout
 
     it "parses compact-u16" $ do
       let parses buffer cursor expected@(w16, _) = do

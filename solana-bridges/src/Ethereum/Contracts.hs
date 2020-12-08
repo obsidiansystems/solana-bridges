@@ -44,7 +44,7 @@ import qualified Data.Sequence as Sequence
 import qualified Data.Solidity.Prim.Bytes as Solidity
 import qualified Data.Solidity.Prim.Int as Solidity
 import qualified Network.Ethereum.Account as Eth
-import qualified Network.Ethereum.Api.Eth as Eth (getCode)
+import qualified Network.Ethereum.Api.Eth as Eth (getBalance, getCode)
 import qualified Network.Ethereum.Api.Types as Eth (TxReceipt(..), DefaultBlock(Latest))
 import qualified Network.Ethereum.Unit as Eth
 import qualified Network.Web3.Provider as Eth
@@ -406,3 +406,9 @@ getCode node ca = do
   runWeb3' node (Eth.getCode ca Eth.Latest) >>= \case
     Left err -> throwError $ "Failed getCode@" <> show ca <> ": " <> show err
     Right r -> pure r
+
+getBalance :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Integer
+getBalance node ca = do
+  runWeb3' node (Eth.getBalance ca Eth.Latest) >>= \case
+    Left err -> throwError $ "Failed getBalance@" <> show ca <> ": " <> show err
+    Right r -> pure (fromIntegral r)

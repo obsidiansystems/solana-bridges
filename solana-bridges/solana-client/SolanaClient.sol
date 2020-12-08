@@ -600,9 +600,14 @@ struct Slot {
     mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
     mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
 
-    constructor () public {
+    uint constant challengePayout = 10*1000*1000;
+    constructor () payable public {
         creator = msg.sender;
+        if(address(this).balance < challengePayout) {
+            revert("Deposit too small for challenge payout");
+        }
     }
+
     function initialize(
             uint64 slot,
             bytes32 blockHash,
