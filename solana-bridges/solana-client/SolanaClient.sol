@@ -618,7 +618,11 @@ struct Slot {
         if(creator != msg.sender)
             revert("Sender not trusted");
 
-        fillSlot(slot, blockHash, leader);
+        Slot storage s = slots[slotOffset(slot)];
+        s.hasBlock = true;
+        s.leaderPublicKey = leader;
+        s.blockHash = blockHash;
+
         lastSlot = slot;
         lastHash = blockHash;
 
@@ -641,38 +645,42 @@ struct Slot {
             revert("Sender not trusted");
     }
 
-    function addBlocks(uint64[] calldata blockSlots,
+    function addBlocks(uint64 parentSlot,
+                       bytes32 parentBlockHash,
+                       uint64[] calldata blockSlots,
                        bytes32[] calldata blockHashes,
-                       uint64[] calldata parentSlots,
-                       bytes32[] calldata parentBlockHashes,
                        bytes32[] calldata leaders
                        ) external {
         authorize();
-        for(uint i = 0; i < blockSlots.length; i++)
-            addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i], leaders[i]);
-    }
 
-    function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leaderPublicKey) external {
-        authorize();
-        addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash, leaderPublicKey);
-    }
-
-    function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leader) private {
-        if(slot <= lastSlot)
+        if(blockSlots[0] <= lastSlot)
             revert("Already seen slot");
         if(parentSlot != lastSlot)
             revert("Unexpected parent slot");
         if(parentBlockHash != lastHash)
             revert("Unexpected parent hash");
 
-        for(uint64 s = lastSlot + 1; s < slot; s++) {
-            emptySlot(s);
-        }
-        fillSlot(slot, blockHash, leader);
+        uint length = blockSlots.length;
 
-        lastSlot = slot;
-        lastHash = blockHash;
-        seenBlocks++;
+        for(uint i = 0; i < length; i++) {
+            uint64 s; uint64 nextSlot = blockSlots[i];
+            for(s = lastSlot + 1; s < nextSlot; s++) {
+                Slot storage slot = slots[slotOffset(s)];
+                if(slot.hasBlock) {
+                    slot.hasBlock = false;
+                }
+            }
+            Slot storage slot = slots[slotOffset(s)];
+            slot.hasBlock = true;
+            slot.leaderPublicKey = leaders[i];
+            slot.blockHash = blockHashes[i];
+            //TODO: store bank hash merkle root for use in verifyTransaction function
+
+            lastSlot = s;
+        }
+
+        seenBlocks += uint64(length);
+        lastHash = blockHashes[length-1];
     }
 
     // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231
@@ -707,22 +715,6 @@ struct Slot {
 
     function slotOffset(uint64 s) private pure returns (uint64) {
         return s % HISTORY_SIZE;
-    }
-
-    function fillSlot(uint64 s, bytes32 hash, bytes32 leader) private {
-        Slot storage slot = slots[slotOffset(s)];
-        slot.hasBlock = true;
-        slot.leaderPublicKey = leader;
-        slot.blockHash = hash;
-        //TODO: store bank hash merkle root for use in verifyTransaction function
-    }
-
-    function emptySlot(uint64 s) private {
-        Slot storage slot = slots[slotOffset(s)];
-        slot.hasBlock = false;
-        slot.leaderPublicKey = 0;
-        slot.blockHash = 0;
-        slot.bankHashMerkleRoot = 0;
     }
 
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
