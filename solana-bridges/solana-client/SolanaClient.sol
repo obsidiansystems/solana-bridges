@@ -931,10 +931,17 @@ struct Slot {
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
 
+        // To prevent the relayer from hiding votes to avoid challenges, we always check one signature
+        // This might not be needed once stake supermajority checks are possible
+        bytes memory signature; uint cursor;
+        (signature, cursor) = parseSignature(signatures, signaturesOffset);
+        if(! ed25519_valid(signature, message, parsedMessage.addresses[0])) {
+            return false;
+        }
+
         // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
         bytes memory data = instruction.data;
         uint tag;
-        uint cursor;
         (tag, cursor) = parseUint32LE(data, 0);
         if (tag != voteTag && tag != voteSwitchTag) {
             revert("Not a Vote nor VoteSwitch instruction");
@@ -945,7 +952,6 @@ struct Slot {
         uint8 signer = uint8(instruction.accounts[3]);
         bytes32 pk = parsedMessage.addresses[signer];
 
-        bytes memory signature;
         (signature, cursor) = parseSignature(signatures, signaturesOffset + signer * 64);
 
         return ed25519_valid(signature, message, pk);

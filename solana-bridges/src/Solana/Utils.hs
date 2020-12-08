@@ -92,13 +92,18 @@ testSolanaClient = do
 
       -- VoteSwitch's Hash is of a switching proof which is currently unused since optimistic confirmation proofs are not yet implemented
       madeUpHash = sha256 "0x1234567890"
-      vs = SolanaVoteInstruction_VoteSwitch v madeUpHash
+      vsi = SolanaVoteInstruction_VoteSwitch v madeUpHash
+
+      notAVote = SolanaVoteInstruction_UpdateValidatorIdentity
 
       txnTamperedMessageHeader = txnParsed
         & solanaTxn_message . solanaTxnMessage_header . solanaTxnHeader_numRequiredSignatures .~ 111
 
       txnTamperedVoteSwitch = txnParsed
-        & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode vs)
+        & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode vsi)
+
+      txnTamperedNoVotes = txnParsed
+        & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode notAVote)
 
   hspec $ describe "Solana client" $ do
     let roundtrips x = roundtrip x `shouldBe` x
@@ -186,6 +191,7 @@ testSolanaClient = do
     it "rejects invalid sigs" $ do
       verify False txnTamperedMessageHeader
       verify False txnTamperedVoteSwitch
+      verify False txnTamperedNoVotes
 
     it "verifies vote transactions" $ do
       let sigs = LBS.toStrict $ Data.Binary.encode $ txnParsed & _solanaTxn_signatures
@@ -225,24 +231,27 @@ testSolanaClient = do
         txCopies :: Word64
         txCopies = 300
 
-        tamperedSlot = startingSlot + txCopies `div` txsPerSlot --TODO: roundup when fractional
+        tamperedVoteSlot = startingSlot + txCopies `div` txsPerSlot --TODO: roundup when fractional
+        tamperedNoVotesSlot = tamperedVoteSlot + 1
 
         copies = flip fmap [0..txCopies-1] $ \i ->
           (startingSlot + (i `div` txsPerSlot), txnParsed)
 
       it "can submit transactions in bulk" $ do
-        let txs = copies <> [(tamperedSlot, txnTamperedVoteSwitch)]
+        let
+          voteTxs = copies <> [(tamperedVoteSlot, txnTamperedVoteSwitch)]
+          txs = voteTxs <> [(tamperedNoVotesSlot, txnTamperedNoVotes)]
         submitTransactions txs
 
         for_ (_solanaVote_slots v) $ \s -> do
           res <- runExceptT $ getVoteCounts node contract (fromIntegral s)
-          res `shouldBe` Right (fromIntegral $ length txs)
+          res `shouldBe` Right (fromIntegral $ length voteTxs)
 
-        expectTx startingSlot       0                txnParsed
-        expectTx startingSlot       (txsPerSlot - 1) txnParsed
-        expectTx (startingSlot + 1) 0                txnParsed
-        expectTx (startingSlot + 2) (txsPerSlot - 1) txnParsed
-        expectTx tamperedSlot       0                txnTamperedVoteSwitch
+        expectTx startingSlot        0                txnParsed
+        expectTx startingSlot        (txsPerSlot - 1) txnParsed
+        expectTx (startingSlot + 1)  0                txnParsed
+        expectTx (startingSlot + 2)  (txsPerSlot - 1) txnParsed
+        expectTx tamperedNoVotesSlot 0                txnTamperedNoVotes
 
       it "survives on challenge of valid vote signatures" $ do
         submitChallenge startingSlot 0 0
@@ -253,5 +262,5 @@ testSolanaClient = do
         expectTx startingSlot 0 txnParsed
 
       it "self-destructs on challenge of invalid vote signatures" $ do
-        submitChallenge tamperedSlot 0 0
+        submitChallenge tamperedNoVotesSlot 0 0
         expectContractDestroyed
