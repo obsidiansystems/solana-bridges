@@ -746,11 +746,11 @@ relaySolanaToEthereum node solanaConfig ca = do
             let
               addBlocks' = runExceptT (addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
                 Left bad -> error $ show bad
-                Right receipt -> liftIO $ putStrLn $ "addBlocks gas cost: " <> show (Eth.receiptGasUsed receipt)
+                Right _receipt -> pure ()
 
               sendTransactions' = runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
                 Left bad -> error $ show bad
-                Right receipt -> liftIO $ putStrLn $ "addTransactions gas cost: " <> show (Eth.receiptGasUsed receipt)
+                Right _receipt -> pure ()
 
             void $ lift $ concurrently addBlocks' sendTransactions'
 
