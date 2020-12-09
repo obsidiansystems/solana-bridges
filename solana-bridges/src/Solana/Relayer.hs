@@ -731,12 +731,13 @@ relaySolanaToEthereum node solanaConfig ca = do
 
           liftIO $ do
             let rpcSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
-            putStr $ unlines
-              [ ""
-              , "Solana RPC slot: " <> show rpcSlot
+            putStrLn $ unlines
+              [ "Solana RPC slot: " <> show rpcSlot
               , "Ethereum contract slot: " <> show contractSlot
-              , "Contract is behind by " <> show (rpcSlot - contractSlot)
               ]
+            when (rpcSlot < contractSlot) $ error "Network change detected: client contract is ahead of the Solana network"
+            putStrLn $ "Contract is behind by " <> show (rpcSlot - contractSlot)
+
           when (not $ null confirmedBlocks) $ do
             liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
             for_ blocksAndSlots $ \(s, b) -> do
