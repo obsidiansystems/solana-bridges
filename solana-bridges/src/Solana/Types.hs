@@ -353,7 +353,9 @@ epochFromSlot schedule =
             )
           )
         else
-          head $ reverse $ filter (\(_, (_, firstSlotInEpoch')) -> firstSlotInEpoch' <= absoluteSlot) warmup
+          case reverse $ filter (\(_, (_, firstSlotInEpoch')) -> firstSlotInEpoch' <= absoluteSlot) warmup of
+            [] -> error "Network too recent: epoch info is not available yet"
+            (x:_) -> x
     in SolanaEpochInfo
       { _solanaEpochInfo_slotsInEpoch = slotsInEpoch
       , _solanaEpochInfo_slotIndex = absoluteSlot - firstSlotInEpoch0
