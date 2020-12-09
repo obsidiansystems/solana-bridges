@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 import Control.Monad.Except (runExceptT)
-import Crypto.Hash (Digest, SHA256, hash)
+import Crypto.Hash (Digest, SHA256)
 import Data.Bool (bool)
 import qualified Data.ByteArray as ByteArray
 import Data.ByteString (ByteString)
@@ -18,13 +18,14 @@ import Test.Hspec (it, describe, hspec, shouldBe)
 
 import Ethereum.Contracts
 import Solana.Relayer
+import Solana.Utils
 
 main :: IO ()
 main = pure ()
 
 testWithRunningNode :: Provider -> IO ()
 testWithRunningNode node = do
-  contract <- deploySolanaClientContract node defaultSolanaRPCConfig
+  (contract, _slot) <- deploySolanaClientContract node defaultSolanaRPCConfig
   testInclusionProofVerification node contract
 
 testInclusionProofVerification :: Provider -> Address -> IO ()
@@ -54,9 +55,6 @@ testInclusionProofVerification node contract = hspec $ describe "16-ary merkle t
     verify False [leaves "a", branches] (merkleParent branches) "aa" 0x01
     verify False [leaves "a", branches] (merkleParent branches) "ap" 0x00
     verify False [leaves "a", branches] (merkleParent branches) "pp" 0xff
-
-sha256 :: ByteString -> Digest SHA256
-sha256 = hash
 
 merkleParent :: [Digest SHA256] -> Digest SHA256
 merkleParent = sha256 . BS.concat . fmap ByteArray.convert
