@@ -903,11 +903,15 @@ struct Slot {
 
     uint256 constant voteTag = 2;
     uint256 constant voteSwitchTag = 6;
+    bytes32 constant voteProgram = hex"0761481d357474bb7c4d7624ebd3bdb3d8355e73d11043fc0da3538000000000";
 
     function countVotes(uint64 slot, bytes memory message) public {
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         for(uint i = 0; i < parsedMessage.instructions.length; i++) {
             SolanaInstruction memory instruction = parsedMessage.instructions[i];
+            if (parsedMessage.addresses[instruction.programId] != voteProgram) {
+                continue;
+            }
 
             // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
             bytes memory data = instruction.data;
@@ -944,6 +948,9 @@ struct Slot {
             return false;
         }
 
+        if (parsedMessage.addresses[instruction.programId] != voteProgram) {
+            revert("Not a vote instruction");
+        }
         // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
         bytes memory data = instruction.data;
         uint tag;
