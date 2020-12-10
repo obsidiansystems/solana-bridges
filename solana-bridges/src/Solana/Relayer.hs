@@ -43,6 +43,7 @@ import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
 import Data.List.Split (chunksOf)
+import Data.List.NonEmpty (nonEmpty)
 import Data.Map (Map)
 import Data.Maybe(fromMaybe, isJust)
 import Data.Semigroup (stimesMonoid)
@@ -738,29 +739,30 @@ relaySolanaToEthereum node solanaConfig ca = do
             when (rpcSlot < contractSlot) $ error "Network change detected: client contract is ahead of the Solana network"
             putStrLn $ "Contract is behind by " <> show (rpcSlot - contractSlot)
 
-          when (not $ null confirmedBlocks) $ do
-            liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-            for_ blocksAndSlots $ \(s, b) -> do
-              liftIO $ putStrLn $ "Slot " <> show s
-              liftIO $ putStr $ showBlockInstructions b
+          case nonEmpty blocksAndSlots of
+            Nothing -> liftIO $ threadDelay 1e6
+            Just blocks -> do
+              liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
+              for_ blocks $ \(s, b) -> do
+                liftIO $ putStrLn $ "Slot " <> show s
+                liftIO $ putStr $ showBlockInstructions b
 
-            let
-              addBlocks' = runExceptT (addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
-                Left bad -> error $ show bad
-                Right _receipt -> pure ()
+              let
+                addBlocks' = runExceptT (addBlocks node ca blocks leaderSchedules epochSchedule) >>= \case
+                  Left bad -> error $ show bad
+                  Right _receipt -> pure ()
 
-              sendTransactions' = runExceptT (sendTransactions node ca blocksAndSlots) >>= \case
-                Left bad -> error $ show bad
-                Right _receipt -> pure ()
+                sendTransactions' = runExceptT (sendTransactions node ca $ toList blocks) >>= \case
+                  Left bad -> error $ show bad
+                  Right _receipt -> pure ()
 
-            void $ lift $ concurrently addBlocks' sendTransactions'
+              void $ lift $ concurrently addBlocks' sendTransactions'
 
-            liftIO $ putStrLn "Submitted new slots to contract"
-            runExceptT (getSeenBlocks node ca) >>= \case
-              Left _ -> pure ()
-              Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
+              liftIO $ putStrLn "Submitted new slots to contract"
+              runExceptT (getSeenBlocks node ca) >>= \case
+                Left _ -> pure ()
+                Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
 
-          when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
           loop
 
       loop

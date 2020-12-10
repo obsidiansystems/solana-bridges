@@ -29,11 +29,14 @@ import Data.ByteArray.HexString (HexString)
 import Data.ByteArray.Sized (unSizedByteArray, unsafeSizedByteArray)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Lazy as LBS
-import GHC.Exts (fromList)
+import Data.Foldable
 import Data.Functor.Compose
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Map (Map)
 import Data.Solidity.Prim.Address (Address)
 import Data.Word
+import GHC.Exts (fromList)
 import Network.Web3.Provider (runWeb3')
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import qualified Data.Binary as Binary
@@ -119,16 +122,16 @@ addBlocks
   :: (MonadIO m, MonadError String m)
   => Eth.Provider
   -> Address
-  -> [(Word64, SolanaCommittedBlock)]
+  -> NonEmpty (Word64, SolanaCommittedBlock)
   -> Map Word64 SolanaLeaderSchedule
   -> SolanaEpochSchedule
   -> m Eth.TxReceipt
 addBlocks node ca blocks leaderSchedule epochSchedule = submit node ca "addBlocks" $ Contracts.addBlocks
-  (word64ToSol . _solanaCommittedBlock_parentSlot . snd . head $ blocks)
-  (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd . head $ blocks)
-  (word64ToSol . fst <$> blocks)
-  (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> blocks)
-  (unsafeBytes32ToSol . (mergedSchedules Map.!) . fst <$> blocks)
+  (word64ToSol . _solanaCommittedBlock_parentSlot . snd . NonEmpty.head $ blocks)
+  (unsafeBytes32ToSol . _solanaCommittedBlock_previousBlockhash . snd . NonEmpty.head $ blocks)
+  (word64ToSol . fst <$> toList blocks)
+  (unsafeBytes32ToSol . _solanaCommittedBlock_blockhash . snd <$> toList blocks)
+  (unsafeBytes32ToSol . (mergedSchedules Map.!) . fst <$> toList blocks)
   where
     mergedSchedules = ifoldMap (\(epoch, leaderPk) slotIndices ->
       foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
