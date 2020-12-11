@@ -27,7 +27,6 @@ import Data.Binary.Put
 import Data.Bits
 import Data.Foldable
 import Data.Map (Map)
-import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Sequence (Seq)
 import Data.Text (Text)
 import GHC.Generics
@@ -107,21 +106,20 @@ wellKnownAddress x = case Base58.decodeBase58 Base58.bitcoinAlphabet x of
       CryptoPassed good -> good
       CryptoFailed bad -> error $ show bad
 
-solanaVoteProgram :: Ed25519.PublicKey
-solanaVoteProgram = wellKnownAddress "Vote111111111111111111111111111111111111111"
-
-findWellKnownProgram :: Ed25519.PublicKey -> Maybe BS.ByteString
-findWellKnownProgram p = listToMaybe $ mapMaybe cmp knownPrograms
-  where
-    cmp wk = if wellKnownAddress wk == p then Just wk else Nothing
-
-    knownPrograms = [ "11111111111111111111111111111111"
+wellKnownPrograms :: [BS.ByteString]
+wellKnownPrograms = [ "11111111111111111111111111111111"
                     , "BPFLoader1111111111111111111111111111111111"
                     , "Config1111111111111111111111111111111111111"
                     , "Stake11111111111111111111111111111111111111"
                     , "KeccakSecp256k11111111111111111111111111111"
                     , "Vote111111111111111111111111111111111111111"
                     ]
+
+solanaVoteProgram :: Ed25519.PublicKey
+solanaVoteProgram = wellKnownAddress "Vote111111111111111111111111111111111111111"
+
+findWellKnownProgram :: Ed25519.PublicKey -> Maybe BS.ByteString
+findWellKnownProgram pk = find (\p -> wellKnownAddress p == pk) wellKnownPrograms
 
 newtype CompactWord16 = CompactWord16 Word16
   deriving (Real, Integral, Num, Show, Eq, Ord, Enum)
