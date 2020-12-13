@@ -795,10 +795,8 @@ showBlockInstructions b = showBlock
     showBlock = unlines $ imap showTransaction $ _solanaCommittedBlock_transactions b
 
 sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m Eth.TxReceipt
-sendTransactions node ca blocksAndSlots = do
-  let txs = join $ flip fmap blocksAndSlots $ \(s,b) ->
-        fmap (s,) $ fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b
-  addTransactions node ca txs
+sendTransactions node ca blocksAndSlots = addTransactions node ca $ flip fmap blocksAndSlots $ \(s,b) ->
+  (s, fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b)
 
 data ContractConfig = ContractConfig
  { _contractConfig_programId :: Text

@@ -141,22 +141,17 @@ addTransactions
   :: (MonadIO m, MonadError String m)
   => Eth.Provider
   -> Address
-  -> [(Word64, SolanaTxn)]
+  -> [(Word64, [SolanaTxn])]
   -> m Eth.TxReceipt
-addTransactions node ca txs = do
- submit node ca "addTransactions" $ Eth.send $ Contracts.AddTransactionsData
-  (fromIntegral <$> slots)
-  (fromIntegral <$> (sigSizes `alternated` msgsSizes))
-  (ByteArray.convert $ BS.concat $ sigs `alternated` msgs)
+addTransactions node ca blocks = do
+ submit node ca "addTransactions" $ Eth.send $ Contracts.AddTransactionsData (fromIntegral . fst <$> blocks) bs
   where
-    slots = fmap fst txs
-    (sigs, sigSizes) = unzip $ flip fmap txs $ \(_, tx) ->
-      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_signatures)
-      in (bs, BS.length bs)
-    (msgs, msgsSizes) = unzip $ flip fmap txs $ \(_, tx) ->
-      let bs = LBS.toStrict $ Binary.encode (tx & _solanaTxn_message)
-      in (bs, BS.length bs)
-    alternated xs ys = zip xs ys >>= (\(x,y) -> [x,y])
+    bs :: [[(Solidity.Bytes, Solidity.Bytes)]]
+    bs = flip fmap blocks $ \(_,txs) ->
+      flip fmap txs $ \tx ->
+            ( ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_signatures
+            , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_message
+            )
 
 challengeVote
   :: (MonadIO m, MonadError String m)

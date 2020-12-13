@@ -688,33 +688,22 @@ struct Slot {
         lastHash = blockHashes[length-1];
     }
 
+    struct Transaction {
+        bytes signatures;
+        bytes message;
+    }
+
     // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231
-    // TODO: parse offchain and pass in bytes[] calldata - bindings currently bugged either in hs-web3 or solidity
-    function addTransactions(uint64[] calldata txSlots,
-                             uint[] calldata sizes,
-                             bytes calldata transactions // [(signature, messages)]
-                             ) external {
+    function addTransactions(uint64[] calldata slotNumbers, Transaction[][] calldata slotTxs) external {
         authorize();
-        uint startOffset; uint endOffset; uint64 x;
-        for(uint64 i = 0; i < (sizes.length / 2); i++) {
-            uint64 s = txSlots[i];
-
-            if (i == 0 || s != txSlots[i-1]) {
-                x = 0;
+        for(uint64 i = 0; i < slotNumbers.length; i++) {
+            uint64 s = slotNumbers[i];
+            for(uint64 j = 0; j < slotTxs[i].length; j++) {
+                transactionSignatures[s][j] = slotTxs[i][j].signatures;
+                bytes memory message = slotTxs[i][j].message;
+                transactionMessages[s][j] = message;
+                countVotes(s, message);
             }
-
-            endOffset += sizes[2*i];
-            transactionSignatures[s][x] = bytes(transactions[startOffset:endOffset]);
-            startOffset = endOffset;
-
-            endOffset += sizes[2*i+1];
-            bytes memory message = bytes(transactions[startOffset:endOffset]);
-            transactionMessages[s][x] = message;
-            startOffset = endOffset;
-
-            countVotes(s, message);
-
-            x++;
         }
     }
 

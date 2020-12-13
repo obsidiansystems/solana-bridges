@@ -310,23 +310,24 @@ testSolanaClient = do
         txsPerSlot = 10
 
         txCopies :: Word64
-        txCopies = 300
+        txCopies = 200
 
-        tamperedVoteSlot = startingSlot + txCopies `div` txsPerSlot --TODO: roundup when fractional
+        slots = txCopies `div` txsPerSlot --TODO: roundup when fractional
+        tamperedVoteSlot = startingSlot + slots
         tamperedNoVotesSlot = tamperedVoteSlot + 1
 
-        copies = flip fmap [0..txCopies-1] $ \i ->
-          (startingSlot + (i `div` txsPerSlot), txnParsed)
+        copies = flip fmap [0..slots-1] $ \i ->
+          (startingSlot + i, replicate txsPerSlot txnParsed)
+
+        voteTxs = copies <> [(tamperedVoteSlot, [txnTamperedVoteSwitch])]
+        txs = voteTxs <> [(tamperedNoVotesSlot, [txnTamperedNoVotes])]
 
       it "can submit transactions in bulk" $ do
-        let
-          voteTxs = copies <> [(tamperedVoteSlot, txnTamperedVoteSwitch)]
-          txs = voteTxs <> [(tamperedNoVotesSlot, txnTamperedNoVotes)]
         submitTransactions txs
 
         for_ (_solanaVote_slots v) $ \s -> do
           res <- runExceptT $ getVoteCounts node contract (fromIntegral s)
-          res `shouldBe` Right (fromIntegral $ length voteTxs)
+          res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
 
         expectTx startingSlot        0                txnParsed
         expectTx startingSlot        (txsPerSlot - 1) txnParsed
