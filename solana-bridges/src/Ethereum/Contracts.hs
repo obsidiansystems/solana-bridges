@@ -117,46 +117,39 @@ initialize node ca slot root leader schedule = void $ submit node ca "initialize
   (word64ToSol $ _solanaEpochSchedule_leaderScheduleSlotOffset schedule)-- uint64 scheduleLeaderScheduleSlotOffset,
   (word64ToSol $ _solanaEpochSchedule_firstNormalSlot schedule)-- uint64 scheduleFirstNormalSlot,
   (word64ToSol $ _solanaEpochSchedule_slotsPerEpoch schedule)-- uint64 scheduleSlotsPerEpoch
+  (blockTransactions root)
 
 addBlocks
   :: (MonadIO m, MonadError String m)
   => Eth.Provider
   -> Address
-  -> NonEmpty (Word64, SolanaCommittedBlock)
-  -> Map Word64 SolanaLeaderSchedule
-  -> SolanaEpochSchedule
+  -> NonEmpty (Word64, SolanaCommittedBlock, Base58ByteString)
   -> m Eth.TxReceipt
-addBlocks node ca blocks leaderSchedule epochSchedule = submit node ca "addBlocks" $ Contracts.addBlocks
+addBlocks node ca blocks = submit node ca "addBlocks" $ Contracts.addBlocks
   ( word64ToSol $ _solanaCommittedBlock_parentSlot parent
   , unsafeBytes32ToSol $ _solanaCommittedBlock_previousBlockhash parent
   )
-  (toList $ flip fmap blocks $ \(s,b) ->
-      ( word64ToSol s
-      , unsafeBytes32ToSol $ _solanaCommittedBlock_blockhash b
-      , unsafeBytes32ToSol $ (mergedSchedules Map.!) s
+  (toList $ flip fmap blocks $ \(slot,block,leader) ->
+      ( word64ToSol slot
+      , unsafeBytes32ToSol $ _solanaCommittedBlock_blockhash block
+      , unsafeBytes32ToSol leader
       )
   )
+  (toList $ flip fmap blocks $ \(_, b, _) -> blockTransactions b)
   where
-    (_, parent) = NonEmpty.head blocks
-    mergedSchedules = ifoldMap (\(epoch, leaderPk) slotIndices ->
-      foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices)
-      $ Compose leaderSchedule
+    (_, parent, _) = NonEmpty.head blocks
 
-addTransactions
-  :: (MonadIO m, MonadError String m)
-  => Eth.Provider
-  -> Address
-  -> [(Word64, [SolanaTxn])]
-  -> m Eth.TxReceipt
-addTransactions node ca blocks = do
- submit node ca "addTransactions" $ Eth.send $ Contracts.AddTransactionsData (fromIntegral . fst <$> blocks) bs
-  where
-    bs :: [[(Solidity.Bytes, Solidity.Bytes)]]
-    bs = flip fmap blocks $ \(_,txs) ->
-      flip fmap txs $ \tx ->
-            ( ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_signatures
-            , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_message
-            )
+mergeSchedules :: Map Word64 SolanaLeaderSchedule -> SolanaEpochSchedule -> Map Word64 Base58ByteString
+mergeSchedules leaderSchedule epochSchedule = flip ifoldMap (Compose leaderSchedule) $ \(epoch, leaderPk) slotIndices ->
+  foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices
+
+blockTransactions :: SolanaCommittedBlock -> [(Solidity.Bytes, Solidity.Bytes)]
+blockTransactions b =
+  flip fmap (fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b) $ \tx ->
+    ( ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_signatures
+    , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_message
+    )
+
 
 challengeVote
   :: (MonadIO m, MonadError String m)

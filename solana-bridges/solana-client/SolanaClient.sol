@@ -616,8 +616,9 @@ struct Slot {
             uint64 scheduleFirstNormalEpoch,
             uint64 scheduleLeaderScheduleSlotOffset,
             uint64 scheduleFirstNormalSlot,
-            uint64 scheduleSlotsPerEpoch
-        ) public {
+            uint64 scheduleSlotsPerEpoch,
+            Transaction[] calldata txs
+        ) external {
         if(initialized)
             revert("already initialized");
         if(creator != msg.sender)
@@ -640,6 +641,13 @@ struct Slot {
         firstNormalSlot = scheduleFirstNormalSlot;
         slotsPerEpoch = scheduleSlotsPerEpoch;
 
+        for(uint64 i = 0; i < txs.length; i++) {
+            transactionSignatures[rootSlot][i] = txs[i].signatures;
+            bytes memory message = txs[i].message;
+            transactionMessages[rootSlot][i] = message;
+            countVotes(rootSlot, message);
+        }
+
         initialized = true;
     }
 
@@ -659,9 +667,9 @@ struct Slot {
         bytes32 blockHash;
         bytes32 leader;
     }
-
     function addBlocks(ParentSlot calldata parentSlot,
-                       NewSlot[] calldata newSlots
+                       NewSlot[] calldata newSlots,
+                       Transaction[][] calldata slotTxs
                        ) external {
         authorize();
 
@@ -691,6 +699,13 @@ struct Slot {
             slot.blockHash = newSlot.blockHash;
             //TODO: store bank hash merkle root for use in verifyTransaction function
 
+            for(uint64 j = 0; j < slotTxs[i].length; j++) {
+                transactionSignatures[nextSlot][j] = slotTxs[i][j].signatures;
+                bytes memory message = slotTxs[i][j].message;
+                transactionMessages[nextSlot][j] = message;
+                countVotes(s, message);
+            }
+
             lastSlot = s;
         }
 
@@ -701,20 +716,6 @@ struct Slot {
     struct Transaction {
         bytes signatures;
         bytes message;
-    }
-
-    // TODO: collapsing with 'addBlocks' triggers https://github.com/ethereum/solidity/issues/6231
-    function addTransactions(uint64[] calldata slotNumbers, Transaction[][] calldata slotTxs) external {
-        authorize();
-        for(uint64 i = 0; i < slotNumbers.length; i++) {
-            uint64 s = slotNumbers[i];
-            for(uint64 j = 0; j < slotTxs[i].length; j++) {
-                transactionSignatures[s][j] = slotTxs[i][j].signatures;
-                bytes memory message = slotTxs[i][j].message;
-                transactionMessages[s][j] = message;
-                countVotes(s, message);
-            }
-        }
     }
 
     function slotOffset(uint64 s) private pure returns (uint64) {

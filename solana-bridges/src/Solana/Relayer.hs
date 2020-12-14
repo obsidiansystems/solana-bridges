@@ -17,7 +17,7 @@
 module Solana.Relayer where
 
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (concurrently, forConcurrently_, withAsync)
+import Control.Concurrent.Async (forConcurrently_, withAsync)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, handle)
 import Control.Lens
@@ -657,7 +657,6 @@ deploySolanaClientContract node solanaConfig = do
         slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
       runExceptT $ do
         initialize node ca slot0 block0 slotLeader0 epochSchedule
-        void $ sendTransactions node ca [(slot0, block0)]
         liftIO $ hPutStrLn stderr $ "Initialized contract with slot " <> show slot0
         pure slot0
 
@@ -748,17 +747,15 @@ relaySolanaToEthereum node solanaConfig ca = do
                 liftIO $ putStr $ showBlockInstructions b
 
               let
-                addBlocks' = runExceptT (addBlocks node ca blocks leaderSchedules epochSchedule) >>= \case
-                  Left bad -> error $ show bad
-                  Right _receipt -> pure ()
+                mergedSchedules = mergeSchedules leaderSchedules epochSchedule
+                blocks' = flip fmap blocks $ \(s,b) -> (s,b,mergedSchedules Map.! s)
 
-                sendTransactions' = runExceptT (sendTransactions node ca $ toList blocks) >>= \case
-                  Left bad -> error $ show bad
-                  Right _receipt -> pure ()
-
-              void $ lift $ concurrently addBlocks' sendTransactions'
+              runExceptT (addBlocks node ca blocks') >>= \case
+                Left bad -> error $ show bad
+                Right _receipt -> pure ()
 
               liftIO $ putStrLn "Submitted new slots to contract"
+
               runExceptT (getSeenBlocks node ca) >>= \case
                 Left _ -> pure ()
                 Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
@@ -793,10 +790,6 @@ showBlockInstructions b = showBlock
           where malformed = "Malformed instruction #" <> show idxI <>  " has invalid program index: " <> show t
 
     showBlock = unlines $ imap showTransaction $ _solanaCommittedBlock_transactions b
-
-sendTransactions :: (MonadIO m, MonadError String m) => Eth.Provider -> Address -> [(Word64, SolanaCommittedBlock)] -> m Eth.TxReceipt
-sendTransactions node ca blocksAndSlots = addTransactions node ca $ flip fmap blocksAndSlots $ \(s,b) ->
-  (s, fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b)
 
 data ContractConfig = ContractConfig
  { _contractConfig_programId :: Text

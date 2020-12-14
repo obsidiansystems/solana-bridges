@@ -20,6 +20,8 @@ import qualified Data.ByteString.Base64 as Base64
 import qualified Data.ByteString.Lazy as LBS
 import Data.Default
 import Data.Foldable
+import Data.List.NonEmpty (nonEmpty)
+import Data.Maybe
 import qualified Data.Sequence as Seq
 import qualified Data.Solidity.Prim.Address as Solidity
 import Data.Tree (Tree (..))
@@ -114,7 +116,7 @@ getTransaction node contract slot txIdx = do
   pure $ Data.Binary.decode $ LBS.fromStrict $ sigs <> msg
 
 
--- curl base64
+-- curl getConfirmedBlock [30, "base64"]
 txnBase64 :: BS.ByteString
 txnBase64 = "AZVKAuMoJbnV4PtPG7mMZCBEanoBomhtUHls0FuOa1QgthOeVMVj6VeAUVkn++w9NW1VF2POQ4YaeOEY6T2L0gsBAAMF01L0Cxouih7U0W+rqrqFKJDpZV3XeSpuqaXgRbrAeAqgAVVnFM8Agxw18NmD9pMJiEV64Q4iw2HyJ+BVmNG3+Qan1RcZLwqvxvJl4/t3zHragsUp0L47E24tAFUgAAAABqfVFxjHdMkoVmOYaR1etoteuKObS21cc1VbIQAAAAAHYUgdNXR0u3xNdiTr072z2DVec9EQQ/wNo1OAAAAAAOXoKdOObGil/U5GuEw/MRcdyHgKqsLIJgZiCDePh+iGAQQEAQIDADUCAAAAAQAAAAAAAAAdAAAAAAAAAGjgBRtbPax5AAeZ2uXW052RZQ4g+VXwFZO6iUZSVsuGAA=="
 
@@ -152,9 +154,8 @@ verifySigs txn = flip fmap ed25519 $ \(pk, sig) -> Ed25519.verify pk msg sig
 testSolanaClient :: IO ()
 testSolanaClient = do
   let node = def
-  (contract, _slot0) <- deploySolanaClientContract node defaultSolanaRPCConfig
 
-  let [vi] = txnParsed
+      [vi] = txnParsed
         & _solanaTxn_message
         & _solanaTxnMessage_instructions
         & fmap _solanaTxnInstruction_data
@@ -163,6 +164,10 @@ testSolanaClient = do
         & toList
         & fmap Data.Binary.decode
       SolanaVoteInstruction_Vote v = vi
+
+      [votedOnSlot] = v & _solanaVote_slots & toList
+      initializeSlot = 1 + fromIntegral votedOnSlot
+      relayStartingSlot = 1 + initializeSlot
 
       v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
       vi' = SolanaVoteInstruction_Vote v'
@@ -182,7 +187,31 @@ testSolanaClient = do
       txnTamperedNoVotes = txnParsed
         & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode notAVote)
 
+  contract <- deploySolanaClientContractImpl node
+
   hspec $ describe "Solana client" $ do
+    let
+      dummyHash = Base58ByteString $ ByteArray.convert solanaVoteProgram
+      dummyEpochSchedule = SolanaEpochSchedule
+        { _solanaEpochSchedule_warmup = False
+        , _solanaEpochSchedule_firstNormalEpoch = 0
+        , _solanaEpochSchedule_leaderScheduleSlotOffset = 0
+        , _solanaEpochSchedule_firstNormalSlot = 0
+        , _solanaEpochSchedule_slotsPerEpoch = 8096
+        }
+      dummyBlock slot txs = SolanaCommittedBlock
+        { _solanaCommittedBlock_blockhash = dummyHash
+        , _solanaCommittedBlock_previousBlockhash = dummyHash
+        , _solanaCommittedBlock_parentSlot = slot - 1
+        , _solanaCommittedBlock_transactions = SolanaTxnWithMeta <$> txs
+        , _solanaCommittedBlock_rewards = []
+        , _solanaCommittedBlock_blockTime = Nothing
+        }
+
+    it "can initialize contract" $ do
+      res <- runExceptT $ initialize node contract initializeSlot (dummyBlock (initializeSlot - 1) []) dummyHash dummyEpochSchedule
+      res `shouldBe` Right ()
+
     let roundtrips x = roundtrip x `shouldBe` x
         verify expected txn = do
           let (msg, ed25519) = txnSigningInfo txn
@@ -289,8 +318,8 @@ testSolanaClient = do
         res <- runExceptT $ challengeVote node contract slot tx instr
         fmap Eth.receiptStatus res `shouldBe` Right (Just 1)
 
-      submitTransactions txnsWithSlot = do
-        res <- runExceptT $ addTransactions node contract txnsWithSlot
+      submitBlocks blocks = do
+        res <- runExceptT $ addBlocks node contract blocks
         fmap Eth.receiptStatus res `shouldBe` Right (Just 1)
 
       expectTx slot txIdx expectedTx = do
@@ -303,9 +332,6 @@ testSolanaClient = do
 
     do
       let
-        [votedOnSlot] = v & _solanaVote_slots & toList
-        startingSlot = 1 + fromIntegral votedOnSlot
-
         txsPerSlot :: Num a => a
         txsPerSlot = 10
 
@@ -313,35 +339,39 @@ testSolanaClient = do
         txCopies = 200
 
         slots = txCopies `div` txsPerSlot --TODO: roundup when fractional
-        tamperedVoteSlot = startingSlot + slots
+        tamperedVoteSlot = relayStartingSlot + slots
         tamperedNoVotesSlot = tamperedVoteSlot + 1
 
         copies = flip fmap [0..slots-1] $ \i ->
-          (startingSlot + i, replicate txsPerSlot txnParsed)
+          (relayStartingSlot + i, replicate txsPerSlot txnParsed)
 
         voteTxs = copies <> [(tamperedVoteSlot, [txnTamperedVoteSwitch])]
-        txs = voteTxs <> [(tamperedNoVotesSlot, [txnTamperedNoVotes])]
+        allTxs = voteTxs <> [(tamperedNoVotesSlot, [txnTamperedNoVotes])]
 
-      it "can submit transactions in bulk" $ do
-        submitTransactions txs
+      it "can submit a chunk of slots with votes" $ do
+        let
+          blocks = fromMaybe (error "Blocks must be non-empty") $ nonEmpty
+            $ flip fmap allTxs $ \(s, txs) -> (s, dummyBlock s txs, dummyHash)
+
+        submitBlocks blocks
 
         for_ (_solanaVote_slots v) $ \s -> do
           res <- runExceptT $ getVoteCounts node contract (fromIntegral s)
           res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
 
-        expectTx startingSlot        0                txnParsed
-        expectTx startingSlot        (txsPerSlot - 1) txnParsed
-        expectTx (startingSlot + 1)  0                txnParsed
-        expectTx (startingSlot + 2)  (txsPerSlot - 1) txnParsed
+        expectTx relayStartingSlot        0                txnParsed
+        expectTx relayStartingSlot        (txsPerSlot - 1) txnParsed
+        expectTx (relayStartingSlot + 1)  0                txnParsed
+        expectTx (relayStartingSlot + 2)  (txsPerSlot - 1) txnParsed
         expectTx tamperedNoVotesSlot 0                txnTamperedNoVotes
 
       it "survives on challenge of valid vote signatures" $ do
-        submitChallenge startingSlot 0 0
-        submitChallenge startingSlot 1 0
-        submitChallenge (startingSlot + 1) 0 0
-        submitChallenge (startingSlot + 1) 1 0
+        submitChallenge relayStartingSlot 0 0
+        submitChallenge relayStartingSlot 1 0
+        submitChallenge (relayStartingSlot + 1) 0 0
+        submitChallenge (relayStartingSlot + 1) 1 0
 
-        expectTx startingSlot 0 txnParsed
+        expectTx relayStartingSlot 0 txnParsed
 
       it "self-destructs on challenge of invalid vote signatures" $ do
         submitChallenge tamperedNoVotesSlot 0 0
