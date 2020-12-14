@@ -571,6 +571,8 @@ contract SolanaClient {
         bytes32 leaderPublicKey;
         bytes32 bankHashMerkleRoot;
         uint64 voteCounts;
+        bytes[] transactionSignatures;
+        bytes[] transactionMessages;
     }
 
     uint64 constant HISTORY_SIZE = 100;
@@ -597,9 +599,18 @@ contract SolanaClient {
         return slots[slotOffset(slot)];
     }
 
-    // slot => transactionIndex => _
-    mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
-    mapping (uint64 => mapping (uint64 => bytes)) public transactionSignatures;
+    // Workarounds for misbehaving hs-web3 bindings
+    function getSlot_(uint64 slot) public view returns (bool, bytes32, bytes32, uint64) {
+        Slot storage s = slots[slotOffset(slot)];
+        return (s.hasBlock, s.blockHash, s.leaderPublicKey, s.voteCounts);
+    }
+    function getSignatures(uint64 slot, uint64 transactionIndex) public view returns (bytes memory) {
+        return getSlot(slot).transactionSignatures[transactionIndex];
+    }
+    function getMessage(uint64 slot, uint64 transactionIndex) public view returns (bytes memory) {
+        return getSlot(slot).transactionMessages[transactionIndex];
+    }
+
 
     uint constant challengePayout = 10*1000*1000;
     constructor () payable public {
@@ -642,10 +653,12 @@ contract SolanaClient {
         firstNormalSlot = scheduleFirstNormalSlot;
         slotsPerEpoch = scheduleSlotsPerEpoch;
 
+        s.transactionSignatures = new bytes[](txs.length);
+        s.transactionMessages = new bytes[](txs.length);
         for(uint64 i = 0; i < txs.length; i++) {
-            transactionSignatures[rootSlot][i] = txs[i].signatures;
+            s.transactionSignatures[i] = txs[i].signatures;
             bytes memory message = txs[i].message;
-            transactionMessages[rootSlot][i] = message;
+            s.transactionMessages[i] = message;
             countVotes(rootSlot, message);
         }
 
@@ -700,10 +713,12 @@ contract SolanaClient {
             slot.blockHash = newSlot.blockHash;
             //TODO: store bank hash merkle root for use in verifyTransaction function
 
+            slot.transactionSignatures = new bytes[](slotTxs[i].length);
+            slot.transactionMessages = new bytes[](slotTxs[i].length);
             for(uint64 j = 0; j < slotTxs[i].length; j++) {
-                transactionSignatures[nextSlot][j] = slotTxs[i][j].signatures;
+                slot.transactionSignatures[j] = slotTxs[i][j].signatures;
                 bytes memory message = slotTxs[i][j].message;
-                transactionMessages[nextSlot][j] = message;
+                slot.transactionMessages[j] = message;
                 countVotes(s, message);
             }
 
@@ -970,9 +985,10 @@ contract SolanaClient {
         return ed25519_valid(signature, message, pk);
     }
 
-    function challengeVote(uint64 slot, uint64 transactionIndex, uint64 instructionIndex) public {
-        bytes storage message = transactionMessages[slot][transactionIndex];
-        bytes storage signatures = transactionSignatures[slot][transactionIndex];
+    function challengeVote(uint64 s, uint64 transactionIndex, uint64 instructionIndex) public {
+        Slot storage slot = slots[slotOffset(s)];
+        bytes storage message = slot.transactionMessages[transactionIndex];
+        bytes storage signatures = slot.transactionSignatures[transactionIndex];
         bool valid = verifyVote(signatures, message, instructionIndex);
 
         if(!valid) {

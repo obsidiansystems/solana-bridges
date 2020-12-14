@@ -85,12 +85,12 @@ getLastHash :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m 
 getLastHash node ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate node ca "lastHash" Contracts.lastHash
 
 getSignatures :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
-getSignatures node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionSignatures"
-  $ Contracts.transactionSignatures (fromIntegral slot) (fromIntegral tx)
+getSignatures node ca slot tx = fmap ByteArray.convert $ simulate node ca "getSignatures"
+  $ Contracts.getSignatures (fromIntegral slot) (fromIntegral tx)
 
 getMessage :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
-getMessage node ca slot tx = fmap ByteArray.convert $ simulate node ca "transactionMessages"
-  $ Contracts.transactionMessages (fromIntegral slot) (fromIntegral tx)
+getMessage node ca slot tx = fmap ByteArray.convert $ simulate node ca "getMessage"
+  $ Contracts.getMessage (fromIntegral slot) (fromIntegral tx)
 
 
 data ContractSlot = ContractSlot
@@ -101,9 +101,14 @@ data ContractSlot = ContractSlot
   } deriving (Eq, Ord, Show)
 
 getSlot :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> m ContractSlot
-getSlot node ca = fmap convert . simulate node ca "slots" . Contracts.getSlot . fromIntegral
+getSlot node ca = fmap convert . simulate node ca "slots" . Contracts.getSlot_ . fromIntegral
   where
-    convert (hasBlock, hash, leader, _, votes) = ContractSlot hasBlock (bytes32FromSol hash) (bytes32FromSol leader) (fromIntegral votes)
+    convert (hasBlock, hash, leader, votes) =
+      ContractSlot
+      hasBlock
+      (bytes32FromSol hash)
+      (bytes32FromSol leader)
+      (fromIntegral votes)
 
 initialize :: (MonadIO m, MonadError String m)
   => Eth.Provider
