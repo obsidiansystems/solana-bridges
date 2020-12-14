@@ -188,6 +188,7 @@ testSolanaClient = do
         & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode notAVote)
 
   contract <- deploySolanaClientContractImpl node
+  putStrLn $ "Contract deployed at address " <> show contract
 
   hspec $ describe "Solana client" $ do
     let
@@ -356,8 +357,8 @@ testSolanaClient = do
         submitBlocks blocks
 
         for_ (_solanaVote_slots v) $ \s -> do
-          res <- runExceptT $ getVoteCounts node contract (fromIntegral s)
-          res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
+          res <- runExceptT $ getSlot node contract (fromIntegral s)
+          fmap _contractSlot_voteCounts res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
 
         expectTx relayStartingSlot        0                txnParsed
         expectTx relayStartingSlot        (txsPerSlot - 1) txnParsed

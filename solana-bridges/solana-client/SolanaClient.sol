@@ -565,12 +565,12 @@ contract SolanaClient {
         return EdwardsPoint_eq(R, signature.R);
     }
 
-
     struct Slot {
         bool hasBlock;
         bytes32 blockHash;
         bytes32 leaderPublicKey;
         bytes32 bankHashMerkleRoot;
+        uint64 voteCounts;
     }
 
     uint64 constant HISTORY_SIZE = 100;
@@ -588,13 +588,14 @@ contract SolanaClient {
     uint64 firstNormalSlot;
     uint64 slotsPerEpoch;
 
-
     uint64 public seenBlocks;
     bytes32 public lastHash;
     uint64 public lastSlot;
     Slot[HISTORY_SIZE] public slots;
 
-    mapping (uint64 => uint64) public voteCounts;
+    function getSlot(uint64 slot) public view returns (Slot memory) {
+        return slots[slotOffset(slot)];
+    }
 
     // slot => transactionIndex => _
     mapping (uint64 => mapping (uint64 => bytes)) public transactionMessages;
@@ -922,13 +923,13 @@ contract SolanaClient {
                 continue;
             }
 
-            uint64 length; uint64 voteSlot;
+            uint64 length; uint64 votedSlot;
             (length, cursor) = parseUint64LE(data, cursor);
             for(uint j = 0; j < length; j++) {
-                (voteSlot, cursor) = parseUint64LE(data, cursor);
-                if(voteSlot + 32 < slot || slot <= voteSlot)
+                (votedSlot, cursor) = parseUint64LE(data, cursor);
+                if(votedSlot + 32 < slot || slot <= votedSlot)
                     revert("Voting for invalid slot");
-                voteCounts[voteSlot]++;
+                slots[slotOffset(votedSlot)].voteCounts++;
             }
         }
     }
