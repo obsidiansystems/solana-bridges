@@ -566,12 +566,12 @@ contract SolanaClient {
     }
 
 
-struct Slot {
-    bool hasBlock;
-    bytes32 blockHash;
-    bytes32 leaderPublicKey;
-    bytes32 bankHashMerkleRoot;
-}
+    struct Slot {
+        bool hasBlock;
+        bytes32 blockHash;
+        bytes32 leaderPublicKey;
+        bytes32 bankHashMerkleRoot;
+    }
 
     uint64 constant HISTORY_SIZE = 100;
     address immutable public creator;
