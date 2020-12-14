@@ -10,7 +10,7 @@ watchdirs=("$(pwd)")
 
 while true; do
     clear
-    solc SolanaClient.sol
+    solc --optimize SolanaClient.sol
     if ! inotifywait -qre close_write "${watchdirs[@]}"; then
         exit "inotifywait failed"
     fi
