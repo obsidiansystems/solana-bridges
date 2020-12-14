@@ -109,6 +109,9 @@ mkSignature msg = do
   sk <- Ed25519.generateSecretKey
   pure $ Ed25519.sign sk (Ed25519.toPublic sk) msg
 
+getVoteCount :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> m Word64
+getVoteCount node contract slot = fmap _contractSlot_voteCounts $ getSlot node contract slot
+
 getTransaction :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> Word64 -> m SolanaTxn
 getTransaction node contract slot txIdx = do
   sigs <- getSignatures node contract slot txIdx
@@ -131,6 +134,23 @@ roundtrip = dec . enc
   where
     dec = Data.Binary.decode . LBS.fromStrict
     enc = LBS.toStrict . Data.Binary.encode
+
+dummyHash :: Base58ByteString
+dummyHash = Base58ByteString $ ByteArray.convert solanaVoteProgram
+
+submitChildBlock :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> [SolanaTxn] -> m Eth.TxReceipt
+submitChildBlock node contract txs = do
+  s <- getLastSlot node contract
+  slot <- getSlot node contract s
+  let block = SolanaCommittedBlock
+        { _solanaCommittedBlock_blockhash = dummyHash
+        , _solanaCommittedBlock_previousBlockhash = _contractSlot_blockHash slot
+        , _solanaCommittedBlock_parentSlot = s
+        , _solanaCommittedBlock_transactions = SolanaTxnWithMeta <$> txs
+        , _solanaCommittedBlock_rewards = []
+        , _solanaCommittedBlock_blockTime = Nothing
+        }
+  addBlocks node contract $ pure (s+1, block, dummyHash)
 
 txnSigningInfo :: SolanaTxn -> (BS.ByteString, Seq.Seq (Ed25519.PublicKey, Ed25519.Signature))
 txnSigningInfo txn = (LBS.toStrict $ Data.Binary.encode msg, Seq.zip pks sigs)
@@ -192,7 +212,6 @@ testSolanaClient = do
 
   hspec $ describe "Solana client" $ do
     let
-      dummyHash = Base58ByteString $ ByteArray.convert solanaVoteProgram
       dummyEpochSchedule = SolanaEpochSchedule
         { _solanaEpochSchedule_warmup = False
         , _solanaEpochSchedule_firstNormalEpoch = 0
@@ -357,8 +376,8 @@ testSolanaClient = do
         submitBlocks blocks
 
         for_ (_solanaVote_slots v) $ \s -> do
-          res <- runExceptT $ getSlot node contract (fromIntegral s)
-          fmap _contractSlot_voteCounts res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
+          res <- runExceptT $ getVoteCount node contract (fromIntegral s)
+          res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
 
         expectTx relayStartingSlot        0                txnParsed
         expectTx relayStartingSlot        (txsPerSlot - 1) txnParsed
