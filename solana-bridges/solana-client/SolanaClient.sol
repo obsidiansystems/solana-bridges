@@ -650,25 +650,35 @@ struct Slot {
             revert("Sender not trusted");
     }
 
-    function addBlocks(uint64 parentSlot,
-                       bytes32 parentBlockHash,
-                       uint64[] calldata blockSlots,
-                       bytes32[] calldata blockHashes,
-                       bytes32[] calldata leaders
+    struct ParentSlot {
+        uint64 number;
+        bytes32 blockHash;
+    }
+    struct NewSlot {
+        uint64 number;
+        bytes32 blockHash;
+        bytes32 leader;
+    }
+
+    function addBlocks(ParentSlot calldata parentSlot,
+                       NewSlot[] calldata newSlots
                        ) external {
         authorize();
 
-        if(blockSlots[0] <= lastSlot)
+        if(newSlots[0].number <= lastSlot)
             revert("Already seen slot");
-        if(parentSlot != lastSlot)
+        if(parentSlot.number != lastSlot)
             revert("Unexpected parent slot");
-        if(parentBlockHash != lastHash)
+        if(parentSlot.blockHash != lastHash)
             revert("Unexpected parent hash");
 
-        uint length = blockSlots.length;
+        uint length = newSlots.length;
 
         for(uint i = 0; i < length; i++) {
-            uint64 s; uint64 nextSlot = blockSlots[i];
+            uint64 s;
+            NewSlot memory newSlot = newSlots[i];
+            uint64 nextSlot = newSlot.number;
+
             for(s = lastSlot + 1; s < nextSlot; s++) {
                 Slot storage slot = slots[slotOffset(s)];
                 if(slot.hasBlock) {
@@ -677,15 +687,15 @@ struct Slot {
             }
             Slot storage slot = slots[slotOffset(s)];
             slot.hasBlock = true;
-            slot.leaderPublicKey = leaders[i];
-            slot.blockHash = blockHashes[i];
+            slot.leaderPublicKey = newSlot.leader;
+            slot.blockHash = newSlot.blockHash;
             //TODO: store bank hash merkle root for use in verifyTransaction function
 
             lastSlot = s;
         }
 
         seenBlocks += uint64(length);
-        lastHash = blockHashes[length-1];
+        lastHash = newSlots[length-1].blockHash;
     }
 
     struct Transaction {
