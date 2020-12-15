@@ -405,6 +405,10 @@ relayEthereumToSolana configFile config = do
            -- , "--payer", "/dev/null"
            ] <> args
 
+    printTxn txn = do
+      putStrLn ("Submitted transaction: " <> show txn)
+      hFlush stdout
+
     relayEthashElements :: Word64 -> IO ()
     relayEthashElements height = do
       elems <- getEthashElements height >>= \case
@@ -427,7 +431,7 @@ relayEthereumToSolana configFile config = do
 
           putStrLn $ "Relaying ethash elements " <> show offset <> " through " <> show (offset + chunkSize - 1) <> ":"
           readCreateProcessWithExitCode p "" >>= \case
-            (ExitSuccess, txn, _) -> putStrLn txn *> hFlush stdout
+            (ExitSuccess, txn, _) -> printTxn txn
             bad -> error $ show bad
 
   let relayingStart = fromMaybe 1 $ _contractConfig_loopStart config
@@ -464,12 +468,14 @@ relayEthereumToSolana configFile config = do
                 , blockHeader
                 ]
         let instructionDataHex = T.decodeLatin1 $ B16.encode $ RLP.rlpSerialize instructionData
-        T.putStrLn $ T.pack (show n) <> ": " <> instructionDataHex
+        T.putStrLn ""
+        T.putStrLn $ "Block " <> T.pack (show n)
+        T.putStrLn $ "Relaying header: " <> instructionDataHex
         let p = bridgeToolProc (if n == relayingStart then "initialize" else "new-block")
               ["--instruction", instructionDataHex]
 
         readCreateProcessWithExitCode p "" >>= \case
-          (ExitSuccess, txn, _) -> putStrLn txn
+          (ExitSuccess, txn, _) -> printTxn txn
           bad -> error $ show bad
 
         relayEthashElements n
