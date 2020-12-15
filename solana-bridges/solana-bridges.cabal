@@ -50,6 +50,7 @@ library
                      , template-haskell
                      , th-lift-instances
                      , temporary
+                     , transformers
                      , text
                      , unix
                      , web3

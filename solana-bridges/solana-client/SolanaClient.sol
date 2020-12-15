@@ -571,6 +571,7 @@ contract SolanaClient {
         bytes32 leaderPublicKey;
         bytes32 bankHashMerkleRoot;
         uint64 voteCounts;
+        bool[] transactionRelayed;
         bytes[] transactionSignatures;
         bytes[] transactionMessages;
     }
@@ -604,11 +605,13 @@ contract SolanaClient {
         Slot storage s = slots[slotOffset(slot)];
         return (s.hasBlock, s.blockHash, s.leaderPublicKey, s.voteCounts);
     }
-    function getSignatures(uint64 slot, uint64 transactionIndex) public view returns (bytes memory) {
-        return getSlot(slot).transactionSignatures[transactionIndex];
+    function getSignatures(uint64 slot, uint64 transactionIndex) public view returns (bool, bytes memory) {
+        Slot memory s = getSlot(slot);
+        return (s.transactionRelayed[transactionIndex], s.transactionSignatures[transactionIndex]);
     }
-    function getMessage(uint64 slot, uint64 transactionIndex) public view returns (bytes memory) {
-        return getSlot(slot).transactionMessages[transactionIndex];
+    function getMessage(uint64 slot, uint64 transactionIndex) public view returns (bool, bytes memory) {
+        Slot memory s = getSlot(slot);
+        return (s.transactionRelayed[transactionIndex], s.transactionMessages[transactionIndex]);
     }
 
 
@@ -653,9 +656,11 @@ contract SolanaClient {
         firstNormalSlot = scheduleFirstNormalSlot;
         slotsPerEpoch = scheduleSlotsPerEpoch;
 
+        s.transactionRelayed = new bool[](txs.length);
         s.transactionSignatures = new bytes[](txs.length);
         s.transactionMessages = new bytes[](txs.length);
         for(uint64 i = 0; i < txs.length; i++) {
+            s.transactionRelayed[i] = true;
             s.transactionSignatures[i] = txs[i].signatures;
             bytes memory message = txs[i].message;
             s.transactionMessages[i] = message;
@@ -713,13 +718,21 @@ contract SolanaClient {
             slot.blockHash = newSlot.blockHash;
             //TODO: store bank hash merkle root for use in verifyTransaction function
 
+            slot.transactionRelayed = new bool[](slotTxs[i].length);
             slot.transactionSignatures = new bytes[](slotTxs[i].length);
             slot.transactionMessages = new bytes[](slotTxs[i].length);
             for(uint64 j = 0; j < slotTxs[i].length; j++) {
-                slot.transactionSignatures[j] = slotTxs[i][j].signatures;
-                bytes memory message = slotTxs[i][j].message;
-                slot.transactionMessages[j] = message;
-                countVotes(s, message);
+                bool relayed = slotTxs[i][j].relayed;
+                slot.transactionRelayed[j] = relayed;
+                if(relayed) {
+                    slot.transactionSignatures[j] = slotTxs[i][j].signatures;
+                    bytes memory message = slotTxs[i][j].message;
+                    slot.transactionMessages[j] = message;
+                    countVotes(s, message);
+                } else {
+                    delete slot.transactionSignatures[j];
+                    delete slot.transactionMessages[j];
+                }
             }
 
             lastSlot = s;
@@ -730,6 +743,7 @@ contract SolanaClient {
     }
 
     struct Transaction {
+        bool relayed;
         bytes signatures;
         bytes message;
     }
@@ -987,6 +1001,9 @@ contract SolanaClient {
 
     function challengeVote(uint64 s, uint64 transactionIndex, uint64 instructionIndex) public {
         Slot storage slot = slots[slotOffset(s)];
+        if(!slot.transactionRelayed[transactionIndex]) {
+            revert("Transaction was not relayed");
+        }
         bytes storage message = slot.transactionMessages[transactionIndex];
         bytes storage signatures = slot.transactionSignatures[transactionIndex];
         bool valid = verifyVote(signatures, message, instructionIndex);

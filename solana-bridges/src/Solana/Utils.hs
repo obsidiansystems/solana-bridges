@@ -7,6 +7,7 @@ module Solana.Utils where
 
 import Control.Lens (mapped, (&), (.~))
 import Control.Monad.Except (MonadError, MonadIO, runExceptT)
+import Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import Crypto.Hash (Digest, SHA256, hash)
 import qualified Crypto.PubKey.Ed25519 as Ed25519
 import Crypto.Random.Types
@@ -26,8 +27,9 @@ import qualified Data.Sequence as Seq
 import qualified Data.Solidity.Prim.Address as Solidity
 import Data.Tree (Tree (..))
 import qualified Network.Ethereum.Api.Types as Eth
+import Network.JsonRpc.TinyClient (JsonRpcException)
 import qualified Network.Web3.Provider as Eth
-import Test.Hspec (it, describe, hspec, shouldBe)
+import Test.Hspec (it, describe, hspec, shouldBe, shouldNotBe, shouldThrow)
 
 import Ethereum.Contracts
 import Solana.Relayer
@@ -112,10 +114,10 @@ mkSignature msg = do
 getVoteCount :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> m Word64
 getVoteCount node contract slot = fmap _contractSlot_voteCounts $ getSlot node contract slot
 
-getTransaction :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> Word64 -> m SolanaTxn
-getTransaction node contract slot txIdx = do
-  sigs <- getSignatures node contract slot txIdx
-  msg <- getMessage node contract slot txIdx
+getTransaction :: (MonadError String m, MonadIO m) => Eth.Provider -> Solidity.Address -> Word64 -> Word64 -> m (Maybe SolanaTxn)
+getTransaction node contract slot txIdx = runMaybeT $ do
+  sigs <- MaybeT $ getSignatures node contract slot txIdx
+  msg <- MaybeT $ getMessage node contract slot txIdx
   pure $ Data.Binary.decode $ LBS.fromStrict $ sigs <> msg
 
 
@@ -206,6 +208,9 @@ testSolanaClient = do
 
       txnTamperedNoVotes = txnParsed
         & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_data .~ CompactByteArray (Data.Binary.encode notAVote)
+
+      txnTamperedInvalidProgram = txnParsed
+        & solanaTxn_message . solanaTxnMessage_instructions . mapped . solanaTxnInstruction_programIdIndex .~ 255
 
   contract <- deploySolanaClientContractImpl node
   putStrLn $ "Contract deployed at address " <> show contract
@@ -346,9 +351,10 @@ testSolanaClient = do
         tx <- runExceptT $ getTransaction node contract slot txIdx
         tx `shouldBe` Right expectedTx
 
-      expectContractDestroyed = do
+      expectContractAlive expectedAlive = do
         res <- runExceptT $ getCode node contract
-        res `shouldBe` Right ""
+        (bool shouldBe shouldNotBe expectedAlive) res (Right "")
+
 
     do
       let
@@ -366,7 +372,7 @@ testSolanaClient = do
           (relayStartingSlot + i, replicate txsPerSlot txnParsed)
 
         voteTxs = copies <> [(tamperedVoteSlot, [txnTamperedVoteSwitch])]
-        allTxs = voteTxs <> [(tamperedNoVotesSlot, [txnTamperedNoVotes])]
+        allTxs = voteTxs <> [(tamperedNoVotesSlot, [txnTamperedInvalidProgram, txnTamperedNoVotes])]
 
       it "can submit a chunk of slots with votes" $ do
         let
@@ -379,20 +385,25 @@ testSolanaClient = do
           res <- runExceptT $ getVoteCount node contract (fromIntegral s)
           res `shouldBe` Right (fromIntegral $ length copies * txsPerSlot + 1)
 
-        expectTx relayStartingSlot        0                txnParsed
-        expectTx relayStartingSlot        (txsPerSlot - 1) txnParsed
-        expectTx (relayStartingSlot + 1)  0                txnParsed
-        expectTx (relayStartingSlot + 2)  (txsPerSlot - 1) txnParsed
-        expectTx tamperedNoVotesSlot 0                txnTamperedNoVotes
+        expectTx relayStartingSlot        0                (Just txnParsed)
+        expectTx relayStartingSlot        (txsPerSlot - 1) (Just txnParsed)
+        expectTx (relayStartingSlot + 1)  0                (Just txnParsed)
+        expectTx (relayStartingSlot + 2)  (txsPerSlot - 1) (Just txnParsed)
+        expectTx tamperedNoVotesSlot      0                Nothing
+        expectTx tamperedNoVotesSlot      1                (Just txnTamperedNoVotes)
 
-      it "survives on challenge of valid vote signatures" $ do
+      it "survives challenge of valid vote signatures" $ do
         submitChallenge relayStartingSlot 0 0
         submitChallenge relayStartingSlot 1 0
         submitChallenge (relayStartingSlot + 1) 0 0
         submitChallenge (relayStartingSlot + 1) 1 0
 
-        expectTx relayStartingSlot 0 txnParsed
+        expectTx relayStartingSlot 0 (Just txnParsed)
+
+      it "survives challenge of non-relayed transactions" $ do
+        runExceptT (challengeVote node contract tamperedNoVotesSlot 0 0) `shouldThrow` (\(_ :: JsonRpcException) -> True)
+        expectContractAlive True
 
       it "self-destructs on challenge of invalid vote signatures" $ do
-        submitChallenge tamperedNoVotesSlot 0 0
-        expectContractDestroyed
+        submitChallenge tamperedNoVotesSlot 1 0
+        expectContractAlive False

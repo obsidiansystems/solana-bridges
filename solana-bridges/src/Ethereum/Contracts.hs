@@ -84,13 +84,17 @@ getLastSlot node ca = word64FromSol <$> simulate node ca "lastSlot" Contracts.la
 getLastHash :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> m Base58ByteString
 getLastHash node ca = Base58ByteString . ByteArray.convert . unSizedByteArray <$> simulate node ca "lastHash" Contracts.lastHash
 
-getSignatures :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
-getSignatures node ca slot tx = fmap ByteArray.convert $ simulate node ca "getSignatures"
+getSignatures :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m (Maybe ByteString)
+getSignatures node ca slot tx = fmap convert $ simulate node ca "getSignatures"
   $ Contracts.getSignatures (fromIntegral slot) (fromIntegral tx)
+  where
+    convert (hasTx, signatures) = if hasTx then Just (ByteArray.convert signatures) else Nothing
 
-getMessage :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m ByteString
-getMessage node ca slot tx = fmap ByteArray.convert $ simulate node ca "getMessage"
+getMessage :: (MonadError String m, MonadIO m) => Eth.Provider -> Address -> Word64 -> Word64 -> m (Maybe ByteString)
+getMessage node ca slot tx = fmap convert $ simulate node ca "getMessage"
   $ Contracts.getMessage (fromIntegral slot) (fromIntegral tx)
+  where
+    convert (hasTx, message) = if hasTx then Just (ByteArray.convert message) else Nothing
 
 
 data ContractSlot = ContractSlot
@@ -153,12 +157,20 @@ mergeSchedules :: Map Word64 SolanaLeaderSchedule -> SolanaEpochSchedule -> Map 
 mergeSchedules leaderSchedule epochSchedule = flip ifoldMap (Compose leaderSchedule) $ \(epoch, leaderPk) slotIndices ->
   foldMap (\slotIndex -> Map.singleton (firstSlotInEpoch epochSchedule epoch + slotIndex) leaderPk) slotIndices
 
-blockTransactions :: SolanaCommittedBlock -> [(Solidity.Bytes, Solidity.Bytes)]
+blockTransactions :: SolanaCommittedBlock -> [(Bool, Solidity.Bytes, Solidity.Bytes)]
 blockTransactions b =
   flip fmap (fmap _solanaTxnWithMeta_transaction $ _solanaCommittedBlock_transactions b) $ \tx ->
-    ( ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_signatures
-    , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_message
-    )
+    if isVoteTxn tx
+    then
+      ( True
+      , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_signatures
+      , ByteArray.convert $ LBS.toStrict $ Binary.encode $ tx & _solanaTxn_message
+      )
+    else
+      ( False
+      , ""
+      , ""
+      )
 
 
 challengeVote
