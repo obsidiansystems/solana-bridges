@@ -21,6 +21,7 @@ The following directories will be populated by various tools used by this repo:
   - `~/.config/solana`
   - `~/.cargo`
   - `~/.xargo`
+  
 Take caution when removing them since other programs might also be using these directories.
 
 #### Run an ethereum testnet locally
@@ -44,7 +45,9 @@ Leave the testnet running on this terminal
 ```shell
 $(nix-build -A solana-bridges)/bin/deploy-solana-client > solana-to-ethereum-config.json
 ```
-Output should end with something like `Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
+Output should end with something similar to
+
+`Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
 
 #### Start relayer
 ```shell
