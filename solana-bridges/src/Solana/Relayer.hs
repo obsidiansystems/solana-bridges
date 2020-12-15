@@ -638,7 +638,7 @@ deploySolanaClientContract node solanaConfig = do
     liftIO $ hPutStrLn stderr $ "Deployed contract at address: " <> show ca
 
     ExceptT $ withSolanaWebSocket solanaConfig $ do
-      liftIO $ putStrLn "Initializing contract"
+      liftIO $ hPutStrLn stderr "Initializing contract"
       -- get the latest confirmed block in
       epochSchedule <- getEpochSchedule
       bootEpochInfo <- getEpochInfo
