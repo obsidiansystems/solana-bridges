@@ -803,7 +803,7 @@ contract SolanaClient {
                 );
     }
 
-    function parseSolanaMessage(bytes memory buffer) public pure returns (SolanaMessage memory) {
+    function parseSolanaMessage(bytes memory buffer) internal pure returns (SolanaMessage memory) {
         SolanaMessage memory solanaMsg;
         uint cursor;
         solanaMsg.requiredSignatures = uint8(buffer[cursor]); cursor++;
@@ -835,7 +835,7 @@ contract SolanaClient {
         return (instruction.programId, instruction.accounts, instruction.data, cursor);
     }
 
-    function parseInstruction(bytes memory buffer, uint cursor) public pure returns (SolanaInstruction memory, uint) {
+    function parseInstruction(bytes memory buffer, uint cursor) internal pure returns (SolanaInstruction memory, uint) {
         SolanaInstruction memory instruction;
         instruction.programId = uint8(buffer[cursor]); cursor++;
         (instruction.accounts, cursor) = parseBytes(buffer, cursor);
@@ -843,7 +843,7 @@ contract SolanaClient {
         return (instruction, cursor);
     }
 
-    function parseUint32LE(bytes memory buffer, uint cursor) public pure returns (uint32, uint) {
+    function parseUint32LE(bytes memory buffer, uint cursor) internal pure returns (uint32, uint) {
         uint32 u;
         for (uint i = 0; i < 4; i++) {
             u |= uint32(uint256(uint8(buffer[cursor + i])) << (i * 8));
@@ -851,7 +851,7 @@ contract SolanaClient {
         return (u, cursor + 4);
     }
 
-    function parseUint64LE(bytes memory buffer, uint cursor) public pure returns (uint64, uint) {
+    function parseUint64LE(bytes memory buffer, uint cursor) internal pure returns (uint64, uint) {
         uint64 u;
         for (uint i = 0; i < 8; i++) {
             u |= uint64(uint256(uint8(buffer[cursor + i])) << (i * 8));
@@ -859,7 +859,7 @@ contract SolanaClient {
         return (u, cursor + 8);
     }
 
-    function parseBytes32(bytes memory buffer, uint cursor) public pure returns (bytes32, uint) {
+    function parseBytes32(bytes memory buffer, uint cursor) internal pure returns (bytes32, uint) {
         bytes32 b32;
         for (uint i = 0; i < 32; i++) {
             b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
@@ -867,7 +867,7 @@ contract SolanaClient {
         return (b32, cursor + 32);
     }
 
-    function parseSignature(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+    function parseSignature(bytes memory buffer, uint cursor) internal pure returns (bytes memory, uint) {
         bytes memory b64 = new bytes(64);
         assembly {
             let offset := add(buffer, cursor)
@@ -877,7 +877,7 @@ contract SolanaClient {
         return (b64, cursor + 64);
     }
 
-    function parseBytes(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
+    function parseBytes(bytes memory buffer, uint cursor) internal pure returns (bytes memory, uint) {
         uint16 bytesLength;
         (bytesLength, cursor) = parseCompactWord16(buffer, cursor);
         bytes memory bs = new bytes(bytesLength);
@@ -887,14 +887,7 @@ contract SolanaClient {
         return (bs, cursor + bytesLength);
     }
 
-    // Workaround for misbehaving hs-web3 bindings
-    function parseVote_(bytes memory buffer, uint cursor) public pure returns (uint64[] memory, bytes32, bool, uint64, uint) {
-        SolanaVote memory vote;
-        (vote, cursor) = parseVote(buffer, cursor);
-        return (vote.slots, vote.hash, vote.hasTimestamp, vote.timestamp, cursor);
-    }
-
-    function parseVote(bytes memory buffer, uint cursor) public pure returns (SolanaVote memory, uint) {
+    function parseVote(bytes memory buffer, uint cursor) internal pure returns (SolanaVote memory, uint) {
         SolanaVote memory vote;
 
         uint64 length;
@@ -914,7 +907,7 @@ contract SolanaClient {
         return (vote, cursor);
     }
 
-    function parseCompactWord16(bytes memory bs, uint cursor) public pure returns (uint16, uint) {
+    function parseCompactWord16(bytes memory bs, uint cursor) internal pure returns (uint16, uint) {
         uint8 b0 = uint8(bs[cursor]); cursor++;
         uint16 w = b0 & 0x7f;
         if (b0 < (1 << 7))
@@ -937,7 +930,7 @@ contract SolanaClient {
     uint256 constant voteSwitchTag = 6;
     bytes32 constant voteProgram = hex"0761481d357474bb7c4d7624ebd3bdb3d8355e73d11043fc0da3538000000000";
 
-    function countVotes(uint64 slot, bytes memory message) public {
+    function countVotes(uint64 slot, bytes memory message) internal {
         SolanaMessage memory parsedMessage = parseSolanaMessage(message);
         for(uint i = 0; i < parsedMessage.instructions.length; i++) {
             SolanaInstruction memory instruction = parsedMessage.instructions[i];

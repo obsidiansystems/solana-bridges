@@ -191,9 +191,6 @@ testSolanaClient = do
       initializeSlot = 1 + fromIntegral votedOnSlot
       relayStartingSlot = 1 + initializeSlot
 
-      v' = v { _solanaVote_timestamp = Just 0x1122334455667788 }
-      vi' = SolanaVoteInstruction_Vote v'
-
       -- VoteSwitch's Hash is of a switching proof which is currently unused since optimistic confirmation proofs are not yet implemented
       madeUpHash = sha256 "0x1234567890"
       vsi = SolanaVoteInstruction_VoteSwitch v madeUpHash
@@ -250,75 +247,12 @@ testSolanaClient = do
       res <- runExceptT $ getBalance node contract
       res `shouldBe` Right challengePayout
 
-    it "parses compact-u16" $ do
-      let parses buffer cursor expected@(w16, _) = do
-            roundtrips w16
-            res <- runExceptT $ parseCompactWord16 node contract buffer cursor
-            res `shouldBe` Right expected
-
-      parses "\x7f" 0 (0x7f, 1)
-      parses "\x83\x02" 0 (0x103, 2)
-      parses "\xFF\xFF\x03" 0 (0xFFFF, 3)
-      parses "\x00\x00\x03" 2 (0x03, 3)
-
-    it "parses compact array of bytes" $ do
-      let parses bytes = do
-            let buffer = LBS.toStrict $ Data.Binary.encode (CompactByteArray bytes)
-            res <- runExceptT $ parseBytes node contract buffer 0
-            res `shouldBe` Right (LBS.toStrict bytes, 1 + fromIntegral (LBS.length bytes))
-
-      parses ""
-      parses "abc"
-      parses "abcdef"
-
     it "parses instructions" $ do
       for_ (txnParsed & _solanaTxn_message & _solanaTxnMessage_instructions) $ \i -> do
         roundtrips i
         let buffer = LBS.toStrict $ Data.Binary.encode i
         res <- runExceptT $ parseInstruction node contract buffer 0
         res `shouldBe` Right (i, fromIntegral (BS.length buffer))
-
-    it "parses bytes32" $ do
-      let blockHash = txnParsed & _solanaTxn_message & _solanaTxnMessage_recentBlockhash
-      roundtrips blockHash
-      let buffer = LBS.toStrict $ Data.Binary.encode blockHash
-      res <- runExceptT $ parseBytes32 node contract buffer 0
-      res `shouldBe` Right (sha256ToBytes32 blockHash, 32)
-
-    it "parses signatures" $ do
-      let parse sig = do
-            roundtrips sig
-            let buffer = LBS.toStrict $ Data.Binary.encode sig
-            res <- runExceptT $ parseSignature node contract buffer 0
-            res `shouldBe` Right (ByteArray.convert sig, 64)
-
-      for_ (txnParsed & _solanaTxn_signatures) parse
-
-    it "parses uint64" $ do
-      let uint = Word64LE 0x1122334455667788
-      roundtrips uint
-      let buffer = LBS.toStrict $ Data.Binary.encode (uint, uint)
-      res <- runExceptT $ parseUint64LE node contract buffer 8
-      res `shouldBe` Right (fromIntegral uint, 16)
-
-    it "parses votes" $ do
-      let parse vote = do
-            let buffer = LBS.toStrict $ Data.Binary.encode vote
-            res <- runExceptT $ parseVote node contract buffer 0
-            res `shouldBe` Right (vote, fromIntegral (BS.length buffer))
-
-      roundtrips vi
-      roundtrips vi'
-
-      parse v
-      parse v'
-{-
-    it "parses messages" $ do
-      roundtrips txnMessage
-      let buffer = LBS.toStrict $ Data.Binary.encode txnMessage
-      res <- runExceptT $ parseSolanaMessage node contract buffer
-      res `shouldBe` Right txnMessage
--}
 
     it "accepts valid sigs" $ do
       verify True txnParsed
