@@ -869,8 +869,10 @@ contract SolanaClient {
 
     function parseSignature(bytes memory buffer, uint cursor) public pure returns (bytes memory, uint) {
         bytes memory b64 = new bytes(64);
-        for (uint i = 0; i < 64; i++) {
-            b64[i] = buffer[cursor + i];
+        assembly {
+            let offset := add(buffer, cursor)
+            mstore(add(0x20, b64), mload(add(0x20, offset)))
+            mstore(add(0x40, b64), mload(add(0x40, offset)))
         }
         return (b64, cursor + 64);
     }
