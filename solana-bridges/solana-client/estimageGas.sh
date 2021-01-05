@@ -2,6 +2,7 @@
 #! nix-shell ../../default.nix -A shells.solana-client-evm -i bash
 
 set -uo pipefail
+cd "$(dirname $0)"
 
 OUTPUT=$(solc --optimize --gas SolanaClient.sol)
 echo "$OUTPUT"

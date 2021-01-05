@@ -5,8 +5,8 @@
 - [Ethereum to Solana](#ethereum-to-solana-bridge)
 
 ## Setup
-
-This can take over 10 minutes the first time it's run, but it should be much faster afterwards
+The Nix package manager is used for handling dependencies.
+The main build can take over 10 minutes the first time it's run, but it should be much faster afterwards.
 
 ```shell
 git clone https://github.com/obsidiansystems/solana-bridges.git
@@ -14,41 +14,52 @@ cd solana-bridges
 nix-build
 ```
 
-#### Run ethereum testnet
+#### Cleanup
+The following directories will be populated by various tools used by this repo:
+  - `~/.ethash`
+  - `~/.ethashproof`
+  - `~/.config/solana`
+  - `~/.cargo`
+  - `~/.xargo`
+  
+Take caution when removing them since other programs might also be using these directories.
+
+#### Run an ethereum testnet locally
 On a separate terminal
 ```shell
-$(nix-build -A solana-bridges)/bin/run-ethereum-testnet
+make run-ethereum-testnet
 ```
 Leave the testnet running on this terminal
 
-#### Run solana testnet
+#### Run a solana testnet locally
 On a separate terminal
 
 ```shell
-$(nix-build -A solana)/bin/solana config set --url http://localhost:8899
-$(nix-build -A run-solana-testnet)/bin/run-solana-testnet solana-bridges/solana/genesis.tar.bz2
+make run-solana-testnet
 ```
 Leave the testnet running on this terminal
 
-### Solana to Ethereum bridge
+## Solana to Ethereum bridge
 
 #### Deploy contract
 ```shell
 $(nix-build -A solana-bridges)/bin/deploy-solana-client > solana-to-ethereum-config.json
 ```
-Output should end with something like `Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
+Output should end with something similar to
+
+`Contract deployed at address: 0xCb15617c1190448F318b8179263a72deF2EE782a`
 
 #### Start relayer
 ```shell
 $(nix-build -A solana-bridges)/bin/relay-solana-to-ethereum solana-to-ethereum-config.json
 ```
 
-### Ethereum to Solana bridge
+## Ethereum to Solana bridge
 
 #### Create and fund an account
 ```shell
 $(nix-build -A solana)/bin/solana-keygen new --no-passphrase
-$(nix-build -A solana)/bin/solana airdrop 1000 --ws http://localhost:9900
+$(nix-build -A solana)/bin/solana airdrop 1000 --faucet-host 127.0.0.1
 ```
 
 #### Build contract

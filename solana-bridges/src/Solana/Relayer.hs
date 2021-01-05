@@ -9,6 +9,7 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -42,6 +43,7 @@ import Data.Bifunctor
 import Data.Functor.Compose
 import Data.List (intercalate, unfoldr)
 import Data.List.Split (chunksOf)
+import Data.List.NonEmpty (nonEmpty)
 import Data.Map (Map)
 import Data.Maybe(fromMaybe, isJust)
 import Data.Semigroup (stimesMonoid)
@@ -78,6 +80,7 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -98,8 +101,8 @@ import Solana.Types
 ethashElementsPerInstruction :: Int
 ethashElementsPerInstruction = 8
 
-mainRelayer :: IO ()
-mainRelayer = do
+mainRelayEthereumToSolana :: IO ()
+mainRelayEthereumToSolana = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile
@@ -115,8 +118,8 @@ mainRelayer = do
 
 type SolanaToEthereumConfig = (Eth.Provider, Address, SolanaRpcConfig)
 
-mainRelayerEth :: IO ()
-mainRelayerEth = do
+mainRelaySolanaToEthereum :: IO ()
+mainRelaySolanaToEthereum = do
   getArgs >>= \case
     configFile:[] -> do
       configData <- BS.readFile configFile
@@ -176,7 +179,7 @@ mainDeploySolanaClientContract = do
         , err
         ]
     Right (provider, solanaConfig) -> do
-      ca <- deploySolanaClientContract provider solanaConfig
+      (ca, _slot0) <- deploySolanaClientContract provider solanaConfig
       let config :: SolanaToEthereumConfig = (provider, ca, solanaConfig)
 
       LBS.putStr $ encode config
@@ -193,7 +196,7 @@ runEthereumTestnet = do
 deployAndRunSolanaRelayer :: IO ()
 deployAndRunSolanaRelayer = do
   let solanaConfig = (SolanaRpcConfig "127.0.0.1" 8899 8900)
-  ca <- deploySolanaClientContract def solanaConfig
+  (ca, _slot0) <- deploySolanaClientContract def solanaConfig
   relaySolanaToEthereum def solanaConfig ca
 
 runSolanaTestnet :: IO ()
@@ -339,13 +342,16 @@ setupEth currentDir runDir = do
     allow predicate = handle $ \err ->
       unless (predicate err) $ error (show err)
 
+challengePayout :: Num a => a
+challengePayout = 1e7
+
 createContract :: Address -> HexString -> Call
 createContract fromAddr hex = Eth.Call
     { callFrom = Just fromAddr
     , callTo = Nothing
     , callGas = Just 25e6
     , callGasPrice = Just 1
-    , callValue = Nothing
+    , callValue = Just challengePayout
     , callData = Just hex
     , callNonce = Nothing
     }
@@ -631,14 +637,14 @@ deploySolanaClientContractImpl node = do
 
 
 
-deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO Address
+deploySolanaClientContract :: Eth.Provider -> SolanaRpcConfig -> IO (Address, Word64)
 deploySolanaClientContract node solanaConfig = do
   ca <- deploySolanaClientContractImpl node
   res <- runExceptT $ do
     liftIO $ hPutStrLn stderr $ "Deployed contract at address: " <> show ca
 
     ExceptT $ withSolanaWebSocket solanaConfig $ do
-      liftIO $ putStrLn "Initializing contract"
+      liftIO $ hPutStrLn stderr "Initializing contract"
       -- get the latest confirmed block in
       epochSchedule <- getEpochSchedule
       bootEpochInfo <- getEpochInfo
@@ -655,13 +661,14 @@ deploySolanaClientContract node solanaConfig = do
       let
         slotLeader0 :: Base58ByteString
         slotLeader0 = maybe (error "leader not found") fst $ uncons $ Map.keys $ Map.filter (List.elem $ _solanaEpochInfo_slotIndex epochInfo0) leaderSchedule
-      runExceptT $ initialize node ca slot0 block0 slotLeader0 epochSchedule
-
-    liftIO $ hPutStrLn stderr $ "Contract deployed at address: " <> show ca
+      runExceptT $ do
+        initialize node ca slot0 block0 slotLeader0 epochSchedule
+        liftIO $ hPutStrLn stderr $ "Initialized contract with slot " <> show slot0
+        pure slot0
 
   case res of
     Left err -> error err
-    Right () -> do
+    Right slot0 -> do
       let
         loopUntilInitialized :: Int -> IO ()
         loopUntilInitialized n = do
@@ -673,7 +680,7 @@ deploySolanaClientContract node solanaConfig = do
                 threadDelay 1e6
                 loopUntilInitialized (pred n)
       loopUntilInitialized 10
-      pure ca
+      pure (ca, slot0)
 
 
 relaySolanaToEthereum :: Eth.Provider -> SolanaRpcConfig -> Address -> IO ()
@@ -730,23 +737,35 @@ relaySolanaToEthereum node solanaConfig ca = do
 
           liftIO $ do
             let rpcSlot = _solanaEpochInfo_absoluteSlot bootEpochInfo
-            putStr $ unlines
-              [ ""
-              , "Solana RPC slot: " <> show rpcSlot
+            putStrLn $ unlines
+              [ "Solana RPC slot: " <> show rpcSlot
               , "Ethereum contract slot: " <> show contractSlot
-              , "Contract is behind by " <> show (rpcSlot - contractSlot)
               ]
-          when (not $ null confirmedBlocks) $ do
-            liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
-            lift (runExceptT $ addBlocks node ca blocksAndSlots leaderSchedules epochSchedule) >>= \case
-              Right () -> pure ()
-              Left bad -> error $ show bad
-            liftIO $ putStrLn "Submitted new slots to contract"
-            runExceptT (getSeenBlocks node ca) >>= \case
-              Left _ -> pure ()
-              Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
+            when (rpcSlot < contractSlot) $ error "Network change detected: client contract is ahead of the Solana network"
+            putStrLn $ "Contract is behind by " <> show (rpcSlot - contractSlot)
 
-          when (null confirmedBlocks) $ liftIO $ threadDelay 1e6
+          case nonEmpty blocksAndSlots of
+            Nothing -> liftIO $ threadDelay 1e6
+            Just blocks -> do
+              liftIO $ putStrLn $ "Sending new slots: " <> show confirmedBlockSlots
+              for_ blocks $ \(s, b) -> do
+                liftIO $ putStrLn $ "Slot " <> show s
+                liftIO $ putStr $ showBlockInstructions b
+
+              let
+                mergedSchedules = mergeSchedules leaderSchedules epochSchedule
+                blocks' = flip fmap blocks $ \(s,b) -> (s,b,mergedSchedules Map.! s)
+
+              runExceptT (addBlocks node ca blocks') >>= \case
+                Left bad -> error $ show bad
+                Right _receipt -> pure ()
+
+              liftIO $ putStrLn "Submitted new slots to contract"
+
+              runExceptT (getSeenBlocks node ca) >>= \case
+                Left _ -> pure ()
+                Right bs -> liftIO $ putStrLn $ "Total blocks accepted by the contract: " <> show bs
+
           loop
 
       loop
@@ -759,6 +778,24 @@ relaySolanaToEthereum node solanaConfig ca = do
 
   putStrLn "All done - network can be stopped now"
 
+showBlockInstructions :: SolanaCommittedBlock -> String
+showBlockInstructions b = showBlock
+  where
+    lookupProgram m i =
+      Seq.lookup
+      (fromIntegral $ _solanaTxnInstruction_programIdIndex i)
+      (unCompactArray $ _solanaTxnMessage_accountKeys m)
+
+    showProgram p = fromMaybe (show p) $ show <$> findWellKnownProgram p
+
+    showTransaction idxT t = "  Transaction " <> show idxT <> ": " <> intercalate ", " (imap showInstruction instructions)
+      where
+        m = _solanaTxn_message $ _solanaTxnWithMeta_transaction t
+        instructions = toList $ _solanaTxnMessage_instructions $ m
+        showInstruction idxI i = maybe (error malformed) showProgram (lookupProgram m i)
+          where malformed = "Malformed instruction #" <> show idxI <>  " has invalid program index: " <> show t
+
+    showBlock = unlines $ imap showTransaction $ _solanaCommittedBlock_transactions b
 
 data ContractConfig = ContractConfig
  { _contractConfig_programId :: Text

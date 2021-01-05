@@ -3,4 +3,4 @@ module Main where
 import Solana.Relayer
 
 main :: IO ()
-main = mainRelayer
+main = mainRelayEthereumToSolana

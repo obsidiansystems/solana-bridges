@@ -14,6 +14,7 @@ library
   exposed-modules: Solana.Relayer
                  , Solana.Types
                  , Solana.RPC
+                 , Solana.Utils
                  , Ethereum.Contracts
                  , Ethereum.Contracts.Bindings
                  , Ethereum.Contracts.Dist
@@ -49,6 +50,7 @@ library
                      , template-haskell
                      , th-lift-instances
                      , temporary
+                     , transformers
                      , text
                      , unix
                      , web3
@@ -58,6 +60,7 @@ library
                      , http-client
                      , http-types
                      , http-client-tls
+                     , hspec
 
 executable relay-ethereum-to-solana
   main-is:             RelayEthereumToSolana.hs

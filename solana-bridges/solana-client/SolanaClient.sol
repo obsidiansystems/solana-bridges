@@ -565,13 +565,16 @@ contract SolanaClient {
         return EdwardsPoint_eq(R, signature.R);
     }
 
-
-struct Slot {
-    bool hasBlock;
-    bytes32 blockHash;
-    bytes32 leaderPublicKey;
-    bytes32 bankHashMerkleRoot;
-}
+    struct Slot {
+        bool hasBlock;
+        bytes32 blockHash;
+        bytes32 leaderPublicKey;
+        bytes32 bankHashMerkleRoot;
+        uint64 voteCounts;
+        bool[] transactionRelayed;
+        bytes[] transactionSignatures;
+        bytes[] transactionMessages;
+    }
 
     uint64 constant HISTORY_SIZE = 100;
     address immutable public creator;
@@ -588,17 +591,38 @@ struct Slot {
     uint64 firstNormalSlot;
     uint64 slotsPerEpoch;
 
-
     uint64 public seenBlocks;
     bytes32 public lastHash;
     uint64 public lastSlot;
     Slot[HISTORY_SIZE] public slots;
 
-    event Success();
-
-    constructor () public {
-        creator = msg.sender;
+    function getSlot(uint64 slot) public view returns (Slot memory) {
+        return slots[slotOffset(slot)];
     }
+
+    // Workarounds for misbehaving hs-web3 bindings
+    function getSlot_(uint64 slot) public view returns (bool, bytes32, bytes32, uint64) {
+        Slot storage s = slots[slotOffset(slot)];
+        return (s.hasBlock, s.blockHash, s.leaderPublicKey, s.voteCounts);
+    }
+    function getSignatures(uint64 slot, uint64 transactionIndex) public view returns (bool, bytes memory) {
+        Slot memory s = getSlot(slot);
+        return (s.transactionRelayed[transactionIndex], s.transactionSignatures[transactionIndex]);
+    }
+    function getMessage(uint64 slot, uint64 transactionIndex) public view returns (bool, bytes memory) {
+        Slot memory s = getSlot(slot);
+        return (s.transactionRelayed[transactionIndex], s.transactionMessages[transactionIndex]);
+    }
+
+
+    uint constant challengePayout = 10*1000*1000;
+    constructor () payable public {
+        creator = msg.sender;
+        if(address(this).balance < challengePayout) {
+            revert("Deposit too small for challenge payout");
+        }
+    }
+
     function initialize(
             uint64 slot,
             bytes32 blockHash,
@@ -607,14 +631,19 @@ struct Slot {
             uint64 scheduleFirstNormalEpoch,
             uint64 scheduleLeaderScheduleSlotOffset,
             uint64 scheduleFirstNormalSlot,
-            uint64 scheduleSlotsPerEpoch
-        ) public {
+            uint64 scheduleSlotsPerEpoch,
+            Transaction[] calldata txs
+        ) external {
         if(initialized)
             revert("already initialized");
         if(creator != msg.sender)
             revert("Sender not trusted");
 
-        fillSlot(slot, blockHash, leader);
+        Slot storage s = slots[slotOffset(slot)];
+        s.hasBlock = true;
+        s.leaderPublicKey = leader;
+        s.blockHash = blockHash;
+
         lastSlot = slot;
         lastHash = blockHash;
 
@@ -627,9 +656,18 @@ struct Slot {
         firstNormalSlot = scheduleFirstNormalSlot;
         slotsPerEpoch = scheduleSlotsPerEpoch;
 
-        initialized = true;
+        s.transactionRelayed = new bool[](txs.length);
+        s.transactionSignatures = new bytes[](txs.length);
+        s.transactionMessages = new bytes[](txs.length);
+        for(uint64 i = 0; i < txs.length; i++) {
+            s.transactionRelayed[i] = true;
+            s.transactionSignatures[i] = txs[i].signatures;
+            bytes memory message = txs[i].message;
+            s.transactionMessages[i] = message;
+            countVotes(rootSlot, message);
+        }
 
-        emit Success();
+        initialized = true;
     }
 
     function authorize() internal view {
@@ -639,60 +677,79 @@ struct Slot {
             revert("Sender not trusted");
     }
 
-    function addBlocks(uint64[] calldata blockSlots,
-                       bytes32[] calldata blockHashes,
-                       uint64[] calldata parentSlots,
-                       bytes32[] calldata parentBlockHashes,
-                       bytes32[] calldata leaders
+    struct ParentSlot {
+        uint64 number;
+        bytes32 blockHash;
+    }
+    struct NewSlot {
+        uint64 number;
+        bytes32 blockHash;
+        bytes32 leader;
+    }
+    function addBlocks(ParentSlot calldata parentSlot,
+                       NewSlot[] calldata newSlots,
+                       Transaction[][] calldata slotTxs
                        ) external {
         authorize();
-        for(uint i = 0; i < blockSlots.length; i++)
-            addBlockAuthorized(blockSlots[i], blockHashes[i], parentSlots[i], parentBlockHashes[i], leaders[i]);
-        emit Success();
-    }
 
-    function addBlock(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leaderPublicKey) external {
-        authorize();
-        addBlockAuthorized(slot, blockHash, parentSlot, parentBlockHash, leaderPublicKey);
-        emit Success();
-    }
-
-    function addBlockAuthorized(uint64 slot, bytes32 blockHash, uint64 parentSlot, bytes32 parentBlockHash, bytes32 leader) private {
-        if(slot <= lastSlot)
+        if(newSlots[0].number <= lastSlot)
             revert("Already seen slot");
-        if(parentSlot != lastSlot)
+        if(parentSlot.number != lastSlot)
             revert("Unexpected parent slot");
-        if(parentBlockHash != lastHash)
+        if(parentSlot.blockHash != lastHash)
             revert("Unexpected parent hash");
 
-        for(uint64 s = lastSlot + 1; s < slot; s++) {
-            emptySlot(s);
-        }
-        fillSlot(slot, blockHash, leader);
+        uint length = newSlots.length;
 
-        lastSlot = slot;
-        lastHash = blockHash;
-        seenBlocks++;
+        for(uint i = 0; i < length; i++) {
+            uint64 s;
+            NewSlot memory newSlot = newSlots[i];
+            uint64 nextSlot = newSlot.number;
+
+            for(s = lastSlot + 1; s < nextSlot; s++) {
+                Slot storage slot = slots[slotOffset(s)];
+                if(slot.hasBlock) {
+                    slot.hasBlock = false;
+                }
+            }
+            Slot storage slot = slots[slotOffset(s)];
+            slot.hasBlock = true;
+            slot.leaderPublicKey = newSlot.leader;
+            slot.blockHash = newSlot.blockHash;
+            //TODO: store bank hash merkle root for use in verifyTransaction function
+
+            slot.transactionRelayed = new bool[](slotTxs[i].length);
+            slot.transactionSignatures = new bytes[](slotTxs[i].length);
+            slot.transactionMessages = new bytes[](slotTxs[i].length);
+            for(uint64 j = 0; j < slotTxs[i].length; j++) {
+                bool relayed = slotTxs[i][j].relayed;
+                slot.transactionRelayed[j] = relayed;
+                if(relayed) {
+                    slot.transactionSignatures[j] = slotTxs[i][j].signatures;
+                    bytes memory message = slotTxs[i][j].message;
+                    slot.transactionMessages[j] = message;
+                    countVotes(s, message);
+                } else {
+                    delete slot.transactionSignatures[j];
+                    delete slot.transactionMessages[j];
+                }
+            }
+
+            lastSlot = s;
+        }
+
+        seenBlocks += uint64(length);
+        lastHash = newSlots[length-1].blockHash;
+    }
+
+    struct Transaction {
+        bool relayed;
+        bytes signatures;
+        bytes message;
     }
 
     function slotOffset(uint64 s) private pure returns (uint64) {
         return s % HISTORY_SIZE;
-    }
-
-    function fillSlot(uint64 s, bytes32 hash, bytes32 leader) private {
-        Slot storage slot = slots[slotOffset(s)];
-        slot.hasBlock = true;
-        slot.leaderPublicKey = leader;
-        slot.blockHash = hash;
-        //TODO: store bank hash merkle root for use in verifyTransaction function
-    }
-
-    function emptySlot(uint64 s) private {
-        Slot storage slot = slots[slotOffset(s)];
-        slot.hasBlock = false;
-        slot.leaderPublicKey = 0;
-        slot.blockHash = 0;
-        slot.bankHashMerkleRoot = 0;
     }
 
     function test_sha512(bytes memory message) public pure returns (bytes memory) {
@@ -710,6 +767,245 @@ struct Slot {
 
     function test_ed25519_verify(bytes memory signature, bytes memory message, bytes32 pk) public pure returns (bool) {
         return ed25519_valid(signature, message, pk);
+    }
+
+    struct SolanaMessage {
+        uint8 requiredSignatures;
+        uint8 readOnlySignatures;
+        uint8 readOnlyUnsigned;
+        bytes32[] addresses;
+        bytes32 recentBlockHash;
+        SolanaInstruction[] instructions;
+    }
+
+    struct SolanaInstruction {
+        uint8 programId;
+        bytes accounts;
+        bytes data;
+    }
+
+    struct SolanaVote {
+        uint64[] slots;
+        bytes32 hash;
+        bool hasTimestamp;
+        uint64 timestamp;
+    }
+
+    // Workaround for misbehaving hs-web3 bindings
+    function parseSolanaMessage_(bytes memory buffer) public pure returns (uint8, uint8, uint8, bytes32[] memory, bytes32) {
+        SolanaMessage memory m;
+        m = parseSolanaMessage(buffer);
+        return (m.requiredSignatures,
+                m.readOnlySignatures,
+                m.readOnlyUnsigned,
+                m.addresses,
+                m.recentBlockHash
+                );
+    }
+
+    function parseSolanaMessage(bytes memory buffer) internal pure returns (SolanaMessage memory) {
+        SolanaMessage memory solanaMsg;
+        uint cursor;
+        solanaMsg.requiredSignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlySignatures = uint8(buffer[cursor]); cursor++;
+        solanaMsg.readOnlyUnsigned = uint8(buffer[cursor]); cursor++;
+
+        uint length;
+        (length, cursor) = parseCompactWord16(buffer, cursor);
+        solanaMsg.addresses = new bytes32[](length);
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.addresses[i], cursor) = parseBytes32(buffer, cursor);
+        }
+
+        (solanaMsg.recentBlockHash, cursor) = parseBytes32(buffer, cursor);
+
+        (length, cursor) = parseCompactWord16(buffer, cursor);
+        solanaMsg.instructions = new SolanaInstruction[](length);
+        for(uint i = 0; i < length; i++) {
+            (solanaMsg.instructions[i], cursor) = parseInstruction(buffer, cursor);
+        }
+
+        return solanaMsg;
+    }
+
+    // Workaround for misbehaving hs-web3 bindings
+    function parseInstruction_(bytes memory buffer, uint cursor) public pure returns (uint8, bytes memory, bytes memory, uint) {
+        SolanaInstruction memory instruction;
+        (instruction, cursor) = parseInstruction(buffer,cursor);
+        return (instruction.programId, instruction.accounts, instruction.data, cursor);
+    }
+
+    function parseInstruction(bytes memory buffer, uint cursor) internal pure returns (SolanaInstruction memory, uint) {
+        SolanaInstruction memory instruction;
+        instruction.programId = uint8(buffer[cursor]); cursor++;
+        (instruction.accounts, cursor) = parseBytes(buffer, cursor);
+        (instruction.data, cursor) = parseBytes(buffer, cursor);
+        return (instruction, cursor);
+    }
+
+    function parseUint32LE(bytes memory buffer, uint cursor) internal pure returns (uint32, uint) {
+        uint32 u;
+        for (uint i = 0; i < 4; i++) {
+            u |= uint32(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 4);
+    }
+
+    function parseUint64LE(bytes memory buffer, uint cursor) internal pure returns (uint64, uint) {
+        uint64 u;
+        for (uint i = 0; i < 8; i++) {
+            u |= uint64(uint256(uint8(buffer[cursor + i])) << (i * 8));
+        }
+        return (u, cursor + 8);
+    }
+
+    function parseBytes32(bytes memory buffer, uint cursor) internal pure returns (bytes32, uint) {
+        bytes32 b32;
+        for (uint i = 0; i < 32; i++) {
+            b32 |= bytes32(buffer[cursor + i]) >> (i * 8);
+        }
+        return (b32, cursor + 32);
+    }
+
+    function parseSignature(bytes memory buffer, uint cursor) internal pure returns (bytes memory, uint) {
+        bytes memory b64 = new bytes(64);
+        assembly {
+            let offset := add(buffer, cursor)
+            mstore(add(0x20, b64), mload(add(0x20, offset)))
+            mstore(add(0x40, b64), mload(add(0x40, offset)))
+        }
+        return (b64, cursor + 64);
+    }
+
+    function parseBytes(bytes memory buffer, uint cursor) internal pure returns (bytes memory, uint) {
+        uint16 bytesLength;
+        (bytesLength, cursor) = parseCompactWord16(buffer, cursor);
+        bytes memory bs = new bytes(bytesLength);
+        for (uint i = 0; i < bytesLength; i++) {
+            bs[i] = buffer[cursor + i];
+        }
+        return (bs, cursor + bytesLength);
+    }
+
+    function parseVote(bytes memory buffer, uint cursor) internal pure returns (SolanaVote memory, uint) {
+        SolanaVote memory vote;
+
+        uint64 length;
+        (length, cursor) = parseUint64LE(buffer, cursor);
+        vote.slots = new uint64[](length);
+        for(uint i = 0; i < length; i++) {
+            (vote.slots[i], cursor) = parseUint64LE(buffer, cursor);
+        }
+
+        (vote.hash, cursor) = parseBytes32(buffer, cursor);
+
+        vote.hasTimestamp = buffer[cursor] != 0; cursor++;
+        if(vote.hasTimestamp) {
+            (vote.timestamp, cursor) = parseUint64LE(buffer, cursor);
+        }
+
+        return (vote, cursor);
+    }
+
+    function parseCompactWord16(bytes memory bs, uint cursor) internal pure returns (uint16, uint) {
+        uint8 b0 = uint8(bs[cursor]); cursor++;
+        uint16 w = b0 & 0x7f;
+        if (b0 < (1 << 7))
+            return (w, cursor);
+
+        uint8 b1 = uint8(bs[cursor]); cursor++;
+        w |= uint16(b1 & 0x7f) << 7;
+        if (b1 < (1 << 7))
+            return (w, cursor);
+
+        uint8 b2 = uint8(bs[cursor]); cursor++;
+        w |= uint16(b2 & 0x03) << 14;
+        if (b2 < (1 << 2))
+            return (w, cursor);
+
+        revert("Invalid Compact-u16");
+    }
+
+    uint256 constant voteTag = 2;
+    uint256 constant voteSwitchTag = 6;
+    bytes32 constant voteProgram = hex"0761481d357474bb7c4d7624ebd3bdb3d8355e73d11043fc0da3538000000000";
+
+    function countVotes(uint64 slot, bytes memory message) internal {
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        for(uint i = 0; i < parsedMessage.instructions.length; i++) {
+            SolanaInstruction memory instruction = parsedMessage.instructions[i];
+            if (parsedMessage.addresses[instruction.programId] != voteProgram) {
+                continue;
+            }
+
+            // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+            bytes memory data = instruction.data;
+            uint tag;
+            uint cursor;
+            (tag, cursor) = parseUint32LE(data, 0);
+            if (tag != voteTag && tag != voteSwitchTag) {
+                continue;
+            }
+
+            uint64 length; uint64 votedSlot;
+            (length, cursor) = parseUint64LE(data, cursor);
+            for(uint j = 0; j < length; j++) {
+                (votedSlot, cursor) = parseUint64LE(data, cursor);
+                if(votedSlot + 32 < slot || slot <= votedSlot)
+                    revert("Voting for invalid slot");
+                slots[slotOffset(votedSlot)].voteCounts++;
+            }
+        }
+    }
+
+    function verifyVote(bytes memory signatures, bytes memory message, uint64 instructionIndex) public pure returns (bool) {
+        uint signaturesCount; uint signaturesOffset;
+        (signaturesCount, signaturesOffset) = parseCompactWord16(signatures, 0);
+
+        SolanaMessage memory parsedMessage = parseSolanaMessage(message);
+        SolanaInstruction memory instruction = parsedMessage.instructions[instructionIndex];
+
+        // To prevent the relayer from hiding votes to avoid challenges, we always check one signature
+        // This might not be needed once stake supermajority checks are possible
+        bytes memory signature; uint cursor;
+        (signature, cursor) = parseSignature(signatures, signaturesOffset);
+        if(! ed25519_valid(signature, message, parsedMessage.addresses[0])) {
+            return false;
+        }
+
+        if (parsedMessage.addresses[instruction.programId] != voteProgram) {
+            revert("Not a vote instruction");
+        }
+        // https://docs.rs/solana-vote-program/1.4.13/solana_vote_program/vote_instruction/enum.VoteInstruction.html#variant.Vote
+        bytes memory data = instruction.data;
+        uint tag;
+        (tag, cursor) = parseUint32LE(data, 0);
+        if (tag != voteTag && tag != voteSwitchTag) {
+            revert("Not a Vote nor VoteSwitch instruction");
+        }
+        SolanaVote memory vote;
+        (vote, cursor) = parseVote(data, cursor);
+
+        uint8 signer = uint8(instruction.accounts[3]);
+        bytes32 pk = parsedMessage.addresses[signer];
+
+        (signature, cursor) = parseSignature(signatures, signaturesOffset + signer * 64);
+
+        return ed25519_valid(signature, message, pk);
+    }
+
+    function challengeVote(uint64 s, uint64 transactionIndex, uint64 instructionIndex) public {
+        Slot storage slot = slots[slotOffset(s)];
+        if(!slot.transactionRelayed[transactionIndex]) {
+            revert("Transaction was not relayed");
+        }
+        bytes storage message = slot.transactionMessages[transactionIndex];
+        bytes storage signatures = slot.transactionSignatures[transactionIndex];
+        bool valid = verifyVote(signatures, message, instructionIndex);
+
+        if(!valid) {
+            selfdestruct(msg.sender);
+        }
     }
 
     function verifyTransaction(bytes32 /* accountsHash */,

@@ -19,6 +19,7 @@ let
           solana-bridges = overrideCabal (self.callCabal2nix "solana-bridges" (gitignoreSource ./solana-bridges) {}) (drv: {
             executableSystemDepends = (drv.executableSystemDepends or []) ++ [solana solana-client-tool ethashproof] ++ (with nixpkgs; [ go-ethereum solc ]);
           });
+          http-client-tls = doJailbreak (super.http-client-tls);
           web3 = doJailbreak (dontCheck (self.callCabal2nix "web3" sources.hs-web3 {}));
           which = self.callCabal2nix "which" sources.which {};
         };
