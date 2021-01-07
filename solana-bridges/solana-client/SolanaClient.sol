@@ -997,7 +997,7 @@ contract SolanaClient {
     function challengeVote(uint64 s, uint64 transactionIndex, uint64 instructionIndex) public {
         Slot storage slot = slots[slotOffset(s)];
         if(!slot.transactionRelayed[transactionIndex]) {
-            revert("Transaction was not relayed");
+            revert("Transaction was not relayed because it contained no vote instructions");
         }
         bytes storage message = slot.transactionMessages[transactionIndex];
         bytes storage signatures = slot.transactionSignatures[transactionIndex];
